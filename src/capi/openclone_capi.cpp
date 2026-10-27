@@ -182,6 +182,7 @@ bool oc_document_save(OCDocument *doc, const char *path, int format, char **erro
     std::string err;
     const FileFormat f = format == OC_FORMAT_FASTA    ? FileFormat::Fasta
                        : format == OC_FORMAT_SNAPGENE ? FileFormat::SnapGene
+                       : format == OC_FORMAT_EMBL     ? FileFormat::Embl
                                                       : FileFormat::GenBank;
     if (!saveSequenceFile(path, doc->doc.sequence(), f, &err)) {
         if (error)

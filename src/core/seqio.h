@@ -5,7 +5,7 @@
 
 namespace oc {
 
-enum class FileFormat { Unknown, GenBank, Fasta, SnapGene, Abif };   // Abif: read only
+enum class FileFormat { Unknown, GenBank, Fasta, SnapGene, Abif, Embl };   // Abif: read only
 
 // From the extension first, then by sniffing the content.
 FileFormat detectFormat(const std::string &path, const std::string &content);
@@ -20,6 +20,10 @@ bool parseSequence(const std::string &content, FileFormat format, Sequence *out,
 // given) is the format that was read; a read-only one (Abif) means saving
 // must go to a new file.
 bool loadSequenceFile(const std::string &path, Sequence *out, std::string *error = nullptr,
+                      FileFormat *format = nullptr);
+// GenBank and EMBL files can hold several records; the ones after the first
+// go to *more (if given).
+bool loadSequenceFile(const std::string &path, Sequence *out, std::vector<Sequence> *more, std::string *error,
                       FileFormat *format = nullptr);
 bool saveSequenceFile(const std::string &path, const Sequence &seq, FileFormat format,
                       std::string *error = nullptr);

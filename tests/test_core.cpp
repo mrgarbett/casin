@@ -2,6 +2,7 @@
 // Headless tests for openclone_core. Usage: core_tests <samples-dir>
 #include "core/abif.h"
 #include "core/align.h"
+#include "core/embl.h"
 #include "core/orf.h"
 #include "core/cloning.h"
 #include "core/digest.h"
@@ -441,6 +442,56 @@ static void testFastaAndIO()
     CHECK(formatFromExtension("a/b/c.GBK") == FileFormat::GenBank);
     CHECK(detectFormat("x.txt", "LOCUS x") == FileFormat::GenBank);
     CHECK_EQ(fileBaseName("/tmp/dir.v2/my file.fasta"), std::string("my file"));
+}
+
+static void testEmbl(const std::string &dir)
+{
+    // A record in the ENA layout.
+    const std::string text =
+        "ID   X12345; SV 1; circular; genomic DNA; STD; SYN; 30 BP.\n"
+        "XX\nAC   X12345;\nXX\nDE   Test vector,\nDE   two lines.\nXX\n"
+        "FH   Key             Location/Qualifiers\nFH\n"
+        "FT   CDS             complement(4..27)\n"
+        "FT                   /gene=\"abc\"\n"
+        "FT                   /note=\"a note that\n"
+        "FT                   wraps\"\n"
+        "XX\nSQ   Sequence 30 BP; 8 A; 7 C; 8 G; 7 T; 0 other;\n"
+        "     atgcatgcaa ccggttaacc ggttaaccgg                                 30\n//\n";
+    CHECK(looksLikeEmbl(text));
+    Sequence e;
+    std::string err;
+    CHECK(readEmbl(text, &e, &err));
+    CHECK_EQ(e.name, "X12345");
+    CHECK(e.circular);
+    CHECK_EQ(e.bases, "ATGCATGCAACCGGTTAACCGGTTAACCGG");
+    CHECK_EQ(e.description, "Test vector, two lines.");
+    CHECK(e.features.size() == 1 && e.features[0].strand == Strand::Reverse && e.features[0].ranges[0].start == 3);
+    CHECK(e.features.size() == 1 && e.features[0].name == "abc");
+    CHECK(e.features.size() == 1 && e.features[0].qualifiers.size() == 2 &&
+          e.features[0].qualifiers[1].value == "a note that wraps");
+
+    // Our own writer round-trips the demo plasmid.
+    Sequence gb;
+    CHECK(loadSequenceFile(dir + "/pOC-demo.gb", &gb, &err));
+    addHistory(gb, "test step");
+    Sequence back;
+    const std::string out = writeEmbl(gb);
+    CHECK(out.compare(0, 5, "ID   ") == 0);
+    CHECK(readEmbl(out, &back, &err));
+    CHECK_EQ(back.name, gb.name);
+    CHECK_EQ(back.bases, gb.bases);
+    CHECK(back.circular == gb.circular);
+    CHECK_EQ(back.history.size(), gb.history.size());
+    CHECK_EQ(back.features.size(), gb.features.size());
+    for (size_t i = 0; i < std::min(back.features.size(), gb.features.size()); ++i) {
+        CHECK_EQ(back.features[i].name, gb.features[i].name);
+        CHECK(back.features[i].ranges.size() == gb.features[i].ranges.size());
+    }
+    CHECK(detectFormat("x.embl", out) == FileFormat::Embl && detectFormat("x.txt", out) == FileFormat::Embl);
+
+    // Several records in one file.
+    const std::string two = writeGenBank(gb) + writeGenBank(back);
+    CHECK_EQ(splitRecords(two).size(), size_t(2));
 }
 
 static void testSamples(const std::string &dir)
@@ -1078,9 +1129,10 @@ int main(int argc, char **argv)
     testMutagenesis();
     testAlign();
     testOrfs();
-    if (argc > 1)
+    if (argc > 1) {
+        testEmbl(argv[1]);
         testSamples(argv[1]);
-    else
+    } else
         std::fprintf(stderr, "note: no samples directory given, skipping sample tests\n");
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

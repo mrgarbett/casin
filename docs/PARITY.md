@@ -16,7 +16,7 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 | E5 | Save `.dna` (features, primers, description) | done on Linux; Mac UI pending |
 | | Save GenBank, export FASTA | done |
 | | Export the map as PNG, SVG, PDF | done |
-| I4 | EMBL and multi-record GenBank | M5 |
+| I4 | EMBL and multi-record GenBank | done: open and save EMBL; each record of a multi-record file opens in its own window (Linux) |
 | I3 | Fetch a sequence from NCBI by accession | M5 |
 | I1 | Print the map and sequence | planned |
 

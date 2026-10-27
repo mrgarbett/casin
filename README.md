@@ -94,8 +94,9 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
 
 ## What works in this milestone
 
-- Open GenBank, FASTA and SnapGene `.dna` files (drag and drop, command line, Finder or
-  the file manager). One window per document.
+- Open GenBank, EMBL, FASTA and SnapGene `.dna` files (drag and drop, command line, Finder
+  or the file manager). One window per document; a file with several GenBank or EMBL
+  records opens each record in its own window.
 - Circular map with feature arrows in lanes, names along the arc (or as callouts when
   they don't fit), enzyme labels in spread-out columns with leader lines, a tick ring,
   and a selection wedge. Linear map for linear sequences.

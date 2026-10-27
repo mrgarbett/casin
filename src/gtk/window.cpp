@@ -455,11 +455,20 @@ void Window::onDarkChanged(GObject *sm, GParamSpec *, gpointer windowWidget)
 bool Window::load(const std::string &path, std::string *error)
 {
     Sequence seq;
+    std::vector<Sequence> more;
     FileFormat format = FileFormat::Unknown;
-    if (!loadSequenceFile(path, &seq, error, &format))
+    if (!loadSequenceFile(path, &seq, &more, error, &format))
         return false;
-    // A trace can't be written back: saving asks for a new file.
-    m_doc.setSequence(std::move(seq), format == FileFormat::Abif ? std::string() : path);
+    // A trace can't be written back, and saving one record would drop the
+    // others from a multi-record file: those save to a new file.
+    m_doc.setSequence(std::move(seq), format == FileFormat::Abif || !more.empty() ? std::string() : path);
+    for (Sequence &extra : more) {
+        Window *w = Window::create(gtk_window_get_application(gtkWindow()));
+        w->document().setSequence(std::move(extra));
+        w->present();
+    }
+    if (!more.empty())
+        toast(baseName(path) + " holds " + std::to_string(more.size() + 1) + " records; each opened in its own window");
     std::unique_ptr<Trace> trace;
     std::string data;
     if (format == FileFormat::Abif && readFile(path, &data)) {
@@ -845,6 +854,8 @@ FileFormat saveFormatFor(const std::string &path)
     const std::string ext = fileExtension(path);
     if (ext == "dna")
         return FileFormat::SnapGene;
+    if (ext == "embl" || ext == "emb")
+        return FileFormat::Embl;
     if (ext == "fa" || ext == "fasta" || ext == "fna" || ext == "fas")
         return FileFormat::Fasta;
     return FileFormat::GenBank;
@@ -1292,7 +1303,7 @@ void showOpenDialog(GtkApplication *app, GtkWindow *parent)
     gtk_file_dialog_set_title(dialog, "Open Sequence");
     GtkFileFilter *seqs = gtk_file_filter_new();
     gtk_file_filter_set_name(seqs, "Sequence files");
-    for (const char *pat : {"*.gb", "*.gbk", "*.genbank", "*.gbff", "*.ape", "*.dna", "*.fa", "*.fasta", "*.fna",
+    for (const char *pat : {"*.gb", "*.gbk", "*.genbank", "*.gbff", "*.ape", "*.embl", "*.dna", "*.fa", "*.fasta", "*.fna",
                             "*.fas", "*.seq", "*.txt", "*.ab1", "*.abi"})
         gtk_file_filter_add_pattern(seqs, pat);
     GtkFileFilter *all = gtk_file_filter_new();
