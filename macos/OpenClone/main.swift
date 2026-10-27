@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if launchFiles.isEmpty && NSDocumentController.shared.documents.isEmpty {
             NSDocumentController.shared.openDocument(nil)
         }
+        UISmokeTest.startIfRequested()
     }
 
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool { false }
