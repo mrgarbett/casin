@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  fedora:
+    name: Fedora (GTK4 + libadwaita, RPM)
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:latest
+    steps:
+      - name: Install build dependencies
+        run: |
+          dnf -y install git gcc-c++ cmake ninja-build pkgconfig gtk4-devel libadwaita-devel \
+                         cairo-devel pango-devel desktop-file-utils libappstream-glib \
+                         rpm-build rpmdevtools xorg-x11-server-Xvfb google-noto-sans-fonts
+      - uses: actions/checkout@v4
+      - name: Build and test
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+      - name: Render the demo map and a window screenshot
+        run: |
+          ./build/src/gtk/openclone --render-map demo-map.png --enzymes all samples/pOC-demo.dna
+          xvfb-run -a env GSK_RENDERER=cairo ./build/src/gtk/openclone \
+              --screenshot window.png --size 1440x900 --select 170-892 samples/pOC-demo.dna
+      - name: Build the RPM
+        run: |
+          git config --global --add safe.directory "$PWD"
+          rpmdev-setuptree
+          git archive --prefix=openclone-0.1.0/ -o ~/rpmbuild/SOURCES/openclone-0.1.0.tar.gz HEAD
+          rpmbuild -ba packaging/fedora/openclone.spec
+          cp ~/rpmbuild/RPMS/*/openclone-*.rpm .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fedora-build
+          path: |
+            demo-map.png
+            window.png
+            openclone-*.rpm
+
+  macos:
+    name: macOS (Swift + AppKit)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Core tests
+        run: |
+          brew install ninja
+          cmake -S . -B build -G Ninja -DOPENCLONE_FRONTEND=none
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+      - name: Build OpenClone.app
+        run: scripts/build_macos_app.sh
+      - name: Headless map render
+        run: build/macos/OpenClone.app/Contents/MacOS/OpenClone --render-map demo-map-macos.png samples/pOC-demo.dna
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: |
+            demo-map-macos.png
+            build/macos/OpenClone.app

@@ -30,20 +30,35 @@ samples/      synthetic demo plasmid (.gb + .dna) from scripts/make_demo_plasmid
 packaging/    .desktop file, MIME types, AppStream metainfo, icon, macOS Info.plist
 ```
 
-## Building on Linux (Debian/Ubuntu)
+## Building on Linux (Fedora)
+
+Fedora is the main Linux target.
 
 ```sh
-sudo apt install build-essential cmake ninja-build pkg-config \
-                 libgtk-4-dev libadwaita-1-dev libcairo2-dev
+sudo dnf install gcc-c++ cmake ninja-build pkgconfig gtk4-devel libadwaita-devel cairo-devel pango-devel
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build --output-on-failure
 ./build/src/gtk/openclone samples/pOC-demo.dna
-sudo cmake --install build      # binary, .desktop file, MIME types, icon
+sudo cmake --install build      # binary, .desktop file, MIME types, icon, metainfo
 ```
 
-Needs GTK ≥ 4.12 and libadwaita ≥ 1.5 (Ubuntu 24.04, Debian 13, Fedora 40 or newer).
-Fedora: `sudo dnf install gcc-c++ cmake ninja-build gtk4-devel libadwaita-devel`.
+To build an RPM, use `packaging/fedora/openclone.spec`:
+
+```sh
+sudo dnf install rpm-build rpmdevtools desktop-file-utils libappstream-glib
+rpmdev-setuptree
+git archive --prefix=openclone-0.1.0/ -o ~/rpmbuild/SOURCES/openclone-0.1.0.tar.gz HEAD
+rpmbuild -ba packaging/fedora/openclone.spec
+sudo dnf install ~/rpmbuild/RPMS/*/openclone-0.1.0-*.rpm
+```
+
+You need GTK ≥ 4.12 and libadwaita ≥ 1.5 (Fedora 40 or newer). Other distributions
+work too. On Debian/Ubuntu 24.04+ install `build-essential cmake ninja-build
+pkg-config libgtk-4-dev libadwaita-1-dev libcairo2-dev` instead.
+
+CI (`.github/workflows/ci.yml`) builds and tests on Fedora, produces the RPM, and
+builds the macOS app on a macOS runner.
 
 ## Building on macOS
 
@@ -67,7 +82,7 @@ ctest --test-dir build
 ```sh
 # Map image without a display (.png, .svg or .pdf). Linux:
 ./build/src/gtk/openclone --render-map map.png --enzymes all samples/pOC-demo.dna
-# Window screenshot (needs a display; Xvfb works):
+# Window screenshot (needs a display; Xvfb works, from xorg-x11-server-Xvfb on Fedora):
 xvfb-run -a env GSK_RENDERER=cairo ./build/src/gtk/openclone \
     --screenshot window.png --size 1440x900 --select 170-892 samples/pOC-demo.dna
 # macOS map image:

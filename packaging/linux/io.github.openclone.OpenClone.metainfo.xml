@@ -11,4 +11,15 @@
     <p>Restriction enzyme data comes from REBASE.</p>
   </description>
   <launchable type="desktop-id">io.github.openclone.OpenClone.desktop</launchable>
+  <url type="homepage">https://github.com/mrgarbett/casin</url>
+  <developer id="io.github.openclone">
+    <name>OpenClone contributors</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
+  <provides>
+    <binary>openclone</binary>
+  </provides>
+  <releases>
+    <release version="0.1.0" date="2026-10-27"/>
+  </releases>
 </component>
