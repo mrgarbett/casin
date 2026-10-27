@@ -7,6 +7,7 @@
 #include "view/seqlayout.h"
 #include "view/style.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -81,6 +82,7 @@ OCDocument *oc_document_new(void)
     d->doc.onSequenceChanged([d] { if (d->cb) d->cb(d->ctx, OC_CHANGED_SEQUENCE); });
     d->doc.onSelectionChanged([d] { if (d->cb) d->cb(d->ctx, OC_CHANGED_SELECTION); });
     d->doc.onEnzymesChanged([d] { if (d->cb) d->cb(d->ctx, OC_CHANGED_ENZYMES); });
+    d->doc.onHistoryChanged([d] { if (d->cb) d->cb(d->ctx, OC_CHANGED_HISTORY); });
     return d;
 }
 
@@ -108,15 +110,36 @@ bool oc_document_load(OCDocument *doc, const char *path, char **error)
     return true;
 }
 
-bool oc_document_save(const OCDocument *doc, const char *path, int format, char **error)
+bool oc_document_save(OCDocument *doc, const char *path, int format, char **error)
 {
     std::string err;
-    const FileFormat f = format == OC_FORMAT_FASTA ? FileFormat::Fasta : FileFormat::GenBank;
+    const FileFormat f = format == OC_FORMAT_FASTA    ? FileFormat::Fasta
+                       : format == OC_FORMAT_SNAPGENE ? FileFormat::SnapGene
+                                                      : FileFormat::GenBank;
     if (!saveSequenceFile(path, doc->doc.sequence(), f, &err)) {
         if (error)
             *error = dupString(err);
         return false;
     }
+    if (f != FileFormat::Fasta) {
+        doc->doc.setPath(path);
+        doc->doc.markSaved();
+    }
+    return true;
+}
+
+bool oc_document_new_sequence(OCDocument *doc, const char *name, const char *bases, bool circular)
+{
+    Sequence seq;
+    seq.bases = cleanBases(bases ? bases : "");
+    if (seq.bases.empty())
+        return false;
+    seq.name = trim(name ? name : "");
+    if (seq.name.empty())
+        seq.name = "Untitled";
+    seq.circular = circular;
+    doc->doc.setSequence(std::move(seq));
+    doc->doc.markUnsaved();
     return true;
 }
 
@@ -161,6 +184,123 @@ bool oc_document_feature(OCDocument *doc, int index, OCFeatureInfo *out)
     out->drawn = view::FeatureStyle::isDrawn(f);
     return true;
 }
+
+// ---- editing -------------------------------------------------------------------
+
+namespace {
+
+Strand strandFromC(int strand)
+{
+    return strand == OC_STRAND_FORWARD ? Strand::Forward : strand == OC_STRAND_REVERSE ? Strand::Reverse : Strand::None;
+}
+
+// A footprint as feature ranges, split at the origin when it wraps.
+std::vector<Range> rangesFor(const Sequence &s, int start, int length)
+{
+    const int n = s.length();
+    if (n == 0 || length <= 0)
+        return {};
+    length = std::min(length, n);
+    start = s.circular ? ((start % n) + n) % n : std::clamp(start, 0, n);
+    if (start + length <= n)
+        return {{start, start + length}};
+    if (!s.circular)
+        return {{start, n}};
+    return {{start, n}, {0, start + length - n}};
+}
+
+} // namespace
+
+bool oc_document_can_undo(const OCDocument *doc) { return doc->doc.canUndo(); }
+bool oc_document_can_redo(const OCDocument *doc) { return doc->doc.canRedo(); }
+char *oc_document_undo_label(const OCDocument *doc) { return dupString(doc->doc.undoLabel()); }
+char *oc_document_redo_label(const OCDocument *doc) { return dupString(doc->doc.redoLabel()); }
+void oc_document_undo(OCDocument *doc) { doc->doc.undo(); }
+void oc_document_redo(OCDocument *doc) { doc->doc.redo(); }
+bool oc_document_is_modified(const OCDocument *doc) { return doc->doc.isModified(); }
+
+const char *oc_document_path(OCDocument *doc)
+{
+    doc->scratch1 = doc->doc.path();
+    return doc->scratch1.c_str();
+}
+
+bool oc_document_type_bases(OCDocument *doc, const char *text) { return text && doc->doc.typeBases(text); }
+void oc_document_delete_selection(OCDocument *doc) { doc->doc.deleteSelection(); }
+void oc_document_delete_backward(OCDocument *doc) { doc->doc.deleteBackward(); }
+void oc_document_delete_forward(OCDocument *doc) { doc->doc.deleteForward(); }
+void oc_document_reverse_complement(OCDocument *doc) { doc->doc.reverseComplementAll(); }
+void oc_document_set_origin_at_selection(OCDocument *doc) { doc->doc.setOriginAtSelection(); }
+void oc_document_set_circular(OCDocument *doc, bool circular) { doc->doc.setCircular(circular); }
+void oc_document_rename(OCDocument *doc, const char *name) { doc->doc.rename(name ? name : ""); }
+
+int oc_document_add_feature(OCDocument *doc, const char *name, const char *type, int strand, int start, int length)
+{
+    Feature f;
+    f.type = type && *type ? type : "misc_feature";
+    f.strand = strandFromC(strand);
+    f.ranges = rangesFor(doc->doc.sequence(), start, length);
+    f.name = trim(name ? name : "");
+    if (f.name.empty())
+        f.name = defaultFeatureName(f.type, f.qualifiers);
+    else
+        f.qualifiers.push_back({"label", f.name});
+    return doc->doc.addFeature(f);
+}
+
+void oc_document_update_feature(OCDocument *doc, int index, const char *name, const char *type, int strand,
+                                int start, int length)
+{
+    const Sequence &s = doc->doc.sequence();
+    if (index < 0 || index >= int(s.features.size()))
+        return;
+    Feature f = s.features[size_t(index)];
+    if (type && *type)
+        f.type = type;
+    f.strand = strandFromC(strand);
+    const Span old = f.span(s.length(), s.circular);
+    if (old.start != start || old.length != length)
+        f.ranges = rangesFor(s, start, length);
+    const std::string clean = trim(name ? name : "");
+    if (!clean.empty() && clean != f.name) {
+        f.name = clean;
+        auto label = std::find_if(f.qualifiers.begin(), f.qualifiers.end(),
+                                  [](const Qualifier &q) { return q.key == "label"; });
+        if (label != f.qualifiers.end())
+            label->value = clean;
+        else
+            f.qualifiers.insert(f.qualifiers.begin(), {"label", clean});
+    }
+    doc->doc.replaceFeature(index, f);
+}
+
+void oc_document_remove_feature(OCDocument *doc, int index) { doc->doc.removeFeature(index); }
+
+int oc_document_primer_count(const OCDocument *doc) { return int(doc->doc.sequence().primers.size()); }
+
+bool oc_document_primer(OCDocument *doc, int index, OCPrimerInfo *out)
+{
+    const Sequence &s = doc->doc.sequence();
+    if (index < 0 || index >= int(s.primers.size()) || !out)
+        return false;
+    const Primer &p = s.primers[size_t(index)];
+    doc->scratch1 = p.name;
+    doc->scratch2 = p.bases;
+    out->name = doc->scratch1.c_str();
+    out->bases = doc->scratch2.c_str();
+    out->start = p.binding.start;
+    out->length = p.binding.length();
+    out->strand = p.strand == Strand::Reverse ? OC_STRAND_REVERSE : OC_STRAND_FORWARD;
+    return true;
+}
+
+int oc_document_add_primer_from_selection(OCDocument *doc, const char *name, int strand)
+{
+    return doc->doc.addPrimerFromSelection(name ? name : "", strand == OC_STRAND_REVERSE ? Strand::Reverse
+                                                                                          : Strand::Forward);
+}
+
+void oc_document_remove_primer(OCDocument *doc, int index) { doc->doc.removePrimer(index); }
 
 int oc_document_enzyme_count(const OCDocument *doc) { return int(doc->doc.enzymes().size()); }
 
@@ -288,6 +428,7 @@ OCScene *oc_seq_layout_render(const OCSeqLayout *layout, const OCDocument *doc, 
 int oc_seq_layout_position_at(const OCSeqLayout *l, double x, double y) { return l->layout->positionAt({x, y}); }
 int oc_seq_layout_feature_at(const OCSeqLayout *l, double x, double y) { return l->layout->featureAt({x, y}); }
 int oc_seq_layout_site_at(const OCSeqLayout *l, double x, double y) { return l->layout->siteAt({x, y}); }
+int oc_seq_layout_primer_at(const OCSeqLayout *l, double x, double y) { return l->layout->primerAt({x, y}); }
 double oc_seq_layout_line_top(const OCSeqLayout *l, int position) { return l->layout->lineTopFor(position); }
 double oc_seq_layout_line_height(const OCSeqLayout *l, int position) { return l->layout->lineHeightFor(position); }
 char *oc_seq_layout_tooltip(const OCSeqLayout *l, double x, double y) { return dupString(l->layout->tooltipAt({x, y})); }

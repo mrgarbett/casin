@@ -99,6 +99,35 @@ int main(int argc, char **argv)
     oc_scene_free(scene);
     oc_seq_layout_free(seq);
 
+    /* Editing, undo and primers. */
+    const int len = oc_document_length(doc);
+    changes = 0;
+    oc_document_set_selection(doc, 5, 0);
+    CHECK(oc_document_type_bases(doc, "acgt"));
+    CHECK(oc_document_length(doc) == len + 4);
+    CHECK(oc_document_is_modified(doc) && oc_document_can_undo(doc));
+    CHECK(changes & OC_CHANGED_HISTORY);
+    char *label = oc_document_undo_label(doc);
+    CHECK(strcmp(label, "Typing") == 0);
+    oc_string_free(label);
+    oc_document_undo(doc);
+    CHECK(oc_document_length(doc) == len && !oc_document_is_modified(doc));
+    int features = oc_document_feature_count(doc);
+    int fi = oc_document_add_feature(doc, "tag", "misc_feature", OC_STRAND_REVERSE, len - 5, 10);
+    CHECK(fi == features);
+    OCFeatureInfo fin;
+    CHECK(oc_document_feature(doc, fi, &fin) && fin.part_count == 2 && fin.length == 10);
+    CHECK(strcmp(fin.name, "tag") == 0 && fin.strand == OC_STRAND_REVERSE);
+    oc_document_update_feature(doc, fi, "tag2", "CDS", OC_STRAND_FORWARD, 100, 30);
+    CHECK(oc_document_feature(doc, fi, &fin) && fin.part_count == 1 && fin.start == 100);
+    oc_document_remove_feature(doc, fi);
+    CHECK(oc_document_feature_count(doc) == features);
+    int primers = oc_document_primer_count(doc);
+    oc_document_set_selection(doc, 200, 20);
+    CHECK(oc_document_add_primer_from_selection(doc, "p1", OC_STRAND_FORWARD) == primers);
+    OCPrimerInfo pin;
+    CHECK(oc_document_primer(doc, primers, &pin) && pin.start == 200 && pin.length == 20 && strlen(pin.bases) == 20);
+
     char *status = oc_document_status_text(doc);
     CHECK(strstr(status, "3,188 bp") != NULL);
     oc_string_free(status);

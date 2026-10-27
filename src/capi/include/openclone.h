@@ -28,8 +28,8 @@ typedef struct OCScene OCScene;
 typedef struct { double r, g, b, a; } OCColor;
 typedef struct { double x, y; } OCPoint;
 
-enum { OC_CHANGED_SEQUENCE = 1, OC_CHANGED_SELECTION = 2, OC_CHANGED_ENZYMES = 4 };
-enum { OC_FORMAT_GENBANK = 1, OC_FORMAT_FASTA = 2 };
+enum { OC_CHANGED_SEQUENCE = 1, OC_CHANGED_SELECTION = 2, OC_CHANGED_ENZYMES = 4, OC_CHANGED_HISTORY = 8 };
+enum { OC_FORMAT_GENBANK = 1, OC_FORMAT_FASTA = 2, OC_FORMAT_SNAPGENE = 3 };
 enum { OC_STRAND_NONE = 0, OC_STRAND_FORWARD = 1, OC_STRAND_REVERSE = 2 };
 enum { OC_HIT_NONE = 0, OC_HIT_FEATURE = 1, OC_HIT_SITE = 2, OC_HIT_SEQUENCE = 3 };
 enum { OC_ITEM_PATH = 0, OC_ITEM_TEXT = 1 };
@@ -47,7 +47,12 @@ void oc_document_free(OCDocument *doc);
 void oc_document_set_callback(OCDocument *doc, OCChangeCallback cb, void *context);
 
 bool oc_document_load(OCDocument *doc, const char *path, char **error);
-bool oc_document_save(const OCDocument *doc, const char *path, int format, char **error);
+/* Saving as GenBank or .dna also makes `path` the document's path and clears
+ * the modified flag; FASTA is an export and changes neither. */
+bool oc_document_save(OCDocument *doc, const char *path, int format, char **error);
+/* Starts the document over with typed or pasted bases (cleaned to IUPAC).
+ * The result counts as unsaved. Returns false when `bases` holds no DNA. */
+bool oc_document_new_sequence(OCDocument *doc, const char *name, const char *bases, bool circular);
 
 bool oc_document_is_empty(const OCDocument *doc);
 const char *oc_document_name(OCDocument *doc);
@@ -103,6 +108,53 @@ void oc_document_activate_site(OCDocument *doc, int visible_index);
  * no match, or -1 when the query isn't DNA. *count gets the total. */
 int oc_document_find_next(OCDocument *doc, const char *query, int *count);
 
+/* ---- editing --------------------------------------------------------------
+ * Each call is one undo step and reports OC_CHANGED_SEQUENCE, then
+ * OC_CHANGED_SELECTION and OC_CHANGED_HISTORY. Typing at the caret joins the
+ * previous typing step. */
+
+bool oc_document_can_undo(const OCDocument *doc);
+bool oc_document_can_redo(const OCDocument *doc);
+char *oc_document_undo_label(const OCDocument *doc);   /* e.g. "Typing"; "" when none */
+char *oc_document_redo_label(const OCDocument *doc);
+void oc_document_undo(OCDocument *doc);
+void oc_document_redo(OCDocument *doc);
+bool oc_document_is_modified(const OCDocument *doc);
+const char *oc_document_path(OCDocument *doc);
+
+/* Replaces the selection, or inserts at the caret. Returns false when `text`
+ * holds no DNA bases. */
+bool oc_document_type_bases(OCDocument *doc, const char *text);
+void oc_document_delete_selection(OCDocument *doc);
+void oc_document_delete_backward(OCDocument *doc);
+void oc_document_delete_forward(OCDocument *doc);
+void oc_document_reverse_complement(OCDocument *doc);
+void oc_document_set_origin_at_selection(OCDocument *doc);
+void oc_document_set_circular(OCDocument *doc, bool circular);
+void oc_document_rename(OCDocument *doc, const char *name);
+
+/* Features by footprint: `start` is 0-based, `length` may run across the
+ * origin of a circular sequence. update keeps the feature's qualifiers and,
+ * when the footprint is unchanged, its parts. */
+int oc_document_add_feature(OCDocument *doc, const char *name, const char *type, int strand, int start, int length);
+void oc_document_update_feature(OCDocument *doc, int index, const char *name, const char *type, int strand,
+                                int start, int length);
+void oc_document_remove_feature(OCDocument *doc, int index);
+
+typedef struct {
+    const char *name;
+    const char *bases;   /* 5'->3' */
+    int start;           /* binding site, 0-based; length 0 when it doesn't bind */
+    int length;
+    int strand;          /* OC_STRAND_FORWARD or OC_STRAND_REVERSE */
+} OCPrimerInfo;
+
+int oc_document_primer_count(const OCDocument *doc);
+bool oc_document_primer(OCDocument *doc, int index, OCPrimerInfo *out);
+/* A primer binding the selection; returns its index or -1. */
+int oc_document_add_primer_from_selection(OCDocument *doc, const char *name, int strand);
+void oc_document_remove_primer(OCDocument *doc, int index);
+
 /* ---- text metrics supplied by the frontend ------------------------------ */
 
 typedef double (*OCMeasureText)(void *context, const char *text, double size, bool bold, bool mono);
@@ -130,6 +182,7 @@ OCScene *oc_seq_layout_render(const OCSeqLayout *layout, const OCDocument *doc, 
 int oc_seq_layout_position_at(const OCSeqLayout *layout, double x, double y);
 int oc_seq_layout_feature_at(const OCSeqLayout *layout, double x, double y);
 int oc_seq_layout_site_at(const OCSeqLayout *layout, double x, double y);
+int oc_seq_layout_primer_at(const OCSeqLayout *layout, double x, double y);
 double oc_seq_layout_line_top(const OCSeqLayout *layout, int position);
 double oc_seq_layout_line_height(const OCSeqLayout *layout, int position);
 char *oc_seq_layout_tooltip(const OCSeqLayout *layout, double x, double y);
