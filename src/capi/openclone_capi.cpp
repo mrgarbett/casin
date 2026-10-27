@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "include/openclone.h"
 
+#include "core/align.h"
 #include "core/cloning.h"
 #include "core/digest.h"
 #include "core/edit.h"
@@ -587,6 +588,23 @@ bool oc_gibson(const OCDocument *vector, const char *vector_enzyme1, const char 
                           vector_enzyme2 ? vector_enzyme2 : "", frags, min_overlap, &p, nullptr, &err))
         return failWith(error, err);
     return deliver(out, p);
+}
+
+char *oc_align_read(const OCDocument *reference, const OCDocument *read, OCAlignmentInfo *out, char **error)
+{
+    ReadAlignment a;
+    std::string err;
+    if (!alignRead(reference->doc.sequence(), read->doc.sequence().bases, &a, &err)) {
+        failWith(error, err);
+        return nullptr;
+    }
+    if (out)
+        *out = {a.reverse, a.refSpan.start, a.refSpan.length, a.matches, a.mismatches, a.gaps, a.identity(),
+                int(a.diffs.size())};
+    std::vector<std::string> lines;
+    for (const AlignmentDiff &d : a.diffs)
+        lines.push_back(std::to_string(d.refPos + 1) + "\t" + d.ref + "\t" + d.read);
+    return dupString(joinLines(lines));
 }
 
 OCMapLayout *oc_map_layout_new(const OCDocument *doc, double width, double height, bool dark,

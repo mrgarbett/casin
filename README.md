@@ -143,16 +143,19 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   (with the date); it is kept in GenBank and `.dna` files.
 - Open Sanger traces (`.ab1`): the base calls open as a sequence, with the good-quality
   range noted; saving goes to a new file. `samples/demo-trace.ab1` is a simulated read.
+- Align Read: align a read from another window (a trace, FASTA or any linear sequence) to
+  this sequence on either strand, across the origin, and list the differences; click one to
+  select it, or add the read as a feature.
 - Add Primer by Sequence: paste a primer and it is placed where its 3′ part binds (either
   strand, up to two mismatches, 5′ tails allowed).
 - Design Primers for Selection: a primer pair that amplifies exactly the selection, sized
   for a target Tm and checked for dimers and hairpins; adds both primers in one undo step.
-- The C API exposes all of this for the Mac app (editing, digest and gel, primer checks and design, enzyme choice, PCR, restriction cloning, Golden Gate, Gibson, mutagenesis); the Mac windows for the milestone 3 tools come next.
+- The C API exposes all of this for the Mac app (editing, digest and gel, primer checks and design, enzyme choice, PCR, restriction cloning, Golden Gate, Gibson, mutagenesis, read alignment); the Mac windows for the milestone 3 tools come next.
 
 ## Next steps
 
 See [docs/PARITY.md](docs/PARITY.md) for the full checklist. Next up: the Mac editing UI,
-then primers with a search window, and the rest of milestone 4 (trace view, alignment to the reference).
+then primers with a search window, and the rest of milestone 4 (drawing traces under the reference).
 
 ## Credits and ground rules
 

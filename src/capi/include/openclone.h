@@ -257,6 +257,23 @@ bool oc_gibson(const OCDocument *vector, const char *vector_enzyme1, const char 
                const OCDocument *const *fragments, int fragment_count, int min_overlap, OCDocument *out,
                char **error);
 
+/* ---- verification ---------------------------------------------------------- */
+
+typedef struct {
+    bool reverse;          /* the read matches the bottom strand */
+    int ref_start;         /* aligned reference span; may run across the origin */
+    int ref_length;
+    int matches, mismatches, gaps;
+    double identity;       /* 0..1 */
+    int diff_count;
+} OCAlignmentInfo;
+
+/* Aligns `read` (e.g. a Sanger trace opened with oc_document_load) to
+ * `reference`. Returns the differences, one per line as
+ * "position<TAB>reference bases<TAB>read bases" (1-based, "" for an
+ * insertion or deletion side), or NULL with *error when it doesn't align. */
+char *oc_align_read(const OCDocument *reference, const OCDocument *read, OCAlignmentInfo *out, char **error);
+
 /* ---- scenes ---------------------------------------------------------------- */
 
 typedef struct {

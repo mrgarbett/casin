@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Headless tests for openclone_core. Usage: core_tests <samples-dir>
 #include "core/abif.h"
+#include "core/align.h"
 #include "core/cloning.h"
 #include "core/digest.h"
 #include "core/edit.h"
@@ -482,6 +483,16 @@ static void testSamples(const std::string &dir)
     FileFormat fmt = FileFormat::Unknown;
     CHECK(loadSequenceFile(dir + "/demo-trace.ab1", &asSeq, &err, &fmt) && fmt == FileFormat::Abif);
     CHECK(asSeq.bases == tr.bases && !asSeq.circular);
+
+    // The read aligns to the plasmid at 951.. and shows the one point mutation.
+    ReadAlignment al;
+    CHECK(alignRead(gb, tr.bases, &al, &err));
+    CHECK(!al.reverse && al.refSpan.start == 950 && al.refSpan.length == 720);
+    CHECK_EQ(al.diffs.size(), size_t(1));
+    if (al.diffs.size() == 1)
+        CHECK(al.diffs[0].refPos == 1250 && al.diffs[0].ref.size() == 1 && al.diffs[0].read.size() == 1);
+    // The same read reversed aligns to the bottom strand.
+    CHECK(alignRead(gb, reverseComplement(tr.bases), &al, &err) && al.reverse && al.refSpan.start == 950);
 
     // Every CDS translates to its /translation, including the reverse and split ones.
     int cds = 0;
@@ -983,6 +994,31 @@ static void testMutagenesis()
     CHECK(!designMutagenesis(s, {5, 3}, "GCG", 60, &d, &err));   // too close to the origin
 }
 
+static void testAlign()
+{
+    Sequence ref;
+    ref.circular = true;
+    ref.bases = "ATGACCATGATTACGCCAAGCTTGCATGCCTGCAGGTCGACTCTAGAGGATCCCCGGGTACCGAGCTCGAATTCACTGGCCGTCGTTTTACAACG"
+                "TCGTGACTGGGAAAACCCTGGCGTTACCCAACTTAATCGCCTTGCAGCACATCC";   // 150
+    // A read across the origin with a deletion of 2 and an insertion of 1.
+    std::string read = ref.bases.substr(110) + ref.bases.substr(0, 40);
+    read.erase(20, 2);                // deletes ref 130..131
+    read.insert(50, "T");             // inserts before ref ... (read pos 50)
+    ReadAlignment al;
+    std::string err;
+    CHECK(alignRead(ref, read, &al, &err));
+    CHECK_EQ(al.refSpan.start, 110);
+    CHECK_EQ(al.refSpan.length, 149 - 110 + 40);
+    CHECK_EQ(al.gaps, 3);   // two deleted bases and one inserted
+    bool del = false, ins = false;
+    for (const AlignmentDiff &d : al.diffs) {
+        del = del || (d.ref.size() == 2 && d.read.empty());
+        ins = ins || (d.ref.empty() && d.read == "T");
+    }
+    CHECK(del && ins);
+    CHECK(!alignRead(ref, "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG", &al, &err));
+}
+
 int main(int argc, char **argv)
 {
     testBasics();
@@ -1002,6 +1038,7 @@ int main(int argc, char **argv)
     testGibson();
     testPrimerDesign();
     testMutagenesis();
+    testAlign();
     if (argc > 1)
         testSamples(argv[1]);
     else

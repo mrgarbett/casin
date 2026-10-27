@@ -139,6 +139,7 @@ void Window::buildUi(GtkApplication *app)
         {"primer-by-sequence", &Window::actPrimerBySequence, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"mutagenesis", &Window::actMutagenesis, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"history", &Window::actHistory, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"align", &Window::actAlign, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-fasta", &Window::actExportFasta, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-map", &Window::actExportMap, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"copy", &Window::actCopy, nullptr, nullptr, nullptr, {0, 0, 0}},
@@ -199,6 +200,7 @@ void Window::buildUi(GtkApplication *app)
     g_menu_append(seqSection, "Golden Gate Assembly…", "win.golden-gate");
     g_menu_append(seqSection, "Gibson Assembly…", "win.gibson");
     g_menu_append(seqSection, "Mutagenesis…", "win.mutagenesis");
+    g_menu_append(seqSection, "Align Read…", "win.align");
     g_menu_append(seqSection, "Cloning History…", "win.history");
     GMenu *featureMenu = g_menu_new();
     g_menu_append(featureMenu, "Add Feature…", "win.add-feature");
@@ -801,7 +803,7 @@ void Window::updateActions()
     enable("undo", m_doc.canUndo());
     enable("redo", m_doc.canRedo());
     for (const char *name : {"save", "save-as", "export-fasta", "export-map", "paste", "select-all",
-                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "choose-enzymes", "primer-by-sequence", "history"})
+                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "choose-enzymes", "primer-by-sequence", "history", "align"})
         enable(name, has);
     enable("cut", sel);
     enable("add-feature", sel);
@@ -997,6 +999,11 @@ void Window::actMutagenesis(GSimpleAction *, GVariant *, gpointer p)
 void Window::actHistory(GSimpleAction *, GVariant *, gpointer p)
 {
     static_cast<Window *>(p)->historyDialog();
+}
+
+void Window::actAlign(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->alignDialog();
 }
 
 void Window::showOnlyEnzymes(const std::set<std::string> &names, int maxCuts)

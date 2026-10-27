@@ -2,6 +2,7 @@
 // Editing dialogs: feature, primer, PCR, restriction cloning, Golden Gate, Gibson, primer design and new sequence.
 #include "window.h"
 
+#include "core/align.h"
 #include "core/cloning.h"
 #include "core/edit.h"
 #include "core/primercheck.h"
@@ -1199,6 +1200,144 @@ void Window::historyDialog()
             adw_action_row_set_subtitle(ADW_ACTION_ROW(row), h.substr(0, 10).c_str());
         adw_preferences_group_add(ADW_PREFERENCES_GROUP(g), row);
     }
+    adw_dialog_present(f.dialog, m_window);
+}
+
+namespace {
+struct AlignForm {
+    Window *window;
+    Sequence reference;
+    std::vector<Sequence> reads;
+    GtkWidget *read, *summary, *diffs, *okButton;
+    AdwDialog *dialog;
+    ReadAlignment alignment;
+    bool ok = false;
+};
+
+std::string diffText(const AlignmentDiff &d)
+{
+    if (d.ref.empty())
+        return "Insertion of " + d.read;
+    if (d.read.empty())
+        return "Deletion of " + d.ref;
+    return d.ref + " → " + d.read;
+}
+
+void updateAlign(AlignForm *st)
+{
+    const guint i = adw_combo_row_get_selected(ADW_COMBO_ROW(st->read));
+    std::string err;
+    st->ok = i < st->reads.size() && alignRead(st->reference, st->reads[i].bases, &st->alignment, &err);
+    gtk_list_box_remove_all(GTK_LIST_BOX(st->diffs));
+    std::string text;
+    if (st->ok) {
+        const ReadAlignment &a = st->alignment;
+        const int n = st->reference.length();
+        int end = a.refSpan.start + a.refSpan.length;
+        if (end > n)
+            end -= n;
+        char pct[16];
+        std::snprintf(pct, sizeof pct, "%.1f%%", a.identity() * 100);
+        text = std::string(a.reverse ? "Bottom strand, " : "Top strand, ") + view::withThousands(a.refSpan.start + 1)
+             + "–" + view::withThousands(end) + " (" + view::formatBp(a.refSpan.length) + "), " + pct + " identity\n"
+             + (a.diffs.empty() ? "No differences" : std::to_string(a.diffs.size()) + (a.diffs.size() == 1 ? " difference" : " differences"));
+        for (const AlignmentDiff &d : a.diffs) {
+            GtkWidget *row = adw_action_row_new();
+            adw_preferences_row_set_use_markup(ADW_PREFERENCES_ROW(row), FALSE);
+            adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), diffText(d).c_str());
+            adw_action_row_set_subtitle(ADW_ACTION_ROW(row), ("at " + view::withThousands(d.refPos + 1)).c_str());
+            gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), TRUE);
+            g_object_set_data(G_OBJECT(row), "pos", GINT_TO_POINTER(d.refPos));
+            g_object_set_data(G_OBJECT(row), "len", GINT_TO_POINTER(std::max<int>(1, int(d.ref.size()))));
+            gtk_list_box_append(GTK_LIST_BOX(st->diffs), row);
+        }
+    } else {
+        text = err;
+    }
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->summary), text.c_str());
+    gtk_widget_set_sensitive(st->okButton, st->ok);
+}
+} // namespace
+
+void Window::alignDialog()
+{
+    if (m_doc.isEmpty())
+        return;
+    auto *st = new AlignForm{};
+    st->window = this;
+    st->reference = m_doc.sequence();
+    std::vector<std::string> names;
+    GtkApplication *app = gtk_window_get_application(gtkWindow());
+    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
+        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+        if (w && w != this && !w->isEmpty() && !w->document().sequence().circular) {
+            st->reads.push_back(w->document().sequence());
+            names.push_back(st->reads.back().name);
+        }
+    }
+    if (st->reads.empty()) {
+        toast("Open a read (.ab1, FASTA or other linear sequence) in another window first");
+        delete st;
+        return;
+    }
+    Form f = makeForm("Align Read", "Add as Feature");
+    adw_dialog_set_content_height(f.dialog, 560);
+    st->dialog = f.dialog;
+    st->okButton = f.ok;
+    GtkWidget *g = addGroup(f, ("Align to " + st->reference.name).c_str());
+    std::vector<const char *> v;
+    for (const std::string &s : names)
+        v.push_back(s.c_str());
+    v.push_back(nullptr);
+    st->read = comboRow(g, "Read", v.data(), 0);
+    st->summary = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->summary), "Alignment");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(g), st->summary);
+    GtkWidget *gd = addGroup(f, "Differences");
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(gd), "Click one to select it in the sequence");
+    st->diffs = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(st->diffs), GTK_SELECTION_NONE);
+    gtk_widget_add_css_class(st->diffs, "boxed-list");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(gd), st->diffs);
+    g_signal_connect(st->diffs, "row-activated", G_CALLBACK((+[](GtkListBox *, GtkListBoxRow *row, gpointer p) {
+                         auto *st = static_cast<AlignForm *>(p);
+                         st->window->document().setSelection(
+                             {GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "pos")),
+                              GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "len"))});
+                     })),
+                     st);
+    g_signal_connect(st->read, "notify::selected", G_CALLBACK((+[](GObject *, GParamSpec *, gpointer p) {
+                         updateAlign(static_cast<AlignForm *>(p));
+                     })),
+                     st);
+    updateAlign(st);
+    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<AlignForm *>(p);
+                         if (!st->ok)
+                             return;
+                         const ReadAlignment &a = st->alignment;
+                         const guint i = adw_combo_row_get_selected(ADW_COMBO_ROW(st->read));
+                         std::string note;
+                         for (const AlignmentDiff &d : a.diffs)
+                             note += (note.empty() ? "" : "; ") + std::to_string(d.refPos + 1) + " " + diffText(d);
+                         Document &doc = st->window->document();
+                         Feature f;
+                         f.name = st->reads[i].name;
+                         f.type = "misc_feature";
+                         f.strand = a.reverse ? Strand::Reverse : Strand::Forward;
+                         const int n = doc.sequence().length();
+                         const int end = a.refSpan.start + a.refSpan.length;
+                         f.ranges = end <= n ? std::vector<Range>{{a.refSpan.start, end}}
+                                             : std::vector<Range>{{a.refSpan.start, n}, {0, end - n}};
+                         f.qualifiers = {{"label", f.name},
+                                         {"note", note.empty() ? "read matches the reference" : "read differs: " + note}};
+                         const int idx = doc.addFeature(f);
+                         if (idx >= 0)
+                             doc.activateFeature(idx);
+                         adw_dialog_close(st->dialog);
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<AlignForm *>(p); });
     adw_dialog_present(f.dialog, m_window);
 }
 
