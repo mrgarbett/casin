@@ -393,9 +393,11 @@ void Window::onDarkChanged(GObject *sm, GParamSpec *, gpointer windowWidget)
 bool Window::load(const std::string &path, std::string *error)
 {
     Sequence seq;
-    if (!loadSequenceFile(path, &seq, error))
+    FileFormat format = FileFormat::Unknown;
+    if (!loadSequenceFile(path, &seq, error, &format))
         return false;
-    m_doc.setSequence(std::move(seq), path);
+    // A trace can't be written back: saving asks for a new file.
+    m_doc.setSequence(std::move(seq), format == FileFormat::Abif ? std::string() : path);
     return true;
 }
 
@@ -1152,7 +1154,7 @@ void showOpenDialog(GtkApplication *app, GtkWindow *parent)
     GtkFileFilter *seqs = gtk_file_filter_new();
     gtk_file_filter_set_name(seqs, "Sequence files");
     for (const char *pat : {"*.gb", "*.gbk", "*.genbank", "*.gbff", "*.ape", "*.dna", "*.fa", "*.fasta", "*.fna",
-                            "*.fas", "*.seq", "*.txt"})
+                            "*.fas", "*.seq", "*.txt", "*.ab1", "*.abi"})
         gtk_file_filter_add_pattern(seqs, pat);
     GtkFileFilter *all = gtk_file_filter_new();
     gtk_file_filter_set_name(all, "All files");

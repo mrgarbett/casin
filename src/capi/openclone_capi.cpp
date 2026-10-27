@@ -132,12 +132,14 @@ bool oc_document_load(OCDocument *doc, const char *path, char **error)
 {
     Sequence seq;
     std::string err;
-    if (!loadSequenceFile(path, &seq, &err)) {
+    FileFormat format = FileFormat::Unknown;
+    if (!loadSequenceFile(path, &seq, &err, &format)) {
         if (error)
             *error = dupString(err);
         return false;
     }
-    doc->doc.setSequence(std::move(seq), path);
+    // A trace can't be written back: saving goes to a new file.
+    doc->doc.setSequence(std::move(seq), format == FileFormat::Abif ? std::string() : path);
     return true;
 }
 

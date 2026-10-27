@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Headless tests for openclone_core. Usage: core_tests <samples-dir>
+#include "core/abif.h"
 #include "core/cloning.h"
 #include "core/digest.h"
 #include "core/edit.h"
@@ -453,6 +454,34 @@ static void testSamples(const std::string &dir)
     CHECK_EQ(gb.features.size(), dna.features.size() + 1);   // + source in GenBank
     CHECK_EQ(dna.primers.size(), size_t(2));
     CHECK(!dna.description.empty() && dna.description.find("SYNTHETIC") != std::string::npos);
+
+    // A Sanger trace (made by scripts/make_demo_trace.py from pOC-demo).
+    std::string ab1;
+    CHECK(readFile(dir + "/demo-trace.ab1", &ab1, &err) && looksLikeAbif(ab1));
+    Trace tr;
+    CHECK(readAbif(ab1, &tr, &err));
+    CHECK_EQ(tr.name, std::string("pOC-demo_fwd_read"));
+    CHECK_EQ(tr.bases.size(), size_t(720));
+    CHECK(tr.quality.size() == 720 && tr.peaks.size() == 720 && tr.scans() > 720 * 10);
+    CHECK(tr.channels[0].size() == size_t(tr.scans()) && tr.channels[3].size() == size_t(tr.scans()));
+    // The called base has the tallest channel at its peak.
+    int agree = 0;
+    for (size_t i = 0; i < tr.bases.size(); ++i) {
+        const int slot = int(std::string("ACGT").find(tr.bases[i]));
+        int best = 0;
+        for (int k = 1; k < 4; ++k)
+            if (tr.channels[size_t(k)][size_t(tr.peaks[i])] > tr.channels[size_t(best)][size_t(tr.peaks[i])])
+                best = k;
+        agree += best == slot ? 1 : 0;
+    }
+    CHECK(agree > 700);
+    const Span good = goodRegion(tr);
+    CHECK(good.start > 0 && good.start < 30 && good.start + good.length > 690 && good.start + good.length < 720);
+    CHECK_EQ(gb.bases.substr(950, 300), tr.bases.substr(0, 300));
+    Sequence asSeq;
+    FileFormat fmt = FileFormat::Unknown;
+    CHECK(loadSequenceFile(dir + "/demo-trace.ab1", &asSeq, &err, &fmt) && fmt == FileFormat::Abif);
+    CHECK(asSeq.bases == tr.bases && !asSeq.circular);
 
     // Every CDS translates to its /translation, including the reverse and split ones.
     int cds = 0;
