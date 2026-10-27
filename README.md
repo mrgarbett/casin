@@ -154,7 +154,7 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   goes to a new file. `samples/demo-trace.ab1` is a simulated read.
 - Align Read: align a read from another window (a trace, FASTA or any linear sequence) to
   this sequence on either strand, across the origin, and list the differences; click one to
-  select it, add the read as a feature, or show it under the sequence (several reads at once,
+  select it, add the read as a feature, or show it under the sequence (Show All Reads aligns every open read at once,
   differences in red; Align and Compare → Hide Aligned Reads clears them).
 - Compare with Another Sequence: the same alignment against any open construct (a parent
   plasmid, say), with its differences listed and drawn under this sequence.

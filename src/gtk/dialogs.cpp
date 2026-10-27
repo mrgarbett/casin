@@ -1885,6 +1885,28 @@ void Window::alignDialog(bool compare)
         v.push_back(s.c_str());
     v.push_back(nullptr);
     st->read = comboRow(g, compare ? "Compare with" : "Read", v.data(), 0);
+    if (!compare && st->reads.size() > 1) {
+        // Every open read at once, each on its own row under the sequence.
+        GtkWidget *all = gtk_button_new_with_label("Show All Reads");
+        gtk_widget_add_css_class(all, "flat");
+        adw_preferences_group_set_header_suffix(ADW_PREFERENCES_GROUP(g), all);
+        g_signal_connect(all, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                             auto *st = static_cast<AlignForm *>(p);
+                             Document &doc = st->window->document();
+                             int shown = 0;
+                             for (const Sequence &r : st->reads) {
+                                 ReadAlignment a;
+                                 if (alignRead(st->reference, r.bases, &a)) {
+                                     doc.addRead(readTrack(a, doc.sequence().length(), r.name));
+                                     ++shown;
+                                 }
+                             }
+                             st->window->toast("Showing " + std::to_string(shown) + " of "
+                                               + std::to_string(st->reads.size()) + " reads under the sequence");
+                             adw_dialog_close(st->dialog);
+                         })),
+                         st);
+    }
     st->summary = adw_action_row_new();
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->summary), "Alignment");
     st->featureButton = gtk_button_new_with_label("Add as Feature");
