@@ -297,6 +297,28 @@ bool Document::typeBases(const std::string &text)
     return true;
 }
 
+Sequence Document::selectedFragment() const
+{
+    if (!m_hasSelection || m_selection.length <= 0)
+        return {};
+    return extractFragment(m_seq, m_selection);
+}
+
+bool Document::pasteFragment(const Sequence &fragment)
+{
+    if (fragment.bases.empty())
+        return false;
+    const Span sel = m_hasSelection ? m_selection : Span{m_seq.length(), 0};
+    int at = 0;
+    edit("Paste",
+         [&](Sequence &s) {
+             at = insertFragment(s, sel, fragment);
+             return true;
+         },
+         [&] { return Span{at, int(fragment.bases.size())}; });
+    return true;
+}
+
 void Document::deleteSelection()
 {
     if (!m_hasSelection || m_selection.length <= 0)

@@ -559,6 +559,23 @@ static void testEditing()
     t = c;
     reverseComplementSequence(t);
     CHECK(sameRanges(t.features[0].ranges, {{8, 10}, {0, 2}}));
+
+    // Fragments carry the features and primers inside them.
+    Sequence frag = extractFragment(s, {3, 5});        // "ACCCC", A is [2,6), B is [6,8)
+    CHECK_EQ(frag.bases, std::string("ACCCC"));
+    CHECK_EQ(frag.features.size(), size_t(2));
+    CHECK(sameRanges(frag.features[0].ranges, {{0, 3}}));
+    CHECK(sameRanges(frag.features[1].ranges, {{3, 5}}));
+    CHECK_EQ(frag.primers.size(), size_t(1));          // the primer on [3,7) lies inside
+    CHECK(frag.primers[0].binding == Range({0, 4}));
+    frag = extractFragment(c, {8, 4});                 // wraps: "AC" + "AC"
+    CHECK_EQ(frag.bases, std::string("ACAC"));
+    CHECK(sameRanges(frag.features[0].ranges, {{0, 4}}));
+    t = s;
+    CHECK_EQ(insertFragment(t, {0, 0}, frag), 0);
+    CHECK_EQ(t.bases, std::string("ACACAAAACCCCGG"));
+    CHECK(sameRanges(t.features.back().ranges, {{0, 4}}));
+    CHECK(sameRanges(t.features[0].ranges, {{6, 10}}));
 }
 
 static void testSnapGeneWriter()

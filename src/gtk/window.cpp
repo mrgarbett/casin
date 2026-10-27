@@ -14,6 +14,10 @@ namespace {
 
 enum SaveKind { SaveSequence, SaveFasta, SaveMap };
 
+// What this app last copied, with its features. Pasting the same bases back
+// (in any window) brings the features along.
+Sequence g_copied;
+
 std::string baseName(const std::string &path)
 {
     size_t slash = path.find_last_of('/');
@@ -630,12 +634,14 @@ void Window::actCopy(GSimpleAction *, GVariant *, gpointer p)
         return;
     }
     self->copyText(self->m_doc.selectedBases(), "");
+    g_copied = self->m_doc.selectedFragment();
 }
 
 void Window::actCopyRc(GSimpleAction *, GVariant *, gpointer p)
 {
     auto *self = static_cast<Window *>(p);
     self->copyText(reverseComplement(self->m_doc.selectedBases()), " (reverse complement)");
+    g_copied = {};
 }
 
 void Window::actFind(GSimpleAction *, GVariant *, gpointer p)
@@ -802,12 +808,17 @@ void Window::actCut(GSimpleAction *, GVariant *, gpointer p)
     if (bases.empty())
         return;
     gdk_clipboard_set_text(gtk_widget_get_clipboard(self->m_window), bases.c_str());
+    g_copied = self->m_doc.selectedFragment();
     self->m_doc.deleteSelection();
     self->toast("Cut " + view::formatBp(int(bases.size())));
 }
 
 void Window::pasteText(const std::string &text)
 {
+    if (!g_copied.bases.empty() && cleanBases(text) == g_copied.bases) {
+        m_doc.pasteFragment(g_copied);
+        return;
+    }
     if (!m_doc.typeBases(text))
         toast("The clipboard holds no DNA bases");
 }

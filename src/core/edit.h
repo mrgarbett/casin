@@ -24,6 +24,14 @@ void reverseComplementSequence(Sequence &seq);
 // Circular sequences only: base `origin` becomes base 0.
 void rotateOrigin(Sequence &seq, int origin);
 
+// The bases of `span` (which may wrap) as a linear fragment, with the parts of
+// features and the primers that fall inside it. Features cut by the span edge
+// keep the part inside.
+Sequence extractFragment(const Sequence &seq, Span span);
+// Replaces `span` with the fragment's bases and adds its features and primers.
+// Returns the boundary where the fragment begins.
+int insertFragment(Sequence &seq, Span span, const Sequence &fragment);
+
 // Orders ranges in top-strand order, starting just after the feature's
 // largest uncovered gap (origin-crossing pieces come out end-then-start).
 void sortRangesTopStrand(std::vector<Range> &ranges, int n, bool circular);

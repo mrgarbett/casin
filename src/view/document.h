@@ -79,6 +79,10 @@ public:
     // Replaces the selection (or inserts at the caret) with `text`, cleaned to
     // IUPAC bases. Returns false when nothing in `text` is DNA.
     bool typeBases(const std::string &text);
+    // The selection with the features and primers inside it.
+    Sequence selectedFragment() const;
+    // Like typeBases, but brings the fragment's features and primers along.
+    bool pasteFragment(const Sequence &fragment);
     void deleteSelection();
     void deleteBackward();   // Backspace: the selection, or the base before the caret
     void deleteForward();    // Delete: the selection, or the base after the caret

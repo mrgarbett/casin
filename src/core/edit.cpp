@@ -63,6 +63,72 @@ void deleteRange(Sequence &seq, int d0, int d1)
 
 } // namespace
 
+Sequence extractFragment(const Sequence &seq, Span span)
+{
+    const int n = seq.length();
+    Sequence frag;
+    frag.name = seq.name;
+    if (n == 0 || span.length <= 0)
+        return frag;
+    span.length = std::min(span.length, n);
+    span.start = seq.circular ? ((span.start % n) + n) % n : std::clamp(span.start, 0, n);
+    frag.bases = seq.slice(span);
+    // The span as up to two pieces of the sequence, with their offsets in the fragment.
+    struct Piece {
+        Range r;
+        int offset;
+    };
+    std::vector<Piece> pieces;
+    if (span.start + span.length > n && seq.circular) {
+        pieces.push_back({{span.start, n}, 0});
+        pieces.push_back({{0, span.start + span.length - n}, n - span.start});
+    } else {
+        pieces.push_back({{span.start, std::min(n, span.start + span.length)}, 0});
+    }
+    const int len = int(frag.bases.size());
+    for (const Feature &f : seq.features) {
+        if (f.type == "source")
+            continue;
+        std::vector<Range> out;
+        for (const Range &r : f.ranges)
+            for (const Piece &p : pieces) {
+                const int a = std::max(r.start, p.r.start), b = std::min(r.end, p.r.end);
+                if (b > a)
+                    out.push_back({a - p.r.start + p.offset, b - p.r.start + p.offset});
+            }
+        if (out.empty())
+            continue;
+        mergeTouching(out);
+        sortRangesTopStrand(out, len, false);
+        Feature g = f;
+        g.ranges = out;
+        frag.features.push_back(g);
+    }
+    for (const Primer &pr : seq.primers)
+        for (const Piece &p : pieces)
+            if (pr.binding.start >= p.r.start && pr.binding.end <= p.r.end && pr.binding.length() > 0) {
+                Primer q = pr;
+                q.binding = {pr.binding.start - p.r.start + p.offset, pr.binding.end - p.r.start + p.offset};
+                frag.primers.push_back(q);
+            }
+    return frag;
+}
+
+int insertFragment(Sequence &seq, Span span, const Sequence &fragment)
+{
+    const int pos = replaceBases(seq, span, fragment.bases);
+    for (Feature f : fragment.features) {
+        for (Range &r : f.ranges)
+            r = {r.start + pos, r.end + pos};
+        seq.features.push_back(f);
+    }
+    for (Primer p : fragment.primers) {
+        p.binding = {p.binding.start + pos, p.binding.end + pos};
+        seq.primers.push_back(p);
+    }
+    return pos;
+}
+
 void sortRangesTopStrand(std::vector<Range> &ranges, int n, bool circular)
 {
     Feature tmp;
