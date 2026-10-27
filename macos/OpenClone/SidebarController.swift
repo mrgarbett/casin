@@ -59,6 +59,13 @@ final class SidebarController: NSViewController, NSTableViewDataSource, NSTableV
         reloadEnzymes()
     }
 
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        // The columns start wider than a narrow sidebar; fit them to it.
+        featureTable.sizeToFit()
+        enzymeTable.sizeToFit()
+    }
+
     @objc private func switchTab(_ sender: NSSegmentedControl) {
         tabs.selectTabViewItem(at: max(0, sender.selectedSegment))
     }
@@ -68,8 +75,13 @@ final class SidebarController: NSViewController, NSTableViewDataSource, NSTableV
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
             column.title = title
             column.width = width
+            column.minWidth = min(width, 40)
+            // Checkbox and count columns keep their width; the others share the rest.
+            column.resizingMask = width <= 40 ? [] : .autoresizingMask
             table.addTableColumn(column)
         }
+        // Fit the columns to the sidebar instead of overflowing it.
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         table.style = .sourceList
         table.usesAlternatingRowBackgroundColors = false
         table.allowsMultipleSelection = false
@@ -102,12 +114,26 @@ final class SidebarController: NSViewController, NSTableViewDataSource, NSTableV
         let stack = NSStackView(views: [filter, scroll, credit])
         stack.orientation = .vertical
         stack.alignment = .leading
+        stack.distribution = .fill
         stack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        // The table has no height of its own; let it take the spare space.
+        scroll.setContentHuggingPriority(.defaultLow - 1, for: .vertical)
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16).isActive = true
+        // NSTabView shrinks a stack view item to its fitting size, so give the
+        // tab a plain container and pin the stack inside it.
+        let container = NSView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: container.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
         let item = NSTabViewItem(identifier: "enzymes")
         item.label = "Enzymes"
-        item.view = stack
+        item.view = container
         tabs.addTabViewItem(item)
     }
 
