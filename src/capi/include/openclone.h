@@ -167,6 +167,10 @@ typedef double (*OCMeasureText)(void *context, const char *text, double size, bo
 
 OCMapLayout *oc_map_layout_new(const OCDocument *doc, double width, double height, bool dark,
                                OCMeasureText measure, void *context);
+/* Map Display options: hidden_types is a comma-separated list of feature types. */
+OCMapLayout *oc_map_layout_new_options(const OCDocument *doc, double width, double height, bool dark,
+                                       bool show_enzymes, bool show_primers, const char *hidden_types,
+                                       OCMeasureText measure, void *context);
 void oc_map_layout_free(OCMapLayout *layout);
 OCScene *oc_map_layout_render(const OCMapLayout *layout, const OCDocument *doc);
 /* kind = OC_HIT_*; index = feature or visible-site index; position = base boundary. */
@@ -232,6 +236,37 @@ char *oc_primer_check(const char *bases, OCPrimerCheck *out);
 char *oc_primer_pair_check(const char *a, const char *b);
 /* Designs a pair that amplifies the selection and adds it as one undo step. */
 bool oc_document_design_primers(OCDocument *doc, double target_tm, char **error);
+/* Like oc_document_design_primers; the primers may sit up to `flank` bases
+ * outside the selection (0 = on its ends). */
+bool oc_document_design_primers_flank(OCDocument *doc, double target_tm, int flank, char **error);
+
+/* ---- ORFs ------------------------------------------------------------------ */
+
+/* Open reading frames of at least min_codons, longest first, one per line:
+ * "start<TAB>length<TAB>strand(1/-1)<TAB>protein" (0-based start). */
+char *oc_find_orfs(const OCDocument *doc, int min_codons);
+/* Adds ORF number `index` (from oc_find_orfs with the same min_codons) as a
+ * CDS feature named `name`; returns the feature index or -1. */
+int oc_document_add_orf(OCDocument *doc, int min_codons, int index, const char *name);
+
+/* ---- enzyme sets ------------------------------------------------------------ */
+
+/* Built-in sets (Type IIS, then one per supplier), one per line:
+ * "name<TAB>Enzyme,Enzyme,...". Saved sets use the text format of
+ * parseEnzymeSets ("name: A, B") and are kept by the frontend. */
+char *oc_builtin_enzyme_sets(void);
+char *oc_enzyme_suppliers(const char *enzyme);   /* REBASE supplier codes */
+/* Shows only these enzymes (keeps the cut filter). */
+void oc_document_show_enzyme_set(OCDocument *doc, const char *const *enzymes, int count);
+
+/* ---- printing --------------------------------------------------------------- */
+
+/* Printed pages (map, then the sequence in whole lines), laid out at
+ * page_width x page_height layout units; scale them to the paper. */
+int oc_print_page_count(const OCDocument *doc, double page_width, double page_height, OCMeasureText measure,
+                        void *context);
+OCScene *oc_print_page(const OCDocument *doc, double page_width, double page_height, int page, OCMeasureText measure,
+                       void *context);
 
 /* ---- choosing enzymes ----------------------------------------------------- */
 

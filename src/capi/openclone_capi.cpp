@@ -5,11 +5,13 @@
 #include "core/cloning.h"
 #include "core/digest.h"
 #include "core/edit.h"
+#include "core/orf.h"
 #include "core/primercheck.h"
 #include "core/seqio.h"
 #include "view/document.h"
 #include "view/gellayout.h"
 #include "view/maplayout.h"
+#include "view/printlayout.h"
 #include "view/seqlayout.h"
 #include "view/style.h"
 
@@ -487,6 +489,90 @@ bool oc_document_design_primers(OCDocument *doc, double target_tm, char **error)
     return true;
 }
 
+bool oc_document_design_primers_flank(OCDocument *doc, double target_tm, int flank, char **error)
+{
+    if (!doc->doc.hasSelection() || doc->doc.selection().length <= 0)
+        return failWith(error, "select the region to amplify");
+    PrimerDesign d;
+    std::string err;
+    if (!designPrimers(doc->doc.sequence(), doc->doc.selection(), target_tm, &d, &err, std::max(0, flank)))
+        return failWith(error, err);
+    doc->doc.addPrimers({d.forward, d.reverse}, "Add Primers");
+    return true;
+}
+
+/* ---- ORFs ---- */
+
+char *oc_find_orfs(const OCDocument *doc, int min_codons)
+{
+    std::vector<std::string> lines;
+    for (const Orf &o : findOrfs(doc->doc.sequence(), min_codons))
+        lines.push_back(std::to_string(o.start) + "\t" + std::to_string(o.length) + "\t"
+                        + (o.strand == Strand::Reverse ? "-1" : "1") + "\t" + o.protein);
+    return dupString(joinLines(lines));
+}
+
+int oc_document_add_orf(OCDocument *doc, int min_codons, int index, const char *name)
+{
+    const std::vector<Orf> orfs = findOrfs(doc->doc.sequence(), min_codons);
+    if (index < 0 || index >= int(orfs.size()))
+        return -1;
+    return doc->doc.addFeature(orfFeature(doc->doc.sequence(), orfs[size_t(index)], name ? name : "ORF"));
+}
+
+/* ---- enzyme sets ---- */
+
+char *oc_builtin_enzyme_sets(void)
+{
+    std::vector<std::string> lines;
+    for (const EnzymeSet &set : builtinEnzymeSets()) {
+        std::string l = set.name + "\t";
+        for (size_t i = 0; i < set.enzymes.size(); ++i)
+            l += (i ? "," : "") + set.enzymes[i];
+        lines.push_back(l);
+    }
+    return dupString(joinLines(lines));
+}
+
+char *oc_enzyme_suppliers(const char *enzyme) { return dupString(enzymeSuppliers(enzyme ? enzyme : "")); }
+
+void oc_document_show_enzyme_set(OCDocument *doc, const char *const *enzymes, int count)
+{
+    std::set<std::string> names;
+    for (int i = 0; i < count; ++i)
+        if (enzymes[i])
+            names.insert(enzymes[i]);
+    doc->doc.showOnlyEnzymes(names, doc->doc.maxCuts());
+}
+
+/* ---- printing ---- */
+
+namespace {
+std::vector<view::Scene> pagesFor(const OCDocument *doc, double w, double h, OCMeasureText measure, void *context)
+{
+    CallbackMeasurer tm(measure, context);
+    view::PrintSettings ps;
+    ps.width = w;
+    ps.height = h;
+    return view::printPages(doc->doc.sequence(), doc->doc.visibleSites(), doc->doc.reads(), tm, ps);
+}
+} // namespace
+
+int oc_print_page_count(const OCDocument *doc, double page_width, double page_height, OCMeasureText measure,
+                        void *context)
+{
+    return int(pagesFor(doc, page_width, page_height, measure, context).size());
+}
+
+OCScene *oc_print_page(const OCDocument *doc, double page_width, double page_height, int page, OCMeasureText measure,
+                       void *context)
+{
+    std::vector<view::Scene> pages = pagesFor(doc, page_width, page_height, measure, context);
+    if (page < 0 || page >= int(pages.size()))
+        return nullptr;
+    return new OCScene{std::move(pages[size_t(page)])};
+}
+
 /* ---- choosing enzymes ---- */
 
 char *oc_document_choose_enzymes(const OCDocument *doc, int max_cuts, bool inside_selection, int spare_feature,
@@ -632,6 +718,32 @@ OCMapLayout *oc_map_layout_new(const OCDocument *doc, double width, double heigh
     l->layout = std::make_unique<view::MapLayout>(doc->doc.sequence(), doc->doc.visibleSites(),
                                                   dark ? view::Theme::darkTheme() : view::Theme::light(), tm,
                                                   width, height);
+    return l;
+}
+
+OCMapLayout *oc_map_layout_new_options(const OCDocument *doc, double width, double height, bool dark,
+                                       bool show_enzymes, bool show_primers, const char *hidden_types,
+                                       OCMeasureText measure, void *context)
+{
+    CallbackMeasurer tm(measure, context);
+    view::MapOptions opt;
+    opt.enzymes = show_enzymes;
+    opt.primers = show_primers;
+    std::string types = hidden_types ? hidden_types : "";
+    size_t from = 0;
+    while (from <= types.size()) {
+        const size_t comma = types.find(',', from);
+        const std::string t = trim(types.substr(from, comma == std::string::npos ? std::string::npos : comma - from));
+        if (!t.empty())
+            opt.hiddenTypes.insert(t);
+        if (comma == std::string::npos)
+            break;
+        from = comma + 1;
+    }
+    auto *l = new OCMapLayout;
+    l->layout = std::make_unique<view::MapLayout>(doc->doc.sequence(), doc->doc.visibleSites(),
+                                                  dark ? view::Theme::darkTheme() : view::Theme::light(), tm, width,
+                                                  height, opt);
     return l;
 }
 

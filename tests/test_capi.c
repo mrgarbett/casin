@@ -68,6 +68,33 @@ int main(int argc, char **argv)
     CHECK(count >= 2);   /* at least the two BsaI sites of the cassette */
     CHECK(oc_document_find_next(doc, "hello", &count) == -1);
 
+    /* Newer tools: map options, ORFs, enzyme sets, printing. */
+    {
+        OCMapLayout *full = oc_map_layout_new(doc, 900, 700, false, measure, NULL);
+        OCMapLayout *bare = oc_map_layout_new_options(doc, 900, 700, false, false, true, "CDS, misc_feature", measure, NULL);
+        OCScene *a = oc_map_layout_render(full, doc), *b = oc_map_layout_render(bare, doc);
+        CHECK(oc_scene_item_count(b) < oc_scene_item_count(a));
+        oc_scene_free(a);
+        oc_scene_free(b);
+        oc_map_layout_free(full);
+        oc_map_layout_free(bare);
+        char *orfs = oc_find_orfs(doc, 100);
+        CHECK(orfs && strchr(orfs, '\t') != NULL);
+        oc_string_free(orfs);
+        char *sets = oc_builtin_enzyme_sets();
+        CHECK(sets && strstr(sets, "BsaI") != NULL);
+        oc_string_free(sets);
+        char *sup = oc_enzyme_suppliers("EcoRI");
+        CHECK(sup && strchr(sup, 'N') != NULL);
+        oc_string_free(sup);
+        const int pages = oc_print_page_count(doc, 760, 1060, measure, NULL);
+        CHECK(pages >= 2);
+        OCScene *page = oc_print_page(doc, 760, 1060, 1, measure, NULL);
+        CHECK(page && oc_scene_width(page) == 760 && oc_scene_item_count(page) > 10);
+        oc_scene_free(page);
+        CHECK(oc_print_page(doc, 760, 1060, pages, measure, NULL) == NULL);
+    }
+
     /* Layouts and scenes. */
     OCMapLayout *map = oc_map_layout_new(doc, 900, 700, false, measure, NULL);
     CHECK(oc_map_layout_is_circular(map));
