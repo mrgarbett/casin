@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Layout tests for openclone_view, using approximate text metrics.
 // Usage: view_tests <samples-dir>
+#include "core/abif.h"
 #include "core/enzymes.h"
 #include "core/seqio.h"
 #include "view/document.h"
 #include "view/gellayout.h"
 #include "view/maplayout.h"
 #include "view/seqlayout.h"
+#include "view/tracelayout.h"
 
 #include <cstdio>
 
@@ -149,6 +151,17 @@ int main(int argc, char **argv)
                       theme, tm, 500, 400);
         CHECK(gel.yOfSize(10000) < gel.yOfSize(1000) && gel.yOfSize(1000) < gel.yOfSize(100));
         CHECK(!gel.render().items.empty());
+    }
+    {
+        std::string data;
+        Trace tr;
+        CHECK(readFile(std::string(argv[1]) + "/demo-trace.ab1", &data, &err) && readAbif(data, &tr, &err));
+        TraceLayout tl(tr, theme, 190);
+        CHECK(tl.totalWidth() > 1000);
+        CHECK(tl.baseAt(tl.xOfBase(100)) == 100 && tl.baseAt(tl.xOfBase(100) + 3) == 100);
+        CHECK(tl.baseAt(-50) == 0 && tl.baseAt(1e9) == int(tr.bases.size()) - 1);
+        Scene ts = tl.render(tl.xOfBase(300) - 200, 400, {300, 1});
+        CHECK(ts.items.size() > 30 && ts.width == 400);
     }
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

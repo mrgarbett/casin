@@ -83,7 +83,7 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 
 | ID | Capability | Status |
 | --- | --- | --- |
-| V1 | Sanger `.ab1` traces | reading done (calls, quality, peaks, channels); trace drawing pending |
+| V1 | Sanger `.ab1` traces | done on Linux (chromatogram, quality, click to select); Mac UI pending |
 | V2 | Align a sequence to the reference | done on Linux (one read at a time, differences listed); Mac UI pending |
 | V3 | Traces aligned to the reference | M4 |
 | V4 | Detect common features | M5 |

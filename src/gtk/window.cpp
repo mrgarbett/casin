@@ -4,7 +4,9 @@
 #include "core/genbank.h"
 #include "core/primercheck.h"
 #include "core/seqio.h"
+#include "view/cairo_render.h"
 #include "view/style.h"
+#include "view/tracelayout.h"
 
 #include <algorithm>
 #include <cmath>
@@ -89,11 +91,15 @@ Window::Window(GtkApplication *app)
         rebuildEnzymeList();
         updateTitle();
         gtk_stack_set_visible_child_name(GTK_STACK(m_stack), m_doc.isEmpty() ? "empty" : "document");
+        // The chromatogram only fits the bases it called.
+        if (m_traceBox)
+            gtk_widget_set_visible(m_traceBox, m_trace && m_trace->bases == m_doc.sequence().bases);
     });
     m_doc.onEnzymesChanged([this] { refreshEnzymeRows(); });
     m_doc.onSelectionChanged([this] {
         updateStatus();
         updateActions();
+        scrollTraceToSelection();
     });
     m_doc.onHistoryChanged([this] {
         updateTitle();
@@ -249,7 +255,43 @@ void Window::buildUi(GtkApplication *app)
 
     m_split = adw_overlay_split_view_new();
     adw_overlay_split_view_set_sidebar_position(ADW_OVERLAY_SPLIT_VIEW(m_split), GTK_PACK_END);
-    adw_overlay_split_view_set_content(ADW_OVERLAY_SPLIT_VIEW(m_split), paned);
+    // Under the map and sequence: the chromatogram of a trace file.
+    m_traceAdj = gtk_adjustment_new(0, 0, 1, 20, 200, 1);
+    m_traceArea = gtk_drawing_area_new();
+    gtk_widget_set_size_request(m_traceArea, -1, 190);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(m_traceArea), &Window::drawTrace, this, nullptr);
+    g_signal_connect_swapped(m_traceAdj, "value-changed", G_CALLBACK(gtk_widget_queue_draw), m_traceArea);
+    GtkGesture *traceClick = gtk_gesture_click_new();
+    g_signal_connect(traceClick, "pressed", G_CALLBACK((+[](GtkGestureClick *, int, double x, double, gpointer p) {
+                         auto *self = static_cast<Window *>(p);
+                         if (!self->m_trace)
+                             return;
+                         const view::TraceLayout layout(*self->m_trace, view::Theme::light(), 190);
+                         const int b = layout.baseAt(x + gtk_adjustment_get_value(self->m_traceAdj));
+                         if (b >= 0 && b < self->m_doc.sequence().length())
+                             self->m_doc.setSelection({b, 1});
+                     })),
+                     this);
+    gtk_widget_add_controller(m_traceArea, GTK_EVENT_CONTROLLER(traceClick));
+    GtkEventController *traceScroll = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES);
+    g_signal_connect(traceScroll, "scroll", G_CALLBACK((+[](GtkEventControllerScroll *, double dx, double dy, gpointer p) {
+                         auto *self = static_cast<Window *>(p);
+                         gtk_adjustment_set_value(self->m_traceAdj,
+                                                  gtk_adjustment_get_value(self->m_traceAdj) + (dx + dy) * 40);
+                         return gboolean(TRUE);
+                     })),
+                     this);
+    gtk_widget_add_controller(m_traceArea, traceScroll);
+    m_traceBox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_append(GTK_BOX(m_traceBox), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+    gtk_box_append(GTK_BOX(m_traceBox), m_traceArea);
+    gtk_box_append(GTK_BOX(m_traceBox), gtk_scrollbar_new(GTK_ORIENTATION_HORIZONTAL, m_traceAdj));
+    gtk_widget_set_visible(m_traceBox, FALSE);
+    GtkWidget *content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_vexpand(paned, TRUE);
+    gtk_box_append(GTK_BOX(content), paned);
+    gtk_box_append(GTK_BOX(content), m_traceBox);
+    adw_overlay_split_view_set_content(ADW_OVERLAY_SPLIT_VIEW(m_split), content);
     adw_overlay_split_view_set_sidebar(ADW_OVERLAY_SPLIT_VIEW(m_split), buildSidebar());
     adw_overlay_split_view_set_min_sidebar_width(ADW_OVERLAY_SPLIT_VIEW(m_split), 260);
     adw_overlay_split_view_set_max_sidebar_width(ADW_OVERLAY_SPLIT_VIEW(m_split), 300);
@@ -400,7 +442,56 @@ bool Window::load(const std::string &path, std::string *error)
         return false;
     // A trace can't be written back: saving asks for a new file.
     m_doc.setSequence(std::move(seq), format == FileFormat::Abif ? std::string() : path);
+    std::unique_ptr<Trace> trace;
+    std::string data;
+    if (format == FileFormat::Abif && readFile(path, &data)) {
+        trace = std::make_unique<Trace>();
+        if (!readAbif(data, trace.get()))
+            trace.reset();
+    }
+    showTrace(std::move(trace));
     return true;
+}
+
+void Window::showTrace(std::unique_ptr<Trace> trace)
+{
+    m_trace = std::move(trace);
+    gtk_widget_set_visible(m_traceBox, m_trace != nullptr);
+    if (!m_trace)
+        return;
+    const view::TraceLayout layout(*m_trace, view::Theme::light(), 190);
+    gtk_adjustment_configure(m_traceAdj, 0, 0, layout.totalWidth(), 40, 400, 400);
+    gtk_widget_queue_draw(m_traceArea);
+}
+
+void Window::scrollTraceToSelection()
+{
+    if (!m_trace || !gtk_widget_get_visible(m_traceBox))
+        return;
+    if (m_doc.hasSelection()) {
+        const view::TraceLayout layout(*m_trace, view::Theme::light(), 190);
+        const double x = layout.xOfBase(m_doc.selection().start);
+        const double v = gtk_adjustment_get_value(m_traceAdj), page = gtk_adjustment_get_page_size(m_traceAdj);
+        if (x < v + 20 || x > v + page - 20)
+            gtk_adjustment_set_value(m_traceAdj, x - page / 3);
+    }
+    gtk_widget_queue_draw(m_traceArea);
+}
+
+void Window::drawTrace(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer p)
+{
+    auto *self = static_cast<Window *>(p);
+    if (!self->m_trace)
+        return;
+    const bool dark = adw_style_manager_get_dark(adw_style_manager_get_default());
+    const view::TraceLayout layout(*self->m_trace, dark ? view::Theme::darkTheme() : view::Theme::light(), h);
+    // Keep the scrollbar's page in step with the width.
+    if (gtk_adjustment_get_page_size(self->m_traceAdj) != w)
+        gtk_adjustment_configure(self->m_traceAdj, std::min(gtk_adjustment_get_value(self->m_traceAdj),
+                                                            std::max(0.0, layout.totalWidth() - w)),
+                                 0, layout.totalWidth(), 40, w * 0.8, w);
+    const Span sel = self->m_doc.hasSelection() ? self->m_doc.selection() : Span{0, 0};
+    view::drawScene(cr, layout.render(gtk_adjustment_get_value(self->m_traceAdj), w, sel));
 }
 
 void Window::updateTitle()

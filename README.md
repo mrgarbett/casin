@@ -141,8 +141,9 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   primers (new bases on the forward primer's 5′ end) and opens the mutant.
 - Cloning History: products of PCR, cloning, assembly and mutagenesis remember each step
   (with the date); it is kept in GenBank and `.dna` files.
-- Open Sanger traces (`.ab1`): the base calls open as a sequence, with the good-quality
-  range noted; saving goes to a new file. `samples/demo-trace.ab1` is a simulated read.
+- Open Sanger traces (`.ab1`): the base calls open as a sequence with the chromatogram
+  below (quality bars, low-quality ends shaded, click a peak to select its base); saving
+  goes to a new file. `samples/demo-trace.ab1` is a simulated read.
 - Align Read: align a read from another window (a trace, FASTA or any linear sequence) to
   this sequence on either strand, across the origin, and list the differences; click one to
   select it, or add the read as a feature.
@@ -155,7 +156,7 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
 ## Next steps
 
 See [docs/PARITY.md](docs/PARITY.md) for the full checklist. Next up: the Mac editing UI,
-then primers with a search window, and the rest of milestone 4 (drawing traces under the reference).
+then primers with a search window, and the rest of milestone 4 (several reads at once, drawn under the reference).
 
 ## Credits and ground rules
 

@@ -3,6 +3,7 @@
 
 #include "mapview.h"
 #include "seqview.h"
+#include "core/abif.h"
 #include "core/seqio.h"
 #include "view/document.h"
 
@@ -124,6 +125,14 @@ private:
     GtkWidget *m_filter = nullptr;
     std::unique_ptr<MapView> m_map;
     std::unique_ptr<SequenceView> m_seq;
+    // Chromatogram strip, shown for a document opened from a trace file.
+    std::unique_ptr<Trace> m_trace;
+    GtkWidget *m_traceBox = nullptr;
+    GtkWidget *m_traceArea = nullptr;
+    GtkAdjustment *m_traceAdj = nullptr;
+    void showTrace(std::unique_ptr<Trace> trace);
+    void scrollTraceToSelection();
+    static void drawTrace(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer self);
     struct EnzymeRow {
         std::string name;
         GtkWidget *row;
