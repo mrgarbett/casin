@@ -687,6 +687,19 @@ bool oc_gibson(const OCDocument *vector, const char *vector_enzyme1, const char 
     return deliver(out, p);
 }
 
+bool oc_overlap_extension(const OCDocument *const *fragments, int fragment_count, int min_overlap, OCDocument *out,
+                          char **error)
+{
+    std::vector<Sequence> frags;
+    for (int i = 0; i < fragment_count && fragments; ++i)
+        frags.push_back(fragments[i]->doc.sequence());
+    Sequence p;
+    std::string err;
+    if (!overlapExtension(frags, min_overlap, &p, nullptr, &err))
+        return failWith(error, err);
+    return deliver(out, p);
+}
+
 char *oc_align_read(const OCDocument *reference, const OCDocument *read, OCAlignmentInfo *out, char **error)
 {
     ReadAlignment a;

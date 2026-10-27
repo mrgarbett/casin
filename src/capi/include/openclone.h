@@ -298,6 +298,10 @@ bool oc_mutagenesis(const OCDocument *doc, const char *bases, double target_tm, 
 bool oc_gibson(const OCDocument *vector, const char *vector_enzyme1, const char *vector_enzyme2,
                const OCDocument *const *fragments, int fragment_count, int min_overlap, OCDocument *out,
                char **error);
+/* Overlap extension PCR: linear fragments joined by their end overlaps,
+ * starting from the first, into one linear product. */
+bool oc_overlap_extension(const OCDocument *const *fragments, int fragment_count, int min_overlap, OCDocument *out,
+                          char **error);
 
 /* ---- verification ---------------------------------------------------------- */
 

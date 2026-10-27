@@ -140,6 +140,8 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   selection, never inside a chosen feature, with the ends you need; show just those.
 - TA, GC and TOPO Cloning: a PCR product into a linearized vector (this window), either
   orientation, with the overhang bases filled in; opens the circular product.
+- Overlap Extension PCR: join this window and other linear fragments by their shared
+  ends into one linear product; orientation comes from the overlaps.
 - Mutagenesis: replace, delete or insert bases at the selection; designs back-to-back
   primers (new bases on the forward primer's 5′ end) and opens the mutant.
 - Cloning History: products of PCR, cloning, assembly and mutagenesis remember each step
@@ -171,7 +173,7 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   (exported maps follow the same choices).
 - View → Translate Frames: show the three forward reading frames, or all six, around the
   strands, with starts and stops highlighted.
-- The C API exposes all of this for the Mac app (editing, digest and gel, primer checks and design, enzyme choice, PCR, restriction cloning, Golden Gate, Gibson, mutagenesis, read alignment); the Mac windows for the milestone 3 tools come next.
+- The C API exposes all of this for the Mac app (editing, digest and gel, primer checks and design, enzyme choice, PCR, restriction cloning, Golden Gate, Gibson, overlap extension, mutagenesis, read alignment); the Mac windows for the milestone 3 tools come next.
 
 ## Next steps
 

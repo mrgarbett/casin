@@ -289,8 +289,11 @@ int endOverlap(const std::string &a, const std::string &b, int minK)
 
 } // namespace
 
-bool gibsonAssemble(const std::vector<Sequence> &fragments, int minOverlap, Sequence *out,
-                    std::vector<GibsonJoin> *joins, std::string *error)
+namespace {
+// Chains fragments by their end overlaps starting from the first; with
+// `close`, the last must overlap the first and the product is circular.
+bool assembleByOverlaps(const std::vector<Sequence> &fragments, int minOverlap, bool close, Sequence *out,
+                        std::vector<GibsonJoin> *joins, std::string *error)
 {
     auto fail = [error](const std::string &msg) {
         if (error)
@@ -298,7 +301,7 @@ bool gibsonAssemble(const std::vector<Sequence> &fragments, int minOverlap, Sequ
         return false;
     };
     if (fragments.size() < 2)
-        return fail("pick a vector and at least one fragment");
+        return fail(close ? "pick a vector and at least one fragment" : "pick at least two fragments");
     for (const Sequence &f : fragments)
         if (f.circular)
             return fail(f.name + " is circular; linearize it first");
@@ -330,16 +333,40 @@ bool gibsonAssemble(const std::vector<Sequence> &fragments, int minOverlap, Sequ
         insertFragment(product, {product.length(), 0}, extractFragment(*last, {j.overlap, last->length() - j.overlap}));
         chain.push_back(j);
     }
-    const int close = endOverlap(last->bases, fwd[0].bases, minOverlap);
-    if (close == 0)
-        return fail("the end of " + last->name + " doesn't overlap the start of " + fwd[0].name);
-    chain[0].overlap = close;
-    // The closing overlap is in the product twice: drop the copy at the end.
-    deleteBases(product, {product.length() - close, close});
-    product.circular = true;
+    if (close) {
+        const int k = endOverlap(last->bases, fwd[0].bases, minOverlap);
+        if (k == 0)
+            return fail("the end of " + last->name + " doesn't overlap the start of " + fwd[0].name);
+        chain[0].overlap = k;
+        // The closing overlap is in the product twice: drop the copy at the end.
+        deleteBases(product, {product.length() - k, k});
+        product.circular = true;
+    }
     *out = product;
     if (joins)
         *joins = chain;
+    return true;
+}
+} // namespace
+
+bool gibsonAssemble(const std::vector<Sequence> &fragments, int minOverlap, Sequence *out,
+                    std::vector<GibsonJoin> *joins, std::string *error)
+{
+    return assembleByOverlaps(fragments, minOverlap, true, out, joins, error);
+}
+
+bool overlapExtension(const std::vector<Sequence> &fragments, int minOverlap, Sequence *out,
+                      std::vector<GibsonJoin> *joins, std::string *error)
+{
+    if (!assembleByOverlaps(fragments, minOverlap, false, out, joins, error))
+        return false;
+    out->circular = false;
+    std::string names;
+    for (size_t i = 0; i < fragments.size(); ++i)
+        names += (i ? " + " : "") + fragments[i].name;
+    out->name = fragments.front().name + "-SOE";
+    out->history = fragments.front().history;
+    addHistory(*out, "Overlap extension PCR: " + names);
     return true;
 }
 

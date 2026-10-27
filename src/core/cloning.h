@@ -87,6 +87,11 @@ struct GibsonJoin {
 bool gibsonAssemble(const std::vector<Sequence> &fragments, int minOverlap, Sequence *out,
                     std::vector<GibsonJoin> *joins = nullptr, std::string *error = nullptr);
 
+// Overlap extension (SOE) PCR: linear fragments joined end to end by their
+// overlaps, starting from the first, into one linear product.
+bool overlapExtension(const std::vector<Sequence> &fragments, int minOverlap, Sequence *out,
+                      std::vector<GibsonJoin> *joins = nullptr, std::string *error = nullptr);
+
 // Whole workflows as the apps offer them. Products are named after their
 // inputs and keep the vector's numbering when its origin survives the cut.
 

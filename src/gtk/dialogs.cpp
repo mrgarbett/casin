@@ -1382,6 +1382,113 @@ void Window::taCloningDialog()
     adw_dialog_present(f.dialog, m_window);
 }
 
+namespace {
+struct SoeForm {
+    Window *window;
+    std::vector<Sequence> parts;   // this window first, then the other linear windows
+    std::vector<bool> chosen;
+    GtkWidget *overlap, *result, *okButton;
+    AdwDialog *dialog;
+    Sequence product;
+    bool ok = false;
+};
+
+void updateSoe(SoeForm *st)
+{
+    std::vector<Sequence> frags;
+    for (size_t i = 0; i < st->parts.size(); ++i)
+        if (st->chosen[i])
+            frags.push_back(st->parts[i]);
+    std::vector<GibsonJoin> joins;
+    std::string err, text;
+    st->ok = overlapExtension(frags, int(adw_spin_row_get_value(ADW_SPIN_ROW(st->overlap))), &st->product, &joins, &err);
+    if (st->ok) {
+        text = view::formatBp(st->product.length()) + " linear product\n";
+        for (const GibsonJoin &j : joins)
+            text += (j.input == 0 ? "" : " → ") + frags[size_t(j.input)].name + (j.flipped ? " (reversed)" : "");
+    } else {
+        text = err;
+    }
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->result), text.c_str());
+    gtk_widget_set_sensitive(st->okButton, st->ok);
+}
+} // namespace
+
+void Window::overlapExtensionDialog()
+{
+    if (m_doc.sequence().circular) {
+        toast("Overlap extension PCR joins linear fragments; this sequence is circular");
+        return;
+    }
+    auto *st = new SoeForm{};
+    st->window = this;
+    st->parts.push_back(m_doc.sequence());
+    GtkApplication *app = gtk_window_get_application(gtkWindow());
+    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
+        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+        if (w && w != this && !w->isEmpty() && !w->document().sequence().circular)
+            st->parts.push_back(w->document().sequence());
+    }
+    if (st->parts.size() < 2) {
+        toast("Open the other linear fragments in other windows first");
+        delete st;
+        return;
+    }
+    st->chosen.assign(st->parts.size(), true);
+    Form f = makeForm("Overlap Extension PCR", "Open Product");
+    st->dialog = f.dialog;
+    st->okButton = f.ok;
+    GtkWidget *gp = addGroup(f, "Fragments");
+    adw_preferences_group_set_description(
+        ADW_PREFERENCES_GROUP(gp),
+        "Joined from this window by their shared ends; orientation comes from the overlaps");
+    for (size_t i = 0; i < st->parts.size(); ++i) {
+        GtkWidget *row = adw_action_row_new();
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), st->parts[i].name.c_str());
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(row),
+                                    (view::formatBp(st->parts[i].length()) + (i == 0 ? " · first fragment" : "")).c_str());
+        GtkWidget *check = gtk_check_button_new();
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(check), TRUE);
+        gtk_widget_set_sensitive(check, i > 0);
+        g_object_set_data(G_OBJECT(check), "index", GINT_TO_POINTER(int(i)));
+        g_signal_connect(check, "toggled", G_CALLBACK((+[](GtkCheckButton *b, gpointer p) {
+                             auto *st = static_cast<SoeForm *>(p);
+                             st->chosen[size_t(GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "index")))] =
+                                 gtk_check_button_get_active(b);
+                             updateSoe(st);
+                         })),
+                         st);
+        adw_action_row_add_prefix(ADW_ACTION_ROW(row), check);
+        if (i > 0)
+            adw_action_row_set_activatable_widget(ADW_ACTION_ROW(row), check);
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(gp), row);
+    }
+    GtkWidget *gr = addGroup(f);
+    st->overlap = spinRow(gr, "Minimum overlap (bp)", 15, 200);
+    st->result = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->result), "Result");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(gr), st->result);
+    g_signal_connect(st->overlap, "notify::value", G_CALLBACK((+[](GObject *, GParamSpec *, gpointer p) {
+                         updateSoe(static_cast<SoeForm *>(p));
+                     })),
+                     st);
+    updateSoe(st);
+    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<SoeForm *>(p);
+                         if (!st->ok)
+                             return;
+                         GtkApplication *app = gtk_window_get_application(st->window->gtkWindow());
+                         Window *w = Window::create(app);
+                         w->document().setSequence(st->product);
+                         w->document().markUnsaved();
+                         w->present();
+                         adw_dialog_close(st->dialog);
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<SoeForm *>(p); });
+    adw_dialog_present(f.dialog, m_window);
+}
+
 void Window::searchFolderDialog()
 {
     auto *st = new SearchForm{};

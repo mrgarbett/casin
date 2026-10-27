@@ -209,6 +209,16 @@ int main(int argc, char **argv)
     oc_document_clear_reads(doc);
     CHECK(oc_document_read_count(doc) == 0);
     CHECK(oc_document_path(trace)[0] == '\0');   /* a trace isn't saved back over itself */
+    /* Overlap extension PCR joins two fragments that share 25 bases. */
+    OCDocument *fa = oc_document_new(), *fb = oc_document_new();
+    CHECK(oc_document_new_sequence(fa, "fa", "ACGTTGCATGCCTAGGATCCGTAACCCCCCCCCCTTGACCGGTACCATGCAAGCTTGCA", false));
+    CHECK(oc_document_new_sequence(fb, "fb", "TTGACCGGTACCATGCAAGCTTGCAGGGGGGGGGG", false));
+    const OCDocument *soeFrags[] = {fa, fb};
+    CHECK(oc_overlap_extension(soeFrags, 2, 15, product, NULL));
+    CHECK(oc_document_length(product) == 59 + 35 - 25 && !oc_document_is_circular(product));
+    CHECK(!oc_overlap_extension(soeFrags, 1, 15, product, NULL));
+    oc_document_free(fa);
+    oc_document_free(fb);
     oc_document_free(trace);
     oc_document_free(product);
     oc_document_free(pcr);

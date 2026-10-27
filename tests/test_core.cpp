@@ -1034,6 +1034,15 @@ static void testGibson()
     CHECK(hasA);
     CHECK(!gibsonAssemble({vec, a}, 15, &product, nullptr, &err));   // b missing: no closing overlap
     CHECK(!gibsonAssemble({vec, a, b}, 30, &product, nullptr, &err));   // overlaps too short
+
+    // Overlap extension PCR joins the same pieces into a linear product.
+    Sequence soe;
+    CHECK(overlapExtension({a, bRc}, 15, &soe, &joins, &err));
+    CHECK(!soe.circular);
+    CHECK_EQ(soe.length(), 25 + 40 + 25 + 30 + 25);
+    CHECK(startsWith(soe.bases, h1) && endsWith(soe.bases, h3));
+    CHECK_EQ(soe.name, std::string("a-SOE"));
+    CHECK(!overlapExtension({a}, 15, &soe, nullptr, &err));
 }
 
 static void testPrimerDesign()
