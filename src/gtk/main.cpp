@@ -3,6 +3,7 @@
 //
 // Headless checks:
 //   openclone --render-map out.png <file>      (no display needed; .svg/.pdf work too)
+//   openclone --print-pdf out.pdf <file>       (the printed pages, A4)
 //   openclone --screenshot out.png <file>      (needs a display, e.g. xvfb-run)
 // Options for both: --size WxH  --enzymes 1|2|3|all  --select A-B (1-based)  --dark
 #include "window.h"
@@ -10,6 +11,7 @@
 #include "core/seqio.h"
 #include "view/cairo_render.h"
 #include "view/maplayout.h"
+#include "view/printlayout.h"
 
 #include <adwaita.h>
 #include <cstdio>
@@ -25,7 +27,7 @@ namespace {
 const char *kAppId = "io.github.openclone.OpenClone";
 
 struct Options {
-    std::string renderMap, screenshot;
+    std::string renderMap, screenshot, printPdf;
     int width = 0, height = 0;
     int maxCuts = 1;
     int selStart = -1, selEnd = -1;
@@ -50,6 +52,9 @@ bool parseOptions(int argc, char **argv, Options *o, std::string *error)
         std::string v;
         if (a == "--render-map") {
             if (!next(&o->renderMap))
+                return false;
+        } else if (a == "--print-pdf") {
+            if (!next(&o->printPdf))
                 return false;
         } else if (a == "--screenshot") {
             if (!next(&o->screenshot))
@@ -113,6 +118,27 @@ int renderMap(const Options &o)
         return 1;
     }
     std::printf("wrote %s (%d sites shown)\n", o.renderMap.c_str(), int(doc.visibleSites().size()));
+    return 0;
+}
+
+int printPdf(const Options &o)
+{
+    Sequence seq;
+    std::string err;
+    if (o.files.size() != 1 || !loadSequenceFile(o.files[0], &seq, &err)) {
+        std::fprintf(stderr, "openclone: %s\n", err.empty() ? "usage: openclone --print-pdf out.pdf <file>" : err.c_str());
+        return o.files.size() != 1 ? 2 : 1;
+    }
+    Document doc;
+    doc.setSequence(std::move(seq), o.files[0]);
+    applyOptions(doc, o);
+    view::PangoTextMeasurer tm;
+    const std::vector<view::Scene> pages = view::printPages(doc.sequence(), doc.visibleSites(), doc.reads(), tm, {});
+    if (!view::exportPdfPages(pages, o.printPdf, 595, 842, 36, &err)) {
+        std::fprintf(stderr, "openclone: %s\n", err.c_str());
+        return 1;
+    }
+    std::printf("wrote %s (%d pages)\n", o.printPdf.c_str(), int(pages.size()));
     return 0;
 }
 
@@ -181,6 +207,7 @@ void onStartup(GApplication *app, gpointer)
         {"win.add-feature", {"<Control>k", nullptr}},
         {"win.digest", {"<Control>d", nullptr}},
         {"win.export-map", {"<Control>e", nullptr}},
+        {"win.print", {"<Control>p", nullptr}},
         {"win.copy", {"<Control>c", nullptr}},
         {"win.copy-rc", {"<Control><Shift>c", nullptr}},
         {"win.find", {"<Control>f", nullptr}},
@@ -256,6 +283,8 @@ int main(int argc, char **argv)
     }
     if (!g_options.renderMap.empty())
         return renderMap(g_options);
+    if (!g_options.printPdf.empty())
+        return printPdf(g_options);
 
     GApplicationFlags flags = G_APPLICATION_HANDLES_OPEN;
     if (!g_options.screenshot.empty())

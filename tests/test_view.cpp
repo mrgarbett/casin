@@ -8,6 +8,7 @@
 #include "view/gellayout.h"
 #include "view/maplayout.h"
 #include "view/seqlayout.h"
+#include "view/printlayout.h"
 #include "view/tracelayout.h"
 
 #include <cstdio>
@@ -180,6 +181,16 @@ int main(int argc, char **argv)
         for (double y = 0; y < withRead.totalHeight() && !found; y += 1)
             found = withRead.readAt({200, y}) == 0;
         CHECK(found);
+    }
+    {
+        // Printing: the map, then the sequence in whole lines across pages.
+        PrintSettings ps;
+        const std::vector<Scene> pages = printPages(seq, sites, {}, tm, ps);
+        CHECK(pages.size() >= 2);
+        for (const Scene &pg : pages)
+            CHECK(pg.width == ps.width && pg.height == ps.height && !pg.items.empty());
+        ps.map = false;
+        CHECK_EQ(printPages(seq, sites, {}, tm, ps).size(), pages.size() - 1);
     }
     testUndo(seq);
     {

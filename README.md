@@ -155,6 +155,8 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   for a target Tm and checked for dimers and hairpins; adds both primers in one undo step.
 - Find ORFs: open reading frames from ATG to stop on both strands (across the origin too),
   longest first; add the ones you pick as CDS features with their translation.
+- Print… (Ctrl+P): the map on the first page, then the sequence in whole lines; the same
+  pages come out of `openclone --print-pdf out.pdf <file>` without a display.
 - View → Map Display: show or hide enzyme sites, primers and each feature type on the map
   (exported maps follow the same choices).
 - View → Translate Frames: show the three forward reading frames, or all six, around the

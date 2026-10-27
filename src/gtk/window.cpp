@@ -6,6 +6,7 @@
 #include "core/seqio.h"
 #include "view/cairo_render.h"
 #include "view/style.h"
+#include "view/printlayout.h"
 #include "view/tracelayout.h"
 
 #include <algorithm>
@@ -152,6 +153,7 @@ void Window::buildUi(GtkApplication *app)
         {"map-options", &Window::actMapOptions, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-fasta", &Window::actExportFasta, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-map", &Window::actExportMap, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"print", &Window::actPrint, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"copy", &Window::actCopy, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"copy-rc", &Window::actCopyRc, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"find", &Window::actFind, nullptr, nullptr, nullptr, {0, 0, 0}},
@@ -192,6 +194,7 @@ void Window::buildUi(GtkApplication *app)
     g_menu_append(fileSection, "Save As…", "win.save-as");
     g_menu_append(fileSection, "Export FASTA…", "win.export-fasta");
     g_menu_append(fileSection, "Export Map…", "win.export-map");
+    g_menu_append(fileSection, "Print…", "win.print");
     g_menu_append_section(menu, nullptr, G_MENU_MODEL(fileSection));
     GMenu *editSection = g_menu_new();
     g_menu_append(editSection, "Cut", "win.cut");
@@ -934,7 +937,7 @@ void Window::updateActions()
     const bool sel = m_doc.hasSelection() && m_doc.selection().length > 0;
     enable("undo", m_doc.canUndo());
     enable("redo", m_doc.canRedo());
-    for (const char *name : {"save", "save-as", "export-fasta", "export-map", "paste", "select-all",
+    for (const char *name : {"save", "save-as", "export-fasta", "export-map", "print", "paste", "select-all",
                              "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "choose-enzymes", "primer-by-sequence", "history", "align", "orfs", "map-options"})
         enable(name, has);
     enable("cut", sel);
@@ -1213,6 +1216,62 @@ void Window::saveDialog(const std::string &title, const std::string &suggested, 
                          },
                          req);
     g_object_unref(dialog);
+}
+
+void Window::actPrint(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->print();
+}
+
+namespace {
+struct PrintJob {
+    Window *window;
+    std::vector<view::Scene> pages;
+};
+}
+
+void Window::print()
+{
+    if (m_doc.isEmpty())
+        return;
+    GtkPrintOperation *op = gtk_print_operation_new();
+    gtk_print_operation_set_job_name(op, m_doc.sequence().name.c_str());
+    auto *job = new PrintJob{this, {}};
+    g_object_set_data_full(G_OBJECT(op), "job", job, [](gpointer p) { delete static_cast<PrintJob *>(p); });
+    g_signal_connect(op, "begin-print", G_CALLBACK((+[](GtkPrintOperation *op, GtkPrintContext *ctx, gpointer p) {
+                         auto *job = static_cast<PrintJob *>(p);
+                         Window *w = job->window;
+                         view::PrintSettings ps;
+                         // Lay out at a fixed width and scale to the paper, so text keeps its size.
+                         ps.height = ps.width * gtk_print_context_get_height(ctx) / gtk_print_context_get_width(ctx);
+                         ps.mapOptions = w->m_map->options();
+                         ps.complement = w->m_seq->showComplement();
+                         view::PangoTextMeasurer tm;
+                         job->pages = view::printPages(w->m_doc.sequence(), w->m_doc.visibleSites(),
+                                                       w->m_doc.reads(), tm, ps);
+                         gtk_print_operation_set_n_pages(op, int(job->pages.size()));
+                     })),
+                     job);
+    g_signal_connect(op, "draw-page",
+                     G_CALLBACK((+[](GtkPrintOperation *, GtkPrintContext *ctx, int page, gpointer p) {
+                         auto *job = static_cast<PrintJob *>(p);
+                         if (page < 0 || page >= int(job->pages.size()))
+                             return;
+                         const view::Scene &sc = job->pages[size_t(page)];
+                         cairo_t *cr = gtk_print_context_get_cairo_context(ctx);
+                         const double k = gtk_print_context_get_width(ctx) / sc.width;
+                         cairo_scale(cr, k, k);
+                         view::drawScene(cr, sc);
+                     })),
+                     job);
+    GError *err = nullptr;
+    const GtkPrintOperationResult res =
+        gtk_print_operation_run(op, GTK_PRINT_OPERATION_ACTION_PRINT_DIALOG, gtkWindow(), &err);
+    if (res == GTK_PRINT_OPERATION_RESULT_ERROR && err) {
+        showError("Could not print", err->message);
+        g_error_free(err);
+    }
+    g_object_unref(op);
 }
 
 void Window::exportMap(const std::string &rawPath)

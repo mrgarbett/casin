@@ -18,7 +18,7 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 | | Export the map as PNG, SVG, PDF | done |
 | I4 | EMBL and multi-record GenBank | done: open and save EMBL; each record of a multi-record file opens in its own window (Linux) |
 | I3 | Fetch a sequence from NCBI by accession | M5 |
-| I1 | Print the map and sequence | planned |
+| I1 | Print the map and sequence | done on Linux (Print…, Ctrl+P; `--print-pdf` headless); Mac UI pending |
 
 ## Viewing
 

@@ -47,6 +47,7 @@ add_library(openclone_view STATIC
     src/view/seqlayout.cpp
     src/view/gellayout.cpp
     src/view/tracelayout.cpp
+    src/view/printlayout.cpp
     src/view/document.cpp)
 target_link_libraries(openclone_view PUBLIC openclone_core)
 
