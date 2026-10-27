@@ -133,6 +133,16 @@ int main(int argc, char **argv)
     MapLayout lmap(lin, linSites, theme, tm, 1000, 500);
     CHECK(!lmap.render({}).items.empty());
     CHECK(lmap.positionAt({0, 250}) == 0);
+    {
+        // Display options: hiding enzymes or a feature type draws less.
+        const size_t all = MapLayout(seq, sites, theme, tm, 1000, 800).render({}).items.size();
+        MapOptions noEnz;
+        noEnz.enzymes = false;
+        MapOptions noCds;
+        noCds.hiddenTypes = {"CDS"};
+        CHECK(MapLayout(seq, sites, theme, tm, 1000, 800, noEnz).render({}).items.size() < all);
+        CHECK(MapLayout(seq, sites, theme, tm, 1000, 800, noCds).render({}).items.size() < all);
+    }
 
     // Sequence view: lines are multiples of 10 bp and positions round-trip.
     SequenceLayout sl(seq, sites, theme, tm, 900, true);

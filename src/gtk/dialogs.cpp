@@ -34,7 +34,7 @@ struct Form {
     GtkWidget *ok;
 };
 
-Form makeForm(const char *title, const char *okLabel)
+Form makeForm(const char *title, const char *okLabel, bool withCancel = true)
 {
     Form f;
     f.dialog = adw_dialog_new();
@@ -43,9 +43,11 @@ Form makeForm(const char *title, const char *okLabel)
     GtkWidget *header = adw_header_bar_new();
     adw_header_bar_set_show_end_title_buttons(ADW_HEADER_BAR(header), FALSE);
     adw_header_bar_set_show_start_title_buttons(ADW_HEADER_BAR(header), FALSE);
-    GtkWidget *cancel = gtk_button_new_with_label("Cancel");
-    g_signal_connect_swapped(cancel, "clicked", G_CALLBACK(adw_dialog_close), f.dialog);
-    adw_header_bar_pack_start(ADW_HEADER_BAR(header), cancel);
+    if (withCancel) {
+        GtkWidget *cancel = gtk_button_new_with_label("Cancel");
+        g_signal_connect_swapped(cancel, "clicked", G_CALLBACK(adw_dialog_close), f.dialog);
+        adw_header_bar_pack_start(ADW_HEADER_BAR(header), cancel);
+    }
     f.ok = gtk_button_new_with_label(okLabel);
     gtk_widget_add_css_class(f.ok, "suggested-action");
     adw_header_bar_pack_end(ADW_HEADER_BAR(header), f.ok);
@@ -1183,7 +1185,7 @@ void Window::mutagenesisDialog()
 void Window::historyDialog()
 {
     const std::vector<std::string> &history = m_doc.sequence().history;
-    Form f = makeForm("Cloning History", "Done");
+    Form f = makeForm("Cloning History", "Done", false);
     adw_dialog_set_content_height(f.dialog, 420);
     g_signal_connect_swapped(f.ok, "clicked", G_CALLBACK(adw_dialog_close), f.dialog);
     GtkWidget *g = addGroup(f, m_doc.sequence().name.c_str());
@@ -1200,6 +1202,51 @@ void Window::historyDialog()
         if (dated)
             adw_action_row_set_subtitle(ADW_ACTION_ROW(row), h.substr(0, 10).c_str());
         adw_preferences_group_add(ADW_PREFERENCES_GROUP(g), row);
+    }
+    adw_dialog_present(f.dialog, m_window);
+}
+
+void Window::mapOptionsDialog()
+{
+    Form f = makeForm("Map Display", "Done", false);
+    g_signal_connect_swapped(f.ok, "clicked", G_CALLBACK(adw_dialog_close), f.dialog);
+    // Each switch carries what it controls: "@enzymes", "@primers" or a feature type.
+    auto addSwitch = [this](GtkWidget *group, const std::string &title, const std::string &key, bool on) {
+        GtkWidget *row = adw_switch_row_new();
+        adw_preferences_row_set_use_markup(ADW_PREFERENCES_ROW(row), FALSE);
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), title.c_str());
+        adw_switch_row_set_active(ADW_SWITCH_ROW(row), on);
+        g_object_set_data_full(G_OBJECT(row), "key", g_strdup(key.c_str()), g_free);
+        g_signal_connect(row, "notify::active", G_CALLBACK((+[](GObject *o, GParamSpec *, gpointer p) {
+                             auto *self = static_cast<Window *>(p);
+                             const std::string k = static_cast<const char *>(g_object_get_data(o, "key"));
+                             const bool active = adw_switch_row_get_active(ADW_SWITCH_ROW(o));
+                             view::MapOptions opt = self->m_map->options();
+                             if (k == "@enzymes")
+                                 opt.enzymes = active;
+                             else if (k == "@primers")
+                                 opt.primers = active;
+                             else if (active)
+                                 opt.hiddenTypes.erase(k);
+                             else
+                                 opt.hiddenTypes.insert(k);
+                             self->m_map->setOptions(opt);
+                         })),
+                         this);
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(group), row);
+    };
+    const view::MapOptions &opt = m_map->options();
+    GtkWidget *g = addGroup(f, "Show on the Map");
+    addSwitch(g, "Enzyme sites", "@enzymes", opt.enzymes);
+    addSwitch(g, "Primers", "@primers", opt.primers);
+    std::map<std::string, int> types;
+    for (const Feature &ft : m_doc.sequence().features)
+        if (view::FeatureStyle::isDrawn(ft))
+            ++types[ft.type];
+    if (!types.empty()) {
+        GtkWidget *tg = addGroup(f, "Feature Types");
+        for (const auto &kv : types)
+            addSwitch(tg, kv.first + " (" + std::to_string(kv.second) + ")", kv.first, !opt.hiddenTypes.count(kv.first));
     }
     adw_dialog_present(f.dialog, m_window);
 }

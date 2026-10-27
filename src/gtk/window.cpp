@@ -149,6 +149,7 @@ void Window::buildUi(GtkApplication *app)
         {"history", &Window::actHistory, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"align", &Window::actAlign, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"orfs", &Window::actOrfs, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"map-options", &Window::actMapOptions, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-fasta", &Window::actExportFasta, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-map", &Window::actExportMap, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"copy", &Window::actCopy, nullptr, nullptr, nullptr, {0, 0, 0}},
@@ -228,6 +229,7 @@ void Window::buildUi(GtkApplication *app)
     g_menu_append(seqSection, "Align Read…", "win.align");
     g_menu_append_section(menu, nullptr, G_MENU_MODEL(seqSection));
     GMenu *viewSection = g_menu_new();
+    g_menu_append(viewSection, "Map Display…", "win.map-options");
     g_menu_append(viewSection, "Show Complement Strand", "win.show-complement");
     GMenu *framesMenu = g_menu_new();
     g_menu_append(framesMenu, "None", "win.frames::0");
@@ -922,7 +924,7 @@ void Window::updateActions()
     enable("undo", m_doc.canUndo());
     enable("redo", m_doc.canRedo());
     for (const char *name : {"save", "save-as", "export-fasta", "export-map", "paste", "select-all",
-                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "choose-enzymes", "primer-by-sequence", "history", "align", "orfs"})
+                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "choose-enzymes", "primer-by-sequence", "history", "align", "orfs", "map-options"})
         enable(name, has);
     enable("cut", sel);
     enable("add-feature", sel);
@@ -1131,6 +1133,11 @@ void Window::actOrfs(GSimpleAction *, GVariant *, gpointer p)
     static_cast<Window *>(p)->orfDialog();
 }
 
+void Window::actMapOptions(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->mapOptionsDialog();
+}
+
 void Window::showOnlyEnzymes(const std::set<std::string> &names, int maxCuts)
 {
     m_doc.showOnlyEnzymes(names, maxCuts);
@@ -1206,7 +1213,7 @@ void Window::exportMap(const std::string &rawPath)
     const double w = std::max(900, gtk_widget_get_width(m_map->widget()));
     const double h = std::max(760, gtk_widget_get_height(m_map->widget()));
     view::PangoTextMeasurer tm;
-    view::MapLayout layout(m_doc.sequence(), m_doc.visibleSites(), view::Theme::light(), tm, w, h);
+    view::MapLayout layout(m_doc.sequence(), m_doc.visibleSites(), view::Theme::light(), tm, w, h, m_map->options());
     view::MapState st;   // exported maps carry no selection
     std::string error;
     if (view::exportScene(layout.render(st), path, &error))

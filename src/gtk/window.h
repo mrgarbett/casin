@@ -79,6 +79,7 @@ private:
     static void actHistory(GSimpleAction *, GVariant *, gpointer self);
     static void actAlign(GSimpleAction *, GVariant *, gpointer self);
     static void actOrfs(GSimpleAction *, GVariant *, gpointer self);
+    static void actMapOptions(GSimpleAction *, GVariant *, gpointer self);
     static gboolean onCloseRequest(GtkWindow *, gpointer self);
     static void actExportFasta(GSimpleAction *, GVariant *, gpointer self);
     static void actExportMap(GSimpleAction *, GVariant *, gpointer self);
@@ -112,6 +113,7 @@ private:
     void historyDialog();
     void alignDialog();
     void orfDialog();
+    void mapOptionsDialog();
     void pasteText(const std::string &text);
 
     Document m_doc;

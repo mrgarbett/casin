@@ -6,6 +6,8 @@
 #include "../core/enzymes.h"
 #include "../core/sequence.h"
 
+#include <set>
+
 namespace oc::view {
 
 struct MapState {
@@ -13,6 +15,13 @@ struct MapState {
     bool hasSelection = false;
     int activeFeature = -1;  // index into Sequence::features
     int activeSite = -1;     // index into the sites passed to the layout
+};
+
+// What the map shows. Hidden feature types are matched on Feature::type.
+struct MapOptions {
+    bool enzymes = true;
+    bool primers = true;
+    std::set<std::string> hiddenTypes;
 };
 
 struct MapHit {
@@ -27,7 +36,7 @@ struct MapHit {
 class MapLayout {
 public:
     MapLayout(const oc::Sequence &seq, const std::vector<CutSite> &sites, const Theme &theme,
-              TextMeasurer &measure, double width, double height);
+              TextMeasurer &measure, double width, double height, MapOptions options = {});
 
     Scene render(const MapState &state) const;
     MapHit hitTest(Point p) const;
@@ -64,6 +73,7 @@ private:
         Color swatch;
     };
 
+    bool shows(const Feature &f) const;
     void layoutCircular(TextMeasurer &tm);
     void layoutLinear(TextMeasurer &tm);
     void buildLabels(TextMeasurer &tm);
@@ -82,6 +92,7 @@ private:
     const oc::Sequence &m_seq;
     const std::vector<CutSite> &m_sites;
     Theme m_theme;
+    MapOptions m_options;
     double m_w, m_h;
     int m_n;
     bool m_circular;

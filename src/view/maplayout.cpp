@@ -53,8 +53,8 @@ std::string formatBp(int n)
 // ---------------------------------------------------------------------------
 
 MapLayout::MapLayout(const oc::Sequence &seq, const std::vector<CutSite> &sites, const Theme &theme,
-                     TextMeasurer &measure, double width, double height)
-    : m_seq(seq), m_sites(sites), m_theme(theme), m_w(width), m_h(height),
+                     TextMeasurer &measure, double width, double height, MapOptions options)
+    : m_seq(seq), m_sites(sites), m_theme(theme), m_options(std::move(options)), m_w(width), m_h(height),
       m_n(seq.length()), m_circular(seq.circular)
 {
     std::map<const Enzyme *, int> counts;
@@ -68,6 +68,11 @@ MapLayout::MapLayout(const oc::Sequence &seq, const std::vector<CutSite> &sites,
         layoutCircular(measure);
     else
         layoutLinear(measure);
+}
+
+bool MapLayout::shows(const Feature &f) const
+{
+    return FeatureStyle::isDrawn(f) && !m_options.hiddenTypes.count(f.type);
 }
 
 Point MapLayout::polar(double angle, double r) const
@@ -164,7 +169,7 @@ void MapLayout::buildLabels(TextMeasurer &tm)
 {
     // One label per distinct cut position.
     std::map<int, std::vector<int>> byPos;
-    for (size_t i = 0; i < m_sites.size(); ++i)
+    for (size_t i = 0; m_options.enzymes && i < m_sites.size(); ++i)
         byPos[m_sites[i].cutTop].push_back(int(i));
     for (auto &kv : byPos) {
         LabelGlyph g;
@@ -205,7 +210,7 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
     // Lanes: longest features first so short ones can stack outside them.
     std::vector<int> order;
     for (size_t i = 0; i < m_seq.features.size(); ++i)
-        if (FeatureStyle::isDrawn(m_seq.features[i]) && !m_seq.features[i].ranges.empty())
+        if (shows(m_seq.features[i]) && !m_seq.features[i].ranges.empty())
             order.push_back(int(i));
     std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
         return m_seq.features[size_t(a)].span(m_n, true).length > m_seq.features[size_t(b)].span(m_n, true).length;
@@ -485,7 +490,7 @@ void MapLayout::layoutLinear(TextMeasurer &tm)
     // Features in lanes below the ticks.
     std::vector<int> order;
     for (size_t i = 0; i < m_seq.features.size(); ++i)
-        if (FeatureStyle::isDrawn(m_seq.features[i]) && !m_seq.features[i].ranges.empty())
+        if (shows(m_seq.features[i]) && !m_seq.features[i].ranges.empty())
             order.push_back(int(i));
     std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
         return m_seq.features[size_t(a)].span(m_n, false).length > m_seq.features[size_t(b)].span(m_n, false).length;
@@ -651,7 +656,7 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
 
     // Primers: thin arrows just outside the feature lanes, pointing 5' to 3'.
     for (const Primer &pr : m_seq.primers) {
-        if (pr.binding.length() <= 0 || pr.binding.end > m_n)
+        if (!m_options.primers || pr.binding.length() <= 0 || pr.binding.end > m_n)
             continue;
         const double r0 = m_featureOuter + 2, r1 = r0 + 4, rm = (r0 + r1) / 2;
         double a0 = angleOfPos(pr.binding.start), a1 = angleOfPos(pr.binding.end);
