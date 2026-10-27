@@ -27,7 +27,7 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 | | Circular and linear maps with features and enzyme sites | done |
 | | Double-strand sequence view with translations | done |
 | | Linked selection, find on both strands, GC and Tm | done |
-| E6 | Primers drawn on the sequence | done on Linux (map pending) |
+| E6 | Primers drawn on the sequence and the circular map | done |
 | E7 | ORF finder and six-frame translation | M4 |
 | X1 | Map display options (feature types, labels, colors) | M4 |
 | X8 | Protein sequence files and properties | M5 |
@@ -41,7 +41,7 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 | E3 | Add, edit and delete features | done on Linux; Mac UI pending |
 | E4 | Reverse complement, set origin, topology, new from pasted text | done on Linux; Mac UI pending |
 | E6 | Add and delete primers | done on Linux; Mac UI pending |
-| X3 | Copy features between sequences | M2 |
+| X3 | Copy and paste keeps features and primers | done on Linux |
 | X9 | Highlight changes against a parent sequence | M5 |
 
 ## Enzymes
@@ -49,7 +49,7 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 | ID | Capability | Status |
 | --- | --- | --- |
 | | Common Type II and Type IIS enzymes from REBASE, cutter filters | done |
-| Z1 | Cuts on both strands, offset cuts, two-cut enzymes | partial (two-cut enzymes missing) |
+| Z1 | Cuts on both strands, offset cuts, two-cut enzymes | done |
 | Z2 | Dam/Dcm methylation sensitivity | planned |
 | Z3 | Saved enzyme sets, supplier filter | planned |
 | X2 | Choose enzymes by criteria (cuts once in a region, spares the insert) | M3 |

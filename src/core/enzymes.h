@@ -9,12 +9,16 @@ namespace oc {
 // recognition site, in the site's own orientation: the top strand is cut
 // after `cutTop` bases and the bottom strand after `cutBottom` bases (both in
 // top-strand coordinates). EcoRI G^AATTC = {1, 5}; PstI CTGCA^G = {5, 1};
-// BsaI GGTCTC(1/5) = {7, 11}.
+// BsaI GGTCTC(1/5) = {7, 11}. Enzymes that cut on both sides of their site
+// have a second pair: BaeI (10/15)ACNNNNGTAYC(12/7) = {-10, -15, 23, 18}.
 struct Enzyme {
     std::string name;
     std::string site;    // IUPAC, uppercase
     int cutTop = 0;
     int cutBottom = 0;
+    int cutTop2 = 0;
+    int cutBottom2 = 0;
+    bool cutsTwice = false;
 
     int siteLength() const { return int(site.size()); }
     bool isPalindromic() const;
@@ -37,7 +41,7 @@ struct CutSite {
 const std::vector<Enzyme> &commonEnzymes();
 const Enzyme *findEnzyme(const std::string &name);
 
-// All cut sites of the given enzymes, sorted by top-strand cut position.
+// All cut sites of the given enzymes (two per match for enzymes that cut twice), sorted by top-strand cut position.
 // Searches the reverse strand for non-palindromic sites, finds sites that
 // span the origin of circular sequences, and drops cuts outside (0, n) on
 // linear ones. The returned pointers refer into `enzymes`.

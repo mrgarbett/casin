@@ -119,14 +119,15 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
 - Reverse complement the whole sequence, set the origin, switch circular/linear, and
   start a new sequence from pasted text (Ctrl+N).
 - Add, edit and delete features (Ctrl+K adds one from the selection). Add and delete
-  primers; primers are drawn on the sequence.
+  primers; primers are drawn on the sequence and the map.
+- Copy and paste keep the features and primers inside the copied bases.
+- Enzymes that cut on both sides of their site (BaeI, BcgI, BsaXI, CspCI).
 - The C API exposes all of this for the Mac app.
 
 ## Next steps
 
-See [docs/PARITY.md](docs/PARITY.md) for the full checklist. Next up: primers on the
-map, copying features with the bases, enzymes that cut twice per site, then
-milestone 3 (digest and virtual gel, restriction-ligation, PCR, Gibson, Golden Gate,
+See [docs/PARITY.md](docs/PARITY.md) for the full checklist. Next up: the Mac editing UI,
+then milestone 3 (digest and virtual gel, restriction-ligation, PCR, Gibson, Golden Gate,
 primer design).
 
 ## Credits and ground rules

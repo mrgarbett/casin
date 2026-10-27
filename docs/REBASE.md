@@ -17,6 +17,10 @@ orientation:
 | EcoRI  | `G^AATTC`       | 1, 5                  |
 | PstI   | `CTGCA^G`       | 5, 1                  |
 | BsaI   | `GGTCTC(1/5)`   | 7, 11                 |
+| BaeI   | `(10/15)ACNNNNGTAYC(12/7)` | -10, -15, then 23, 18 |
+
+Enzymes that cut on both sides of their site (BaeI, BcgI, BsaXI, CspCI) carry a
+second pair; each match gives two cut sites.
 
 This matches the `c1`/`c2` columns of REBASE's EMBOSS export (`emboss_e.###`).
 
@@ -24,7 +28,7 @@ This matches the `c1`/`c2` columns of REBASE's EMBOSS export (`emboss_e.###`).
 
 `scripts/check_enzymes.py` compares every entry with REBASE's EMBOSS data as
 packaged by Biopython (`Bio/Restriction/Restriction_Dictionary.py`, generated from
-`emboss_e`). The last check used REBASE EMBOSS version 404 and found 94 enzymes with
+`emboss_e`). The last check used REBASE EMBOSS version 404 and found 98 enzymes with
 0 mismatches:
 
     pip download biopython --no-deps && unzip biopython-*.whl 'Bio/Restriction/*'

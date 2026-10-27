@@ -301,6 +301,20 @@ static const CutSite *siteOf(const std::vector<CutSite> &sites, const std::strin
 
 static void testEnzymes()
 {
+    {
+        // BaeI cuts on both sides of its site: (10/15)ACNNNNGTAYC(12/7).
+        Sequence two;
+        two.bases = std::string(30, 'G') + "ACAAAAGTATC" + std::string(30, 'G');
+        const Enzyme *bae = findEnzyme("BaeI");
+        CHECK(bae && bae->cutsTwice);
+        std::vector<Enzyme> only{*bae};
+        const std::vector<CutSite> cuts = findSites(two, only);
+        CHECK_EQ(cuts.size(), size_t(2));
+        if (cuts.size() == 2) {
+            CHECK(cuts[0].cutTop == 20 && cuts[0].cutBottom == 15);
+            CHECK(cuts[1].cutTop == 53 && cuts[1].cutBottom == 48);
+        }
+    }
     const auto &all = commonEnzymes();
     CHECK(all.size() >= 60);
     const Enzyme *ecoRI = findEnzyme("EcoRI");
