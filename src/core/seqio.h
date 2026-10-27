@@ -18,7 +18,6 @@ bool writeFile(const std::string &path, const std::string &content, std::string 
 bool parseSequence(const std::string &content, FileFormat format, Sequence *out, std::string *error = nullptr);
 // Uses the file's base name when the sequence has no name.
 bool loadSequenceFile(const std::string &path, Sequence *out, std::string *error = nullptr);
-// GenBank or FASTA only.
 bool saveSequenceFile(const std::string &path, const Sequence &seq, FileFormat format,
                       std::string *error = nullptr);
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Headless tests for openclone_core. Usage: core_tests <samples-dir>
+#include "core/edit.h"
 #include "core/enzymes.h"
 #include "core/fasta.h"
 #include "core/genbank.h"
@@ -475,6 +476,131 @@ static void testSamples(const std::string &dir)
     }
 }
 
+static Feature feat(const char *name, std::initializer_list<Range> ranges, Strand strand = Strand::Forward)
+{
+    Feature f;
+    f.type = "misc_feature";
+    f.name = name;
+    f.strand = strand;
+    f.ranges = ranges;
+    return f;
+}
+
+static void testEditing()
+{
+    // 0123456789
+    // AAAACCCCGG, feature A = [2,6), feature B = [6,8), primer on [4,8)
+    Sequence s;
+    s.bases = "AAAACCCCGG";
+    s.features = {feat("A", {{2, 6}}), feat("B", {{6, 8}})};
+    s.primers = {{"p", "ACCC", {3, 7}, Strand::Forward}};
+
+    Sequence t = s;
+    insertBases(t, 4, "TT");                         // inside A, inside the primer
+    CHECK_EQ(t.bases, std::string("AAAATTCCCCGG"));
+    CHECK(sameRanges(t.features[0].ranges, {{2, 8}}));
+    CHECK(sameRanges(t.features[1].ranges, {{8, 10}}));
+    CHECK(t.primers.empty());
+
+    t = s;
+    insertBases(t, 2, "T");                          // at A's start: A shifts
+    CHECK(sameRanges(t.features[0].ranges, {{3, 7}}));
+    CHECK_EQ(t.primers.size(), size_t(1));
+    CHECK(t.primers[0].binding == Range({4, 8}));
+
+    t = s;
+    deleteBases(t, {5, 2});                          // [5,7): end of A, start of B
+    CHECK_EQ(t.bases, std::string("AAAACCGG"));
+    CHECK(sameRanges(t.features[0].ranges, {{2, 5}}));
+    CHECK(sameRanges(t.features[1].ranges, {{5, 6}}));
+    CHECK(t.primers.empty());
+
+    t = s;
+    deleteBases(t, {6, 2});                          // all of B
+    CHECK_EQ(t.features.size(), size_t(1));
+
+    // A split feature whose gap is deleted becomes one piece.
+    t = s;
+    t.features = {feat("J", {{0, 2}, {4, 6}})};
+    deleteBases(t, {2, 2});
+    CHECK(sameRanges(t.features[0].ranges, {{0, 4}}));
+
+    // Circular: a feature across the origin, stored as two ranges.
+    Sequence c;
+    c.circular = true;
+    c.bases = "ACGTACGTAC";                          // n = 10
+    c.features = {feat("O", {{8, 10}, {0, 2}})};
+    t = c;
+    insertBases(t, 0, "GG");                         // at the origin: grows
+    CHECK(sameRanges(t.features[0].ranges, {{10, 12}, {0, 4}}));
+    t = c;
+    deleteBases(t, {9, 2});                          // wraps: deletes base 9 and base 0
+    CHECK_EQ(t.bases, std::string("CGTACGTA"));
+    CHECK(sameRanges(t.features[0].ranges, {{7, 8}, {0, 1}}));
+    t = c;
+    CHECK_EQ(replaceBases(t, {9, 2}, "TTT"), 8);
+    CHECK_EQ(t.bases, std::string("CGTACGTATTT"));
+
+    t = c;
+    rotateOrigin(t, 8);                              // the feature no longer wraps
+    CHECK_EQ(t.bases, std::string("ACACGTACGT"));
+    CHECK(sameRanges(t.features[0].ranges, {{0, 4}}));
+    t.features = {feat("P", {{1, 3}})};            // a plain feature that will wrap
+    rotateOrigin(t, 2);
+    CHECK(sameRanges(t.features[0].ranges, {{9, 10}, {0, 1}}));
+
+    t = s;
+    reverseComplementSequence(t);
+    CHECK_EQ(t.bases, std::string("CCGGGGTTTT"));
+    CHECK(sameRanges(t.features[0].ranges, {{4, 8}}));
+    CHECK(t.features[0].strand == Strand::Reverse);
+    CHECK(t.primers[0].binding == Range({3, 7}));
+    CHECK(t.primers[0].strand == Strand::Reverse);
+    t = c;
+    reverseComplementSequence(t);
+    CHECK(sameRanges(t.features[0].ranges, {{8, 10}, {0, 2}}));
+}
+
+static void testSnapGeneWriter()
+{
+    Sequence s;
+    s.name = "w";
+    s.description = "A <test> & more";
+    s.circular = true;
+    s.bases = "ATGAAACCCGGGTTTTAGCATGCATG";   // 26
+    Feature cds = feat("orf & co", {{0, 18}});
+    cds.type = "CDS";
+    cds.color = "#3366cc";
+    cds.qualifiers = {{"codon_start", "1"}, {"note", "first"}, {"note", "x < y"}};
+    s.features = {cds, feat("wrap", {{22, 26}, {0, 3}}, Strand::Reverse), feat("plain", {{5, 9}}, Strand::None)};
+    s.primers = {{"fwd", "ATGAAACCC", {0, 9}, Strand::Forward}, {"rev", "CATGCATGC", {17, 26}, Strand::Reverse}};
+
+    const std::string data = writeSnapGene(s);
+    CHECK(looksLikeSnapGene(data));
+    Sequence r;
+    std::string err;
+    CHECK(readSnapGene(data, &r, &err));
+    CHECK_EQ(r.bases, s.bases);
+    CHECK(r.circular);
+    CHECK_EQ(r.description, s.description);
+    CHECK_EQ(r.features.size(), size_t(3));
+    if (r.features.size() == 3) {
+        CHECK_EQ(r.features[0].name, std::string("orf & co"));
+        CHECK_EQ(r.features[0].type, std::string("CDS"));
+        CHECK_EQ(r.features[0].color, std::string("#3366cc"));
+        CHECK(r.features[0].qualifiers == cds.qualifiers);
+        CHECK(sameRanges(r.features[1].ranges, {{22, 26}, {0, 3}}));
+        CHECK(r.features[1].strand == Strand::Reverse);
+        CHECK(r.features[2].strand == Strand::None);
+    }
+    CHECK_EQ(r.primers.size(), size_t(2));
+    if (r.primers.size() == 2) {
+        CHECK(r.primers[1].binding == Range({17, 26}));
+        CHECK(r.primers[1].strand == Strand::Reverse);
+        CHECK_EQ(r.primers[0].bases, std::string("ATGAAACCC"));
+    }
+}
+
 int main(int argc, char **argv)
 {
     testBasics();
@@ -484,6 +610,8 @@ int main(int argc, char **argv)
     testEnzymes();
     testTm();
     testFastaAndIO();
+    testEditing();
+    testSnapGeneWriter();
     if (argc > 1)
         testSamples(argv[1]);
     else

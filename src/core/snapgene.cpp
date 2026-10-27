@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "snapgene.h"
+#include "edit.h"
 #include "xml.h"
 
 #include <algorithm>
@@ -46,19 +47,6 @@ bool parsePair(const std::string &s, int *a, int *b)
     return true;
 }
 
-// Orders pieces so the feature reads in top-strand order starting just after
-// its largest uncovered gap (so origin-crossing pieces come out end-then-start).
-void sortTopStrand(std::vector<Range> &ranges, int n, bool circular)
-{
-    Feature tmp;
-    tmp.ranges = ranges;
-    const Span s = tmp.span(n, circular);
-    std::sort(ranges.begin(), ranges.end(), [&](const Range &x, const Range &y) {
-        auto key = [&](const Range &r) { return n > 0 ? ((r.start - s.start) % n + n) % n : r.start; };
-        return key(x) < key(y);
-    });
-}
-
 void parseFeatures(const std::string &xmlText, Sequence &seq)
 {
     auto root = xml::parse(xmlText);
@@ -87,7 +75,7 @@ void parseFeatures(const std::string &xmlText, Sequence &seq)
         }
         if (f.ranges.empty())
             continue;
-        sortTopStrand(f.ranges, n, seq.circular);
+        sortRangesTopStrand(f.ranges, n, seq.circular);
         for (const xml::Element *q : fe->childrenNamed("Q")) {
             const std::string key = q->attr("name");
             if (key.empty())
@@ -144,6 +132,98 @@ void parseNotes(const std::string &xmlText, Sequence &seq)
         return;
     if (const xml::Element *d = root->child("Description"))
         seq.description = xml::stripHtml(d->text);
+}
+
+void putU32BE(std::string &out, uint32_t v)
+{
+    out.push_back(char((v >> 24) & 0xFF));
+    out.push_back(char((v >> 16) & 0xFF));
+    out.push_back(char((v >> 8) & 0xFF));
+    out.push_back(char(v & 0xFF));
+}
+
+void putPacket(std::string &out, uint8_t type, const std::string &payload)
+{
+    out.push_back(char(type));
+    putU32BE(out, uint32_t(payload.size()));
+    out += payload;
+}
+
+std::string escapeXml(const std::string &s)
+{
+    std::string out;
+    out.reserve(s.size());
+    for (char c : s) {
+        switch (c) {
+        case '&': out += "&amp;"; break;
+        case '<': out += "&lt;"; break;
+        case '>': out += "&gt;"; break;
+        case '"': out += "&quot;"; break;
+        default: out.push_back(c);
+        }
+    }
+    return out;
+}
+
+bool isInteger(const std::string &s)
+{
+    if (s.empty() || s.size() > 9)
+        return false;
+    return std::all_of(s.begin(), s.end(), [](char c) { return c >= '0' && c <= '9'; });
+}
+
+std::string featuresXml(const Sequence &seq)
+{
+    const int n = seq.length();
+    std::string x = "<Features nextValidID=\"" + std::to_string(seq.features.size()) + "\">";
+    int id = 0;
+    for (const Feature &f : seq.features) {
+        x += "<Feature recentID=\"" + std::to_string(id++) + "\" name=\"" + escapeXml(f.name) + "\"";
+        if (f.strand != Strand::None)
+            x += std::string(" directionality=\"") + (f.strand == Strand::Forward ? "1" : "2") + "\"";
+        x += " type=\"" + escapeXml(f.type) + "\">";
+        // Pieces that meet at the origin become one wrapping segment ("a-b", a > b).
+        for (size_t i = 0; i < f.ranges.size(); ++i) {
+            const Range &r = f.ranges[i];
+            int a = r.start + 1, b = r.end;
+            if (seq.circular && r.end == n && i + 1 < f.ranges.size() && f.ranges[i + 1].start == 0)
+                b = f.ranges[++i].end;
+            x += "<Segment range=\"" + std::to_string(a) + "-" + std::to_string(b) + "\"";
+            if (!f.color.empty())
+                x += " color=\"" + escapeXml(f.color) + "\"";
+            x += " type=\"standard\"/>";
+        }
+        // Repeated keys go into one <Q> with several values. Text values are
+        // HTML inside the XML, so they are escaped twice.
+        std::vector<std::string> keys;
+        for (const Qualifier &q : f.qualifiers)
+            if (std::find(keys.begin(), keys.end(), q.key) == keys.end())
+                keys.push_back(q.key);
+        for (const std::string &key : keys) {
+            x += "<Q name=\"" + escapeXml(key) + "\">";
+            for (const Qualifier &q : f.qualifiers)
+                if (q.key == key)
+                    x += isInteger(q.value) ? "<V int=\"" + q.value + "\"/>" : "<V text=\"" + escapeXml(escapeXml(q.value)) + "\"/>";
+            x += "</Q>";
+        }
+        x += "</Feature>";
+    }
+    return x + "</Features>";
+}
+
+std::string primersXml(const Sequence &seq)
+{
+    std::string x = "<Primers nextValidID=\"" + std::to_string(seq.primers.size()) + "\">";
+    int id = 0;
+    for (const Primer &p : seq.primers) {
+        x += "<Primer recentID=\"" + std::to_string(id++) + "\" name=\"" + escapeXml(p.name) + "\" sequence=\""
+           + escapeXml(p.bases) + "\">";
+        if (p.binding.length() > 0)
+            x += "<BindingSite location=\"" + std::to_string(p.binding.start) + "-" + std::to_string(p.binding.end - 1)
+               + "\" boundStrand=\"" + (p.strand == Strand::Reverse ? "1" : "0") + "\"/>";
+        x += "</Primer>";
+    }
+    return x + "</Primers>";
 }
 
 } // namespace
@@ -213,6 +293,27 @@ bool readSnapGene(const std::string &data, Sequence *out, std::string *error)
         parseNotes(notesXml, seq);
     *out = seq;
     return true;
+}
+
+std::string writeSnapGene(const Sequence &seq)
+{
+    std::string out;
+    // Header: magic, file type 1 (DNA), then export and import format versions.
+    std::string header = "SnapGene";
+    for (uint16_t v : {uint16_t(1), uint16_t(15), uint16_t(19)}) {
+        header.push_back(char(v >> 8));
+        header.push_back(char(v & 0xFF));
+    }
+    putPacket(out, kHeader, header);
+    putPacket(out, kDna, std::string(1, char(seq.circular ? 0x01 : 0x00)) + seq.bases);
+    putPacket(out, kPrimers, primersXml(seq));
+    std::string notes = "<Notes><Type>Synthetic</Type>";
+    if (!seq.description.empty())
+        notes += "<Description>" + escapeXml("<html><body>" + escapeXml(seq.description) + "</body></html>")
+               + "</Description>";
+    putPacket(out, kNotes, notes + "</Notes>");
+    putPacket(out, kFeatures, featuresXml(seq));
+    return out;
 }
 
 } // namespace oc

@@ -60,14 +60,66 @@ public:
     // 1-based match number, 0 if nothing matched, -1 if the query isn't DNA.
     int findNext(const std::string &query, int *count = nullptr, Strand *strand = nullptr);
 
+    // ---- editing ----
+    // Every change to the sequence goes through these. Each one is a step on
+    // the undo stack; the whole sequence is kept per step, which is cheap at
+    // plasmid sizes.
+    bool canUndo() const { return !m_undo.empty(); }
+    bool canRedo() const { return !m_redo.empty(); }
+    std::string undoLabel() const { return m_undo.empty() ? std::string() : m_undo.back().label; }
+    std::string redoLabel() const { return m_redo.empty() ? std::string() : m_redo.back().label; }
+    void undo();
+    void redo();
+    // True when the sequence differs from the last load or save.
+    bool isModified() const { return m_state != m_savedState; }
+    void markSaved();
+
+    // Replaces the selection (or inserts at the caret) with `text`, cleaned to
+    // IUPAC bases. Returns false when nothing in `text` is DNA.
+    bool typeBases(const std::string &text);
+    void deleteSelection();
+    void deleteBackward();   // Backspace: the selection, or the base before the caret
+    void deleteForward();    // Delete: the selection, or the base after the caret
+    void reverseComplementAll();
+    // Circular only: makes the selection start (or caret) base 1.
+    void setOriginAtSelection();
+    void setCircular(bool circular);
+    void rename(const std::string &name);
+    // Feature edits. addFeature returns the new feature's index.
+    int addFeature(const Feature &f);
+    void replaceFeature(int index, const Feature &f);
+    void removeFeature(int index);
+    // Adds a primer that binds the selection on the given strand.
+    int addPrimerFromSelection(const std::string &name, Strand strand);
+    void removePrimer(int index);
+
     // Text for a status bar: length, topology, selection, GC%, Tm.
     std::string statusText() const;
 
     void onSequenceChanged(Listener l) { m_seqListeners.push_back(std::move(l)); }
     void onSelectionChanged(Listener l) { m_selListeners.push_back(std::move(l)); }
     void onEnzymesChanged(Listener l) { m_enzListeners.push_back(std::move(l)); }
+    // Undo/redo availability or the modified flag changed.
+    void onHistoryChanged(Listener l) { m_histListeners.push_back(std::move(l)); }
+    // True while the current sequence change came from an edit, not a load.
+    bool isEditing() const { return m_inEdit; }
 
 private:
+    struct Step {
+        std::string label;
+        Sequence seq;
+        Span selection;
+        bool hasSelection;
+        int activeFeature;
+        unsigned state;
+    };
+    // Snapshots for undo, runs `change`, then selects `after` (a caret when
+    // its length is 0) and notifies. `change` returns false to cancel.
+    void edit(const std::string &label, const std::function<bool(Sequence &)> &change,
+              const std::function<Span()> &after);
+    Step snapshot(const std::string &label) const;
+    void restore(Step &step);
+    void sequenceEdited();
     void recomputeSites();
     void refilter();
     static void emit(const std::vector<Listener> &ls);
@@ -84,7 +136,10 @@ private:
     bool m_hasSelection = false;
     int m_activeFeature = -1;
     int m_activeSite = -1;
-    std::vector<Listener> m_seqListeners, m_selListeners, m_enzListeners;
+    std::vector<Step> m_undo, m_redo;
+    unsigned m_state = 0, m_savedState = 0, m_nextState = 0;
+    bool m_inEdit = false;
+    std::vector<Listener> m_seqListeners, m_selListeners, m_enzListeners, m_histListeners;
 };
 
 } // namespace oc

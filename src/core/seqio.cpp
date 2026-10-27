@@ -126,9 +126,10 @@ bool saveSequenceFile(const std::string &path, const Sequence &seq, FileFormat f
     switch (format) {
     case FileFormat::GenBank: return writeFile(path, writeGenBank(seq), error);
     case FileFormat::Fasta: return writeFile(path, writeFasta(seq), error);
+    case FileFormat::SnapGene: return writeFile(path, writeSnapGene(seq), error);
     default:
         if (error)
-            *error = "can only save GenBank or FASTA";
+            *error = "unknown file format";
         return false;
     }
 }

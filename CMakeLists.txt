@@ -22,6 +22,7 @@ set(OPENCLONE_FRONTEND ${_default_frontend} CACHE STRING "gtk, appkit or none")
 # ---- core: plain C++17, no dependencies ---------------------------------------
 add_library(openclone_core STATIC
     src/core/sequence.cpp
+    src/core/edit.cpp
     src/core/genbank.cpp
     src/core/fasta.cpp
     src/core/xml.cpp

@@ -3,6 +3,7 @@
 // Usage: view_tests <samples-dir>
 #include "core/enzymes.h"
 #include "core/seqio.h"
+#include "view/document.h"
 #include "view/maplayout.h"
 #include "view/seqlayout.h"
 
@@ -21,6 +22,57 @@ static int g_checks = 0;
             std::fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__, __LINE__, #cond); \
         }                                                                           \
     } while (0)
+
+#define CHECK_EQ(a, b) CHECK((a) == (b))
+
+static void testUndo(const Sequence &seq)
+{
+    Document doc;
+    int histories = 0;
+    doc.onHistoryChanged([&] { ++histories; });
+    doc.setSequence(seq);
+    const std::string original = doc.sequence().bases;
+    const size_t features = doc.sequence().features.size();
+    CHECK(!doc.isModified() && !doc.canUndo());
+
+    doc.setSelection({10, 0});
+    CHECK(doc.typeBases("gg aa"));
+    CHECK(!doc.typeBases("123"));
+    CHECK_EQ(doc.sequence().length(), int(original.size()) + 4);
+    CHECK(doc.selection().start == 14 && doc.selection().length == 0);
+    CHECK(doc.isModified() && doc.canUndo());
+    CHECK(doc.undoLabel() == "Insert Bases");
+
+    doc.setSelection({0, 5});
+    doc.deleteBackward();
+    CHECK_EQ(doc.sequence().length(), int(original.size()) - 1);
+    doc.reverseComplementAll();
+    doc.undo();
+    doc.undo();
+    CHECK_EQ(doc.sequence().length(), int(original.size()) + 4);
+    doc.undo();
+    CHECK(doc.sequence().bases == original);
+    CHECK(!doc.isModified() && doc.canRedo());
+    doc.redo();
+    CHECK(doc.isModified());
+    doc.markSaved();
+    CHECK(!doc.isModified());
+    doc.undo();
+    CHECK(doc.isModified());
+
+    Feature f;
+    f.type = "misc_feature";
+    f.name = "new";
+    f.ranges = {{0, 30}};
+    CHECK_EQ(doc.addFeature(f), int(features));
+    CHECK_EQ(doc.activeFeature(), int(features));
+    doc.removeFeature(0);
+    CHECK_EQ(doc.sequence().features.size(), features);
+    doc.setSelection({100, 20});
+    CHECK_EQ(doc.addPrimerFromSelection("", Strand::Reverse), int(seq.primers.size()));
+    CHECK(doc.sequence().primers.back().bases == reverseComplement(doc.sequence().bases.substr(100, 20)));
+    CHECK(histories > 8);
+}
 
 int main(int argc, char **argv)
 {
@@ -81,6 +133,7 @@ int main(int argc, char **argv)
     CHECK(sl.positionAt({300, sl.lineTopFor(sl.basesPerLine()) + 5}) > sl.basesPerLine());
     Scene ss = sl.render(0, 600, {});
     CHECK(!ss.items.empty());
+    testUndo(seq);
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }
