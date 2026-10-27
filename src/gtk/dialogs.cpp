@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Editing dialogs: feature, primer and new sequence.
+// Editing dialogs: feature, primer, PCR, restriction cloning and new sequence.
 #include "window.h"
 
+#include "core/cloning.h"
 #include "core/edit.h"
 #include "core/primercheck.h"
 #include "view/maplayout.h"   // formatBp
 #include "view/style.h"
 
 #include <algorithm>
+#include <climits>
+#include <map>
 
 namespace oc::gtk {
 
@@ -368,6 +371,251 @@ void Window::pcrDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<PcrForm *>(p); });
+    adw_dialog_present(f.dialog, m_window);
+}
+
+namespace {
+struct CloneForm {
+    Window *window;
+    Sequence vector;
+    std::vector<Sequence> sources;               // open documents that can give the insert
+    std::vector<CutSite> vectorSites, insertSites;
+    std::vector<std::string> vectorEnzymes, insertEnzymes;   // combo contents
+    GtkWidget *vLeft, *vRight, *source, *iLeft, *iRight, *orientation, *result;
+    GtkWidget *okButton;
+    AdwDialog *dialog;
+    Sequence product;
+    bool ok = false;
+    bool rebuilding = false;
+};
+
+std::vector<CutSite> sitesNamed(const std::vector<CutSite> &all, const std::string &name)
+{
+    std::vector<CutSite> out;
+    for (const CutSite &c : all)
+        if (c.enzyme && c.enzyme->name == name)
+            out.push_back(c);
+    return out;
+}
+
+// Enzymes cutting `seq` between 1 and `maxCuts` times, sorted by name.
+std::vector<std::string> cutters(const std::vector<CutSite> &sites, int maxCuts)
+{
+    std::map<std::string, int> count;
+    for (const CutSite &c : sites)
+        if (c.enzyme)
+            ++count[c.enzyme->name];
+    std::vector<std::string> out;
+    for (const auto &[name, n] : count)
+        if (n <= maxCuts)
+            out.push_back(name);
+    std::sort(out.begin(), out.end(), [](const std::string &a, const std::string &b) { return toLower(a) < toLower(b); });
+    return out;
+}
+
+void setComboItems(GtkWidget *row, const std::vector<std::string> &items, const std::string &prefer, guint fallback)
+{
+    std::vector<const char *> v;
+    for (const std::string &s : items)
+        v.push_back(s.c_str());
+    v.push_back(nullptr);
+    GtkStringList *list = gtk_string_list_new(v.data());
+    adw_combo_row_set_model(ADW_COMBO_ROW(row), G_LIST_MODEL(list));
+    g_object_unref(list);
+    auto it = std::find(items.begin(), items.end(), prefer);
+    adw_combo_row_set_selected(ADW_COMBO_ROW(row), it != items.end() ? guint(it - items.begin())
+                                                                     : std::min(fallback, guint(items.size() - 1)));
+}
+
+std::string endName(const FragmentEnd &e)
+{
+    if (e.overhang == 0)
+        return e.enzyme + " (blunt)";
+    return e.enzyme + (e.overhang > 0 ? " (5′ " : " (3′ ") + e.bases + ")";
+}
+
+// The piece of `seq` cut at `left` and `right`; one enzyme used on both
+// sides takes its two sites (or opens a circle at its one site).
+bool cloneSide(const Sequence &seq, const std::vector<CutSite> &all, const std::string &left, const std::string &right,
+               bool keepLarger, ClonePiece *out, std::string *err)
+{
+    const std::vector<CutSite> a = sitesNamed(all, left), b = sitesNamed(all, right);
+    if (a.empty() || b.empty()) {
+        *err = "pick enzymes that cut";
+        return false;
+    }
+    if (left == right) {
+        if (a.size() == 1)
+            return pieceBetween(seq, a[0], a[0], keepLarger, out, err);
+        if (a.size() == 2)
+            return pieceBetween(seq, a[0], a[1], keepLarger, out, err);
+        *err = left + " cuts " + std::to_string(a.size()) + " times";
+        return false;
+    }
+    if (a.size() != 1 || b.size() != 1) {
+        *err = (a.size() != 1 ? left : right) + " must cut only once";
+        return false;
+    }
+    return pieceBetween(seq, a[0], b[0], keepLarger, out, err);
+}
+
+void updateClone(CloneForm *st)
+{
+    if (st->rebuilding)
+        return;
+    st->ok = false;
+    std::string err;
+    ClonePiece backbone, insert;
+    const guint src = adw_combo_row_get_selected(ADW_COMBO_ROW(st->source));
+    const Sequence &donor = st->sources[std::min<size_t>(src, st->sources.size() - 1)];
+    std::string text;
+    if (!cloneSide(st->vector, st->vectorSites, comboText(st->vLeft), comboText(st->vRight), true, &backbone, &err)) {
+        text = "Vector: " + err;
+    } else if (!cloneSide(donor, st->insertSites, comboText(st->iLeft), comboText(st->iRight), false, &insert,
+                                 &err)) {
+        text = "Insert: " + err;
+    } else {
+        const bool reverse = adw_combo_row_get_selected(ADW_COMBO_ROW(st->orientation)) == 1;
+        const ClonePiece placed = reverse ? flipPiece(insert) : insert;
+        std::string otherErr;
+        Sequence other;
+        if (ligateCircular({backbone, placed}, &st->product, &err)) {
+            st->ok = true;
+            st->product.name = st->vector.name + "-" + donor.name;
+            // Keep the vector's numbering when its origin survived the cut.
+            if (backbone.originOffset() > 0)
+                rotateOrigin(st->product, backbone.originOffset());
+            const bool both = ligateCircular({backbone, reverse ? insert : flipPiece(insert)}, &other, &otherErr);
+            text = view::formatBp(st->product.length()) + " product: " + view::formatBp(backbone.length())
+                 + " backbone + " + view::formatBp(insert.length()) + " insert"
+                 + (both ? "\nThe insert fits both ways, so screen for orientation" : "\nDirectional: only this orientation ligates");
+        } else if (ligateCircular({backbone, reverse ? insert : flipPiece(insert)}, &other, &otherErr)) {
+            text = "Ligates only in the other orientation";
+        } else {
+            text = "Ends don't match: " + err;
+        }
+        text = "Vector ends " + endName(backbone.right) + " and " + endName(backbone.left) + "\n" + text;
+    }
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->result), text.c_str());
+    gtk_widget_set_sensitive(st->okButton, st->ok);
+}
+
+void sourceChanged(CloneForm *st)
+{
+    const guint src = adw_combo_row_get_selected(ADW_COMBO_ROW(st->source));
+    const Sequence &donor = st->sources[std::min<size_t>(src, st->sources.size() - 1)];
+    st->insertSites = findSites(donor, commonEnzymes());
+    st->insertEnzymes = cutters(st->insertSites, 2);
+    if (st->insertEnzymes.empty())
+        st->insertEnzymes.push_back("(none)");
+    st->rebuilding = true;
+    setComboItems(st->iLeft, st->insertEnzymes, comboText(st->vLeft), 0);
+    setComboItems(st->iRight, st->insertEnzymes, comboText(st->vRight), 1);
+    st->rebuilding = false;
+    updateClone(st);
+}
+} // namespace
+
+void Window::cloningDialog()
+{
+    if (m_doc.isEmpty())
+        return;
+    if (!m_doc.sequence().circular) {
+        toast("Restriction cloning needs a circular vector");
+        return;
+    }
+    auto *st = new CloneForm{};
+    st->window = this;
+    st->vector = m_doc.sequence();
+    st->vectorSites = findSites(st->vector, commonEnzymes());
+    st->vectorEnzymes = cutters(st->vectorSites, 1);
+    if (st->vectorEnzymes.empty()) {
+        toast("No enzyme cuts this vector once");
+        delete st;
+        return;
+    }
+    // Insert sources: other windows first, then this one.
+    std::vector<std::string> sourceNames;
+    GtkApplication *app = gtk_window_get_application(gtkWindow());
+    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
+        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+        if (!w || w == this || w->isEmpty())
+            continue;
+        st->sources.push_back(w->document().sequence());
+        sourceNames.push_back(st->sources.back().name);
+    }
+    st->sources.push_back(st->vector);
+    sourceNames.push_back(st->vector.name + " (this window)");
+
+    Form f = makeForm("Restriction Cloning", "Open Product");
+    st->dialog = f.dialog;
+    st->okButton = f.ok;
+    GtkWidget *gv = addGroup(f, "Vector");
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(gv),
+                                          (st->vector.name + ", cut with enzymes that cut once").c_str());
+    st->vLeft = comboRow(gv, "First enzyme", nullptr, 0);
+    st->vRight = comboRow(gv, "Second enzyme", nullptr, 0);
+    // Start from the outermost enzymes that cut both the vector and the
+    // first insert once: the usual way to lift an insert out with its flanks.
+    std::string first, second;
+    {
+        const std::vector<CutSite> donorSites = findSites(st->sources.front(), commonEnzymes());
+        const std::vector<std::string> once = cutters(donorSites, 1);
+        int lo = INT_MAX, hi = INT_MIN;
+        for (const CutSite &c : donorSites) {
+            const std::string &name = c.enzyme->name;
+            if (!std::binary_search(once.begin(), once.end(), name, [](const std::string &a, const std::string &b) {
+                    return toLower(a) < toLower(b);
+                }) || std::find(st->vectorEnzymes.begin(), st->vectorEnzymes.end(), name) == st->vectorEnzymes.end())
+                continue;
+            if (c.cutTop < lo) {
+                lo = c.cutTop;
+                first = name;
+            }
+            if (c.cutTop > hi) {
+                hi = c.cutTop;
+                second = name;
+            }
+        }
+    }
+    setComboItems(st->vLeft, st->vectorEnzymes, first, 0);
+    setComboItems(st->vRight, st->vectorEnzymes, second, 1);
+    GtkWidget *gi = addGroup(f, "Insert");
+    std::vector<const char *> sn;
+    for (const std::string &s : sourceNames)
+        sn.push_back(s.c_str());
+    sn.push_back(nullptr);
+    st->source = comboRow(gi, "From", sn.data(), 0);
+    st->iLeft = comboRow(gi, "First enzyme", nullptr, 0);
+    st->iRight = comboRow(gi, "Second enzyme", nullptr, 0);
+    static const char *const orient[] = {"Forward", "Reverse", nullptr};
+    st->orientation = comboRow(gi, "Orientation", orient, 0);
+    GtkWidget *gr = addGroup(f);
+    st->result = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->result), "Result");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(gr), st->result);
+
+    auto changed = +[](GObject *, GParamSpec *, gpointer p) { updateClone(static_cast<CloneForm *>(p)); };
+    for (GtkWidget *w : {st->vLeft, st->vRight, st->iLeft, st->iRight, st->orientation})
+        g_signal_connect(w, "notify::selected", G_CALLBACK(changed), st);
+    g_signal_connect(st->source, "notify::selected", G_CALLBACK((+[](GObject *, GParamSpec *, gpointer p) {
+                         sourceChanged(static_cast<CloneForm *>(p));
+                     })),
+                     st);
+    sourceChanged(st);
+    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<CloneForm *>(p);
+                         if (!st->ok)
+                             return;
+                         GtkApplication *app = gtk_window_get_application(st->window->gtkWindow());
+                         Window *w = Window::create(app);
+                         w->document().setSequence(st->product);
+                         w->document().markUnsaved();
+                         w->present();
+                         adw_dialog_close(st->dialog);
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<CloneForm *>(p); });
     adw_dialog_present(f.dialog, m_window);
 }
 

@@ -126,14 +126,17 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   fragments with their ends and overhangs, next to a virtual gel with a ladder and
   the uncut plasmid.
 - PCR Product: pick a forward and a reverse primer; the product (with 5′ tails and the
-  features it covers) opens in a new window.
-- The C API exposes all of this for the Mac app.
+  features it covers) opens in a new window. The Primers tab flags primer problems
+  (GC, Tm, 3′ clamp, runs, hairpins, dimers).
+- Restriction Cloning: cut the vector with one or two enzymes, take an insert from any
+  open window, check that the ends ligate in the chosen orientation and open the
+  product (vector numbering kept).
+- The C API exposes the editing for the Mac app; digest, PCR and cloning are not in it yet.
 
 ## Next steps
 
 See [docs/PARITY.md](docs/PARITY.md) for the full checklist. Next up: the Mac editing UI,
-then milestone 3 (digest and virtual gel, restriction-ligation, PCR, Gibson, Golden Gate,
-primer design).
+then the rest of milestone 3 (Gibson, Golden Gate, primer design).
 
 ## Credits and ground rules
 

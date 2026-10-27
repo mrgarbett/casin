@@ -131,6 +131,7 @@ void Window::buildUi(GtkApplication *app)
         {"add-primer", &Window::actAddPrimer, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"digest", &Window::actDigest, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"pcr", &Window::actPcr, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"clone", &Window::actClone, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-fasta", &Window::actExportFasta, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-map", &Window::actExportMap, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"copy", &Window::actCopy, nullptr, nullptr, nullptr, {0, 0, 0}},
@@ -186,6 +187,7 @@ void Window::buildUi(GtkApplication *app)
     g_menu_append(seqSection, "Circular", "win.circular");
     g_menu_append(seqSection, "Digest and Gel…", "win.digest");
     g_menu_append(seqSection, "PCR Product…", "win.pcr");
+    g_menu_append(seqSection, "Restriction Cloning…", "win.clone");
     GMenu *featureMenu = g_menu_new();
     g_menu_append(featureMenu, "Add Feature…", "win.add-feature");
     g_menu_append(featureMenu, "Edit Feature…", "win.edit-feature");
@@ -783,7 +785,7 @@ void Window::updateActions()
     enable("undo", m_doc.canUndo());
     enable("redo", m_doc.canRedo());
     for (const char *name : {"save", "save-as", "export-fasta", "export-map", "paste", "select-all",
-                             "reverse-complement", "circular", "digest", "pcr"})
+                             "reverse-complement", "circular", "digest", "pcr", "clone"})
         enable(name, has);
     enable("cut", sel);
     enable("add-feature", sel);
@@ -937,6 +939,11 @@ void Window::actDigest(GSimpleAction *, GVariant *, gpointer p)
 void Window::actPcr(GSimpleAction *, GVariant *, gpointer p)
 {
     static_cast<Window *>(p)->pcrDialog();
+}
+
+void Window::actClone(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->cloningDialog();
 }
 
 void Window::actExportFasta(GSimpleAction *, GVariant *, gpointer p)

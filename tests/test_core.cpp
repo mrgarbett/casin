@@ -750,6 +750,8 @@ static void testCloning()
         hasOri = hasOri || f.name == "ori";
     }
     CHECK(hasGene && hasOri);
+    CHECK_EQ(backbone.originOffset(), 76 - 41);   // the vector's base 1 sits 35 bases into the backbone
+    CHECK_EQ(insert.originOffset(), -1);
     CHECK(!ligateCircular({backbone, flipPiece(insert)}, &product, &err));
     CHECK(!err.empty());
     // A blunt piece closes on itself; a sticky piece with mismatched ends doesn't.
@@ -766,6 +768,11 @@ static void testCloning()
         CHECK(ligateCircular({flipPiece(p)}, &product));
     }
     CHECK(!ligateCircular({insert}, &product));
+    // pieceBetween picks the backbone and the insert without caring about order.
+    ClonePiece bb, in;
+    CHECK(pieceBetween(v, vEco, vBam, true, &bb) && bb.length() == backbone.length());
+    CHECK(pieceBetween(ins, iBam, iEco, false, &in) && in.length() == insert.length());
+    CHECK(pieceBetween(v, vEco, vEco, true, &bb) && bb.length() == v.length());   // linearized
 }
 
 int main(int argc, char **argv)

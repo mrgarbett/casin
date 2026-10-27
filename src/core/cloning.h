@@ -23,7 +23,11 @@ struct ClonePiece {
     Sequence top;
     Sequence bottom;
     FragmentEnd left, right;
+    int sourceStart = 0;    // where `top` starts in the sequence it was cut from, -1 once flipped
+    int sourceLength = 0;   // length of that sequence
     int length() const { return top.length(); }
+    // Offset of the source's origin inside `top`, or -1 when the piece doesn't span it.
+    int originOffset() const;
 };
 
 // The piece between two cuts, reading left to right on the top strand. On a
@@ -32,6 +36,12 @@ struct ClonePiece {
 bool cutPiece(const Sequence &seq, const CutSite &left, const CutSite &right, ClonePiece *out,
               std::string *error = nullptr);
 ClonePiece flipPiece(const ClonePiece &p);
+
+// What stays after cutting at two sites and dropping the other part: on a
+// circular sequence the larger (`keepLarger`) or smaller arc, on a linear one
+// the piece between the sites. Two cuts at one place open a circle there.
+bool pieceBetween(const Sequence &seq, const CutSite &a, const CutSite &b, bool keepLarger, ClonePiece *out,
+                  std::string *error = nullptr);
 
 // Sticky ends need the same overhang type and bases; blunt joins blunt.
 bool endsLigate(const FragmentEnd &right, const FragmentEnd &left);

@@ -31,6 +31,16 @@ FragmentEnd endAt(const Sequence &seq, const CutSite &c)
 
 } // namespace
 
+int ClonePiece::originOffset() const
+{
+    if (sourceStart < 0 || sourceLength <= 0)
+        return -1;
+    if (sourceStart == 0)
+        return 0;
+    const int o = sourceLength - sourceStart;
+    return o < length() ? o : -1;
+}
+
 bool cutPiece(const Sequence &seq, const CutSite &left, const CutSite &right, ClonePiece *out, std::string *error)
 {
     auto fail = [error](const char *msg) {
@@ -57,6 +67,8 @@ bool cutPiece(const Sequence &seq, const CutSite &left, const CutSite &right, Cl
     reverseComplementSequence(p.bottom);
     p.left = endAt(seq, left);
     p.right = endAt(seq, right);
+    p.sourceStart = ((left.cutTop % n) + n) % n;
+    p.sourceLength = n;
     *out = p;
     return true;
 }
@@ -64,11 +76,39 @@ bool cutPiece(const Sequence &seq, const CutSite &left, const CutSite &right, Cl
 ClonePiece flipPiece(const ClonePiece &p)
 {
     ClonePiece f;
+    f.sourceLength = p.sourceLength;
+    f.sourceStart = -1;   // reversed: no longer maps onto the source
     f.top = p.bottom;
     f.bottom = p.top;
     f.left = {p.right.enzyme, p.right.overhang, reverseComplement(p.right.bases)};
     f.right = {p.left.enzyme, p.left.overhang, reverseComplement(p.left.bases)};
     return f;
+}
+
+bool pieceBetween(const Sequence &seq, const CutSite &a, const CutSite &b, bool keepLarger, ClonePiece *out,
+                  std::string *error)
+{
+    if (a.cutTop == b.cutTop) {
+        if (seq.circular)
+            return cutPiece(seq, a, a, out, error);
+        if (error)
+            *error = "a linear sequence needs two different cuts";
+        return false;
+    }
+    const CutSite &first = a.cutTop < b.cutTop ? a : b;
+    const CutSite &second = a.cutTop < b.cutTop ? b : a;
+    ClonePiece inner;
+    if (!cutPiece(seq, first, second, &inner, error))
+        return false;
+    if (!seq.circular) {
+        *out = inner;
+        return true;
+    }
+    ClonePiece outer;
+    if (!cutPiece(seq, second, first, &outer, error))
+        return false;
+    *out = (outer.length() > inner.length()) == keepLarger ? outer : inner;
+    return true;
 }
 
 bool endsLigate(const FragmentEnd &right, const FragmentEnd &left)
