@@ -8,6 +8,7 @@
 
 #include <adwaita.h>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -26,6 +27,8 @@ public:
     void present() { gtk_window_present(gtkWindow()); }
     void showError(const std::string &heading, const std::string &body);
     void toast(const std::string &text);
+    // Shows just these enzymes on the map, sequence and enzyme list.
+    void showOnlyEnzymes(const std::set<std::string> &names, int maxCuts);
     // Saves a PNG of the window once it has been laid out, then calls done.
     void screenshot(const std::string &path, void (*done)(bool ok, gpointer), gpointer data);
 
@@ -69,6 +72,7 @@ private:
     static void actGoldenGate(GSimpleAction *, GVariant *, gpointer self);
     static void actGibson(GSimpleAction *, GVariant *, gpointer self);
     static void actDesignPrimers(GSimpleAction *, GVariant *, gpointer self);
+    static void actChooseEnzymes(GSimpleAction *, GVariant *, gpointer self);
     static gboolean onCloseRequest(GtkWindow *, gpointer self);
     static void actExportFasta(GSimpleAction *, GVariant *, gpointer self);
     static void actExportMap(GSimpleAction *, GVariant *, gpointer self);
@@ -94,6 +98,7 @@ private:
     void goldenGateDialog();
     void gibsonDialog();
     void designPrimersDialog();
+    void chooseEnzymesDialog();
     void pasteText(const std::string &text);
 
     Document m_doc;

@@ -135,6 +135,7 @@ void Window::buildUi(GtkApplication *app)
         {"golden-gate", &Window::actGoldenGate, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"gibson", &Window::actGibson, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"design-primers", &Window::actDesignPrimers, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"choose-enzymes", &Window::actChooseEnzymes, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-fasta", &Window::actExportFasta, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-map", &Window::actExportMap, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"copy", &Window::actCopy, nullptr, nullptr, nullptr, {0, 0, 0}},
@@ -188,6 +189,7 @@ void Window::buildUi(GtkApplication *app)
     g_menu_append(seqSection, "Reverse Complement Sequence", "win.reverse-complement");
     g_menu_append(seqSection, "Set Origin at Selection", "win.set-origin");
     g_menu_append(seqSection, "Circular", "win.circular");
+    g_menu_append(seqSection, "Choose Enzymes…", "win.choose-enzymes");
     g_menu_append(seqSection, "Digest and Gel…", "win.digest");
     g_menu_append(seqSection, "PCR Product…", "win.pcr");
     g_menu_append(seqSection, "Restriction Cloning…", "win.clone");
@@ -791,7 +793,7 @@ void Window::updateActions()
     enable("undo", m_doc.canUndo());
     enable("redo", m_doc.canRedo());
     for (const char *name : {"save", "save-as", "export-fasta", "export-map", "paste", "select-all",
-                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson"})
+                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "choose-enzymes"})
         enable(name, has);
     enable("cut", sel);
     enable("add-feature", sel);
@@ -966,6 +968,19 @@ void Window::actGibson(GSimpleAction *, GVariant *, gpointer p)
 void Window::actDesignPrimers(GSimpleAction *, GVariant *, gpointer p)
 {
     static_cast<Window *>(p)->designPrimersDialog();
+}
+
+void Window::actChooseEnzymes(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->chooseEnzymesDialog();
+}
+
+void Window::showOnlyEnzymes(const std::set<std::string> &names, int maxCuts)
+{
+    m_doc.showOnlyEnzymes(names, maxCuts);
+    // Keep the cut filter in the enzyme panel in step (1, 2, 3, all).
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(m_filter), guint(maxCuts >= 1 && maxCuts <= 3 ? maxCuts - 1 : 3));
+    toast(std::to_string(names.size()) + (names.size() == 1 ? " enzyme shown" : " enzymes shown"));
 }
 
 void Window::actExportFasta(GSimpleAction *, GVariant *, gpointer p)

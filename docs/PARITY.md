@@ -52,7 +52,7 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 | Z1 | Cuts on both strands, offset cuts, two-cut enzymes | done |
 | Z2 | Dam/Dcm methylation sensitivity | planned |
 | Z3 | Saved enzyme sets, supplier filter | planned |
-| X2 | Choose enzymes by criteria (cuts once in a region, spares the insert) | M3 |
+| X2 | Choose enzymes by criteria (cuts once in a region, spares the insert) | done on Linux; Mac UI pending |
 
 ## Cloning simulation
 

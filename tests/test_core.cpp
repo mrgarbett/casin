@@ -708,6 +708,24 @@ static void testDigest()
     DigestResult uncut = digest(s, none);
     CHECK(uncut.uncut && uncut.fragments.size() == 1 && uncut.fragments[0].length == 76);
     CHECK(!commonLadders().empty() && commonLadders()[0].bands.front() > commonLadders()[0].bands.back());
+
+    // EcoRI at 10, BamHI at 30, PstI at 50 on the circle; an "insert" spans 25..40.
+    const std::vector<CutSite> sites = findSites(s, use);
+    EnzymeCriteria crit;
+    crit.inside = true;
+    crit.region = {5, 30};   // 5..35 holds EcoRI and BamHI
+    CHECK(chooseEnzymes(s, use, sites, crit) == std::vector<std::string>({"BamHI", "EcoRI"}));
+    crit.spare = {{25, 15}};
+    CHECK(chooseEnzymes(s, use, sites, crit) == std::vector<std::string>({"EcoRI"}));
+    crit = {};
+    crit.ends = EnzymeCriteria::Ends::ThreePrime;
+    CHECK(chooseEnzymes(s, use, sites, crit) == std::vector<std::string>({"PstI"}));
+    crit = {};
+    crit.minCuts = 0;
+    crit.maxCuts = 0;
+    crit.region = {70, 20};   // across the origin: 70..76, 0..14 holds EcoRI's cut at 11
+    crit.inside = true;
+    CHECK(chooseEnzymes(s, use, sites, crit) == std::vector<std::string>({"EcoRI"}));
 }
 
 static void testCloning()

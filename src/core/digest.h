@@ -22,6 +22,22 @@ struct DigestResult {
 // Cuts with every given enzyme at once. Cut sites come from findSites().
 DigestResult digest(const Sequence &seq, const std::vector<Enzyme> &enzymes);
 
+// Picks enzymes by what their cuts do to the sequence, for example "cuts once,
+// inside the multiple cloning site, and never inside the insert".
+struct EnzymeCriteria {
+    int minCuts = 1;
+    int maxCuts = 1;             // 0 = no upper limit
+    bool inside = false;         // every cut must fall within `region`
+    Span region;
+    std::vector<Span> spare;     // no cut may fall strictly inside these
+    enum class Ends { Any, FivePrime, ThreePrime, Blunt } ends = Ends::Any;
+};
+
+// Names of the matching enzymes, sorted by name. `sites` comes from
+// findSites(seq, enzymes).
+std::vector<std::string> chooseEnzymes(const Sequence &seq, const std::vector<Enzyme> &enzymes,
+                                       const std::vector<CutSite> &sites, const EnzymeCriteria &criteria);
+
 struct Ladder {
     std::string name;
     std::vector<int> bands;   // bp, largest first

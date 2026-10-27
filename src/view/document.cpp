@@ -93,6 +93,17 @@ void Document::setEnzymeHidden(const std::string &name, bool hidden)
     emit(m_enzListeners);
 }
 
+void Document::showOnlyEnzymes(const std::set<std::string> &names, int maxCuts)
+{
+    m_maxCuts = maxCuts;
+    m_hidden.clear();
+    for (const Enzyme &e : m_enzymes)
+        if (!names.count(e.name))
+            m_hidden.insert(e.name);
+    refilter();
+    emit(m_enzListeners);
+}
+
 void Document::setSelection(Span s)
 {
     m_typing = false;

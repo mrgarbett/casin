@@ -135,6 +135,8 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   and orientation come from the overhangs, and the dropout is replaced.
 - Gibson Assembly (also HiFi and In-Fusion): open the vector with one or two enzymes and
   join linear fragments from open windows by their end overlaps.
+- Choose Enzymes: find enzymes that cut once (or up to three times), only inside the
+  selection, never inside a chosen feature, with the ends you need; show just those.
 - Design Primers for Selection: a primer pair that amplifies exactly the selection, sized
   for a target Tm and checked for dimers and hairpins; adds both primers in one undo step.
 - The C API exposes the editing for the Mac app; digest, PCR, cloning and the assemblies are not in it yet.
@@ -142,7 +144,7 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
 ## Next steps
 
 See [docs/PARITY.md](docs/PARITY.md) for the full checklist. Next up: the Mac editing UI,
-then the rest of milestone 3 (enzyme choice by criteria, primers with a search window).
+then primers with a search window, and milestone 4 (cloning history, Sanger traces, alignment).
 
 ## Credits and ground rules
 
