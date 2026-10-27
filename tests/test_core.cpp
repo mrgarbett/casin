@@ -775,6 +775,49 @@ static void testCloning()
     CHECK(pieceBetween(v, vEco, vEco, true, &bb) && bb.length() == v.length());   // linearized
 }
 
+static void testGoldenGate()
+{
+    const Enzyme &bsa = *findEnzyme("BsaI");
+    // Vector: AATG <GAGACC dropout GGTCTC> GCTT; the backbone keeps both overhangs.
+    Sequence vec;
+    vec.name = "dest";
+    vec.circular = true;
+    vec.bases = std::string(20, 'A') + "AATGAGAGACC" + std::string(30, 'G') + "GGTCTCAGCTT" + std::string(40, 'T');
+    // Part A AATG..GGAG, part B GGAG..GCTT, both in plasmids with inward sites.
+    auto part = [](const std::string &name, const std::string &left, const std::string &body, const std::string &right) {
+        Sequence p;
+        p.name = name;
+        p.circular = true;
+        p.bases = "CCCCC" "GGTCTCA" + left + body + right + "TGAGACC" "CCCCCCCCCC";
+        return p;
+    };
+    Sequence a = part("A", "AATG", "ACGTACGTAC", "GGAG");
+    Sequence b = part("B", "GGAG", "TTGACCAACC", "GCTT");
+    ClonePiece pa;
+    std::string err;
+    CHECK(goldenGatePiece(a, bsa, &pa, &err));
+    CHECK_EQ(pa.left.bases, std::string("AATG"));
+    CHECK_EQ(pa.right.bases, std::string("GGAG"));
+    CHECK_EQ(pa.length(), 4 + 10);
+    // B given as its reverse complement and listed before A: the order and orientation are found.
+    Sequence bRc = b;
+    reverseComplementSequence(bRc);
+    Sequence product;
+    std::vector<AssemblyStep> steps;
+    CHECK(goldenGate({vec, bRc, a}, bsa, &product, &steps, &err));
+    CHECK_EQ(product.length(), 20 + 40 + 4 + 14 + 14);
+    CHECK_EQ(steps.size(), size_t(3));
+    if (steps.size() == 3) {
+        CHECK(steps[1].input == 2 && !steps[1].flipped);
+        CHECK(steps[2].input == 1 && steps[2].flipped);
+    }
+    CHECK(startsWith(product.bases, std::string(20, 'A') + "AATGACGTACGTACGGAGTTGACCAACCGCTT"));
+    CHECK(product.bases.find("GGTCTC") == std::string::npos && product.bases.find("GAGACC") == std::string::npos);
+    // Missing part B: the circle can't close.
+    CHECK(!goldenGate({vec, a}, bsa, &product, nullptr, &err));
+    CHECK(!err.empty());
+}
+
 int main(int argc, char **argv)
 {
     testBasics();
@@ -790,6 +833,7 @@ int main(int argc, char **argv)
     testPrimerChecks();
     testPcr();
     testCloning();
+    testGoldenGate();
     if (argc > 1)
         testSamples(argv[1]);
     else

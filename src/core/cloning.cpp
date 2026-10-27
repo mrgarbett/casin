@@ -29,6 +29,14 @@ FragmentEnd endAt(const Sequence &seq, const CutSite &c)
     return e;
 }
 
+// Whether [s, s + len) lies inside the piece [start, start + pieceLen), on a
+// sequence of length n (circular coordinates).
+bool spanInside(int s, int len, int start, int pieceLen, int n)
+{
+    const int off = ((s - start) % n + n) % n;
+    return off + len <= pieceLen;
+}
+
 } // namespace
 
 int ClonePiece::originOffset() const
@@ -145,6 +153,90 @@ bool ligateCircular(const std::vector<ClonePiece> &pieces, Sequence *out, std::s
         insertFragment(product, {product.length(), 0}, pieces[i].top);
     product.circular = true;
     *out = product;
+    return true;
+}
+
+bool goldenGatePiece(const Sequence &seq, const Enzyme &enzyme, ClonePiece *out, std::string *error)
+{
+    auto fail = [&](const std::string &msg) {
+        if (error)
+            *error = seq.name + ": " + msg;
+        return false;
+    };
+    const std::vector<Enzyme> one{enzyme};   // the sites point into this vector
+    const std::vector<CutSite> sites = findSites(seq, one);
+    if (sites.size() != 2)
+        return fail(enzyme.name + " cuts " + std::to_string(sites.size()) + (sites.size() == 1 ? " time" : " times")
+                    + ", needs 2");
+    const int n = seq.length();
+    std::vector<ClonePiece> candidates;
+    for (int k = 0; k < 2; ++k) {
+        if (!seq.circular && k == 1)
+            break;   // a linear input keeps the piece between its cuts
+        const CutSite &l = sites[size_t(k)], &r = sites[size_t(1 - k)];
+        ClonePiece p;
+        if (!cutPiece(seq, l, r, &p, error))
+            return false;
+        bool clean = true;
+        for (const CutSite &c : sites)
+            clean = clean && !spanInside(c.matchStart, enzyme.siteLength(), p.sourceStart, p.length(), n);
+        if (clean)
+            candidates.push_back(p);
+    }
+    if (candidates.size() != 1)
+        return fail(candidates.empty() ? "every piece keeps an " + enzyme.name + " site"
+                                       : "both pieces are free of " + enzyme.name + " sites");
+    *out = candidates.front();
+    out->top.name = out->bottom.name = seq.name;
+    return true;
+}
+
+bool goldenGate(const std::vector<Sequence> &inputs, const Enzyme &enzyme, Sequence *out,
+                std::vector<AssemblyStep> *steps, std::string *error)
+{
+    if (inputs.size() < 2) {
+        if (error)
+            *error = "pick a vector and at least one part";
+        return false;
+    }
+    std::vector<ClonePiece> pieces(inputs.size());
+    for (size_t i = 0; i < inputs.size(); ++i)
+        if (!goldenGatePiece(inputs[i], enzyme, &pieces[i], error))
+            return false;
+    std::vector<AssemblyStep> chain{{0, false, pieces[0]}};
+    std::vector<bool> used(inputs.size(), false);
+    used[0] = true;
+    for (size_t step = 1; step < inputs.size(); ++step) {
+        const FragmentEnd &end = chain.back().piece.right;
+        std::vector<AssemblyStep> fits;
+        for (size_t i = 1; i < inputs.size(); ++i) {
+            if (used[i])
+                continue;
+            if (endsLigate(end, pieces[i].left))
+                fits.push_back({int(i), false, pieces[i]});
+            const ClonePiece f = flipPiece(pieces[i]);
+            if (endsLigate(end, f.left))
+                fits.push_back({int(i), true, f});
+        }
+        if (fits.size() != 1) {
+            if (error)
+                *error = fits.empty() ? "no part continues after the " + end.bases + " overhang of " + inputs[size_t(chain.back().input)].name
+                                      : "more than one part fits after the " + end.bases + " overhang";
+            return false;
+        }
+        used[size_t(fits.front().input)] = true;
+        chain.push_back(fits.front());
+    }
+    std::vector<ClonePiece> ordered;
+    for (const AssemblyStep &s : chain)
+        ordered.push_back(s.piece);
+    if (!ligateCircular(ordered, out, error))
+        return false;
+    // Keep the vector's numbering when its origin is in the backbone.
+    if (pieces[0].originOffset() > 0)
+        rotateOrigin(*out, pieces[0].originOffset());
+    if (steps)
+        *steps = chain;
     return true;
 }
 

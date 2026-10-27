@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Editing dialogs: feature, primer, PCR, restriction cloning and new sequence.
+// Editing dialogs: feature, primer, PCR, restriction cloning, Golden Gate and new sequence.
 #include "window.h"
 
 #include "core/cloning.h"
@@ -616,6 +616,145 @@ void Window::cloningDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<CloneForm *>(p); });
+    adw_dialog_present(f.dialog, m_window);
+}
+
+namespace {
+struct GoldenGateForm {
+    Window *window;
+    Sequence vector;
+    std::vector<Sequence> parts;          // other open documents
+    std::vector<bool> chosen;
+    std::vector<Enzyme> enzymes;          // Type IIS enzymes
+    GtkWidget *enzyme, *result, *okButton;
+    AdwDialog *dialog;
+    Sequence product;
+    bool ok = false;
+};
+
+void updateGoldenGate(GoldenGateForm *st)
+{
+    std::vector<Sequence> inputs{st->vector};
+    for (size_t i = 0; i < st->parts.size(); ++i)
+        if (st->chosen[i])
+            inputs.push_back(st->parts[i]);
+    const guint e = adw_combo_row_get_selected(ADW_COMBO_ROW(st->enzyme));
+    std::string err, text;
+    std::vector<AssemblyStep> steps;
+    st->ok = e < st->enzymes.size() && goldenGate(inputs, st->enzymes[e], &st->product, &steps, &err);
+    if (st->ok) {
+        st->product.name = st->vector.name;
+        text = view::formatBp(st->product.length()) + " product\n";
+        for (const AssemblyStep &s : steps) {
+            if (s.input > 0)
+                st->product.name += "-" + inputs[size_t(s.input)].name;
+            text += (s.input == 0 ? "" : " → ") + inputs[size_t(s.input)].name + (s.flipped ? " (reversed)" : "") + " "
+                  + s.piece.left.bases + "…" + s.piece.right.bases;
+        }
+    } else {
+        text = err;
+    }
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->result), text.c_str());
+    gtk_widget_set_sensitive(st->okButton, st->ok);
+}
+} // namespace
+
+void Window::goldenGateDialog()
+{
+    if (m_doc.isEmpty())
+        return;
+    if (!m_doc.sequence().circular) {
+        toast("Golden Gate needs a circular destination vector");
+        return;
+    }
+    auto *st = new GoldenGateForm{};
+    st->window = this;
+    st->vector = m_doc.sequence();
+    for (const Enzyme &e : commonEnzymes())
+        if (e.cutsOutsideSite() && !e.cutsTwice && e.overhang() != 0)
+            st->enzymes.push_back(e);
+    GtkApplication *app = gtk_window_get_application(gtkWindow());
+    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
+        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+        if (w && w != this && !w->isEmpty())
+            st->parts.push_back(w->document().sequence());
+    }
+    if (st->parts.empty()) {
+        toast("Open the parts in other windows first");
+        delete st;
+        return;
+    }
+    st->chosen.assign(st->parts.size(), true);
+    // Start with an enzyme that cuts every input twice, else the vector.
+    guint pick = 0;
+    int best = 0;
+    for (size_t i = 0; i < st->enzymes.size(); ++i) {
+        const std::vector<Enzyme> one{st->enzymes[i]};
+        if (findSites(st->vector, one).size() != 2)
+            continue;
+        int score = 1;
+        for (const Sequence &part : st->parts)
+            score += findSites(part, one).size() == 2 ? 1 : 0;
+        if (score > best) {
+            best = score;
+            pick = guint(i);
+        }
+    }
+
+    Form f = makeForm("Golden Gate Assembly", "Open Product");
+    st->dialog = f.dialog;
+    st->okButton = f.ok;
+    GtkWidget *gv = addGroup(f, "Destination vector");
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(gv), st->vector.name.c_str());
+    std::vector<const char *> names;
+    for (const Enzyme &e : st->enzymes)
+        names.push_back(e.name.c_str());
+    names.push_back(nullptr);
+    st->enzyme = comboRow(gv, "Enzyme", names.data(), pick);
+    GtkWidget *gp = addGroup(f, "Parts");
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(gp),
+                                          "Open windows; order and orientation come from the overhangs");
+    for (size_t i = 0; i < st->parts.size(); ++i) {
+        GtkWidget *row = adw_action_row_new();
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), st->parts[i].name.c_str());
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(row), view::formatBp(st->parts[i].length()).c_str());
+        GtkWidget *check = gtk_check_button_new();
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(check), TRUE);
+        g_object_set_data(G_OBJECT(check), "index", GINT_TO_POINTER(int(i)));
+        g_signal_connect(check, "toggled", G_CALLBACK((+[](GtkCheckButton *b, gpointer p) {
+                             auto *st = static_cast<GoldenGateForm *>(p);
+                             st->chosen[size_t(GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "index")))] =
+                                 gtk_check_button_get_active(b);
+                             updateGoldenGate(st);
+                         })),
+                         st);
+        adw_action_row_add_prefix(ADW_ACTION_ROW(row), check);
+        adw_action_row_set_activatable_widget(ADW_ACTION_ROW(row), check);
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(gp), row);
+    }
+    GtkWidget *gr = addGroup(f);
+    st->result = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->result), "Result");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(gr), st->result);
+    g_signal_connect(st->enzyme, "notify::selected", G_CALLBACK((+[](GObject *, GParamSpec *, gpointer p) {
+                         updateGoldenGate(static_cast<GoldenGateForm *>(p));
+                     })),
+                     st);
+    updateGoldenGate(st);
+    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<GoldenGateForm *>(p);
+                         if (!st->ok)
+                             return;
+                         GtkApplication *app = gtk_window_get_application(st->window->gtkWindow());
+                         Window *w = Window::create(app);
+                         w->document().setSequence(st->product);
+                         w->document().markUnsaved();
+                         w->present();
+                         adw_dialog_close(st->dialog);
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st,
+                           [](gpointer p) { delete static_cast<GoldenGateForm *>(p); });
     adw_dialog_present(f.dialog, m_window);
 }
 

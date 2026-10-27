@@ -62,7 +62,7 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 | C2 | Restriction-ligation cloning | done on Linux; Mac UI pending |
 | C3 | PCR product from two primers, with 5′ tails | done on Linux; Mac UI pending |
 | C4 | Gibson, HiFi and In-Fusion assembly | M3 |
-| C5 | Golden Gate assembly | M3 |
+| C5 | Golden Gate assembly | done on Linux; Mac UI pending |
 | C6 | Cloning history saved with each construct | M4 |
 | C7 | Gateway BP and LR | M5 |
 | C8 | Site-directed mutagenesis | M4 |

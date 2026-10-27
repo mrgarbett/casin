@@ -131,12 +131,14 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
 - Restriction Cloning: cut the vector with one or two enzymes, take an insert from any
   open window, check that the ends ligate in the chosen orientation and open the
   product (vector numbering kept).
-- The C API exposes the editing for the Mac app; digest, PCR and cloning are not in it yet.
+- Golden Gate Assembly: pick a Type IIS enzyme and the parts from open windows; the order
+  and orientation come from the overhangs, and the dropout is replaced.
+- The C API exposes the editing for the Mac app; digest, PCR, cloning and Golden Gate are not in it yet.
 
 ## Next steps
 
 See [docs/PARITY.md](docs/PARITY.md) for the full checklist. Next up: the Mac editing UI,
-then the rest of milestone 3 (Gibson, Golden Gate, primer design).
+then the rest of milestone 3 (Gibson and HiFi, primer design).
 
 ## Credits and ground rules
 

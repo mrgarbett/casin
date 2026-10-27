@@ -51,4 +51,20 @@ bool endsLigate(const FragmentEnd &right, const FragmentEnd &left);
 // doesn't ligate.
 bool ligateCircular(const std::vector<ClonePiece> &pieces, Sequence *out, std::string *error = nullptr);
 
+// Golden Gate: each input is cut with one Type IIS enzyme and keeps the
+// piece that has no recognition site left in it (the part between two
+// inward-facing sites, or the vector backbone outside two outward-facing
+// ones). The first input is the vector. The pieces are chained by their
+// overhangs, flipping a part when its reverse complement fits, and the
+// circle must close.
+struct AssemblyStep {
+    int input = 0;          // index into the inputs
+    bool flipped = false;
+    ClonePiece piece;       // as placed, already flipped when `flipped`
+};
+
+bool goldenGatePiece(const Sequence &seq, const Enzyme &enzyme, ClonePiece *out, std::string *error = nullptr);
+bool goldenGate(const std::vector<Sequence> &inputs, const Enzyme &enzyme, Sequence *out,
+                std::vector<AssemblyStep> *steps = nullptr, std::string *error = nullptr);
+
 } // namespace oc
