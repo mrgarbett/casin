@@ -160,6 +160,7 @@ void Window::buildUi(GtkApplication *app)
         {"search-folder", &Window::actSearchFolder, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"ta-cloning", &Window::actTaCloning, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"overlap-extension", &Window::actOverlapExtension, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"insertion", &Window::actInsertion, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"copy", &Window::actCopy, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"copy-rc", &Window::actCopyRc, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"find", &Window::actFind, nullptr, nullptr, nullptr, {0, 0, 0}},
@@ -236,6 +237,7 @@ void Window::buildUi(GtkApplication *app)
     g_menu_append(cloneMenu, "Gibson Assembly…", "win.gibson");
     g_menu_append(cloneMenu, "TA, GC and TOPO Cloning…", "win.ta-cloning");
     g_menu_append(cloneMenu, "Overlap Extension PCR…", "win.overlap-extension");
+    g_menu_append(cloneMenu, "Insertion by PCR…", "win.insertion");
     g_menu_append(cloneMenu, "Mutagenesis…", "win.mutagenesis");
     g_menu_append(cloneMenu, "Cloning History…", "win.history");
     g_menu_append_submenu(seqSection, "Cloning", G_MENU_MODEL(cloneMenu));
@@ -1074,7 +1076,7 @@ void Window::updateActions()
     enable("undo", m_doc.canUndo());
     enable("redo", m_doc.canRedo());
     for (const char *name : {"save", "save-as", "export-fasta", "export-map", "print", "paste", "select-all",
-                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "ta-cloning", "overlap-extension", "choose-enzymes", "primer-by-sequence", "history", "align", "compare", "orfs", "protein", "map-options"})
+                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "ta-cloning", "overlap-extension", "insertion", "choose-enzymes", "primer-by-sequence", "history", "align", "compare", "orfs", "protein", "map-options"})
         enable(name, has);
     enable("cut", sel);
     enable("add-feature", sel);
@@ -1372,6 +1374,11 @@ void Window::actOverlapExtension(GSimpleAction *, GVariant *, gpointer p)
 void Window::actProtein(GSimpleAction *, GVariant *, gpointer p)
 {
     static_cast<Window *>(p)->proteinDialog();
+}
+
+void Window::actInsertion(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->insertionDialog();
 }
 
 void Window::actSearchFolder(GSimpleAction *, GVariant *, gpointer p)

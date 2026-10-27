@@ -142,6 +142,9 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   orientation, with the overhang bases filled in; opens the circular product.
 - Overlap Extension PCR: join this window and other linear fragments by their shared
   ends into one linear product; orientation comes from the overlaps.
+- Insertion by PCR: primers that amplify an insert (its selection, in another window) with
+  tails matching the vector on each side of this window's caret or selection; opens the
+  construct with the primers on it.
 - Mutagenesis: replace, delete or insert bases at the selection; designs back-to-back
   primers (new bases on the forward primer's 5′ end) and opens the mutant.
 - Cloning History: products of PCR, cloning, assembly and mutagenesis remember each step

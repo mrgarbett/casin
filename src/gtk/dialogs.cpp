@@ -1596,6 +1596,144 @@ void Window::proteinDialog()
     adw_dialog_present(f.dialog, m_window);
 }
 
+namespace {
+struct InsertionForm {
+    Window *window;
+    Sequence vector;
+    Span site;
+    std::vector<Sequence> inserts;
+    std::vector<Span> targets;   // each insert's selection, or all of it
+    GtkWidget *insert, *tm, *overlap, *target, *forward, *reverse, *result, *okButton;
+    AdwDialog *dialog;
+    InsertionDesign design;
+    bool ok = false;
+};
+
+void updateInsertion(InsertionForm *st)
+{
+    const size_t i = adw_combo_row_get_selected(ADW_COMBO_ROW(st->insert));
+    if (i >= st->inserts.size())
+        return;
+    const Span t = st->targets[i];
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->target),
+                                (t.length == st->inserts[i].length()
+                                     ? "All " + view::formatBp(t.length)
+                                     : std::to_string(t.start + 1) + "–" + std::to_string(t.start + t.length) + " ("
+                                           + view::formatBp(t.length) + ", its selection)")
+                                    .c_str());
+    std::string err;
+    st->ok = designInsertion(st->vector, st->site, st->inserts[i], t, adw_spin_row_get_value(ADW_SPIN_ROW(st->tm)),
+                             int(adw_spin_row_get_value(ADW_SPIN_ROW(st->overlap))), &st->design, &err);
+    const int overlap = int(adw_spin_row_get_value(ADW_SPIN_ROW(st->overlap)));
+    auto primerText = [&](const Primer &p, const PrimerCheck &c) {
+        const std::string tail = p.bases.substr(0, size_t(overlap));
+        std::string lower = tail;
+        for (char &ch : lower)
+            ch = char(std::tolower(static_cast<unsigned char>(ch)));
+        char tm[32];
+        std::snprintf(tm, sizeof tm, "%.1f", c.tm);
+        return lower + p.bases.substr(size_t(overlap)) + "\n" + std::to_string(p.bases.size()) + " nt · annealing part "
+               + std::to_string(c.length) + " nt, Tm " + tm + " °C";
+    };
+    if (st->ok) {
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(st->forward),
+                                    primerText(st->design.forward, st->design.annealing.forwardCheck).c_str());
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(st->reverse),
+                                    primerText(st->design.reverse, st->design.annealing.reverseCheck).c_str());
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(st->result),
+                                    (view::formatBp(st->design.pcrProduct.length()) + " PCR product, "
+                                     + view::formatBp(st->design.construct.length())
+                                     + (st->design.construct.circular ? " circular" : " linear") + " construct")
+                                        .c_str());
+    } else {
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(st->forward), "");
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(st->reverse), "");
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(st->result), err.c_str());
+    }
+    gtk_widget_set_sensitive(st->okButton, st->ok);
+}
+
+GtkWidget *subtitleRow(GtkWidget *group, const char *title)
+{
+    GtkWidget *row = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), title);
+    adw_action_row_set_subtitle_selectable(ADW_ACTION_ROW(row), TRUE);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group), row);
+    return row;
+}
+} // namespace
+
+void Window::insertionDialog()
+{
+    if (m_doc.isEmpty())
+        return;
+    auto *st = new InsertionForm{};
+    st->window = this;
+    st->vector = m_doc.sequence();
+    st->site = m_doc.selection();
+    std::vector<std::string> names;
+    GtkApplication *app = gtk_window_get_application(gtkWindow());
+    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
+        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+        if (w && w != this && !w->isEmpty()) {
+            const Sequence &s = w->document().sequence();
+            const Span sel = w->document().selection();
+            st->inserts.push_back(s);
+            st->targets.push_back(sel.length >= 18 && !sel.wraps(s.length()) ? sel : Span{0, s.length()});
+            names.push_back(s.name);
+        }
+    }
+    if (st->inserts.empty()) {
+        toast("Open the insert in another window first, with the part to insert selected");
+        delete st;
+        return;
+    }
+    Form f = makeForm("Insertion by PCR", "Open Construct");
+    adw_dialog_set_content_height(f.dialog, 640);
+    st->dialog = f.dialog;
+    st->okButton = f.ok;
+    GtkWidget *g = addGroup(f, ("Into " + st->vector.name).c_str());
+    adw_preferences_group_set_description(
+        ADW_PREFERENCES_GROUP(g),
+        (st->site.length > 0 ? "Replaces " + std::to_string(st->site.start + 1) + "–"
+                                   + std::to_string(st->site.start + st->site.length)
+                             : st->site.start == 0 ? std::string("Inserts before base 1")
+                                                : "Inserts after base " + std::to_string(st->site.start))
+            .c_str());
+    std::vector<const char *> v;
+    for (const std::string &n : names)
+        v.push_back(n.c_str());
+    v.push_back(nullptr);
+    st->insert = comboRow(g, "Insert", v.data(), 0);
+    st->target = subtitleRow(g, "Amplified part");
+    st->tm = spinRow(g, "Annealing Tm (°C)", 60, 75);
+    st->overlap = spinRow(g, "Overlap with vector (bp)", 20, 40);
+    GtkWidget *gp = addGroup(f, "Primers");
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(gp), "Vector tails in lower case");
+    st->forward = subtitleRow(gp, "Forward");
+    st->reverse = subtitleRow(gp, "Reverse");
+    st->result = subtitleRow(gp, "Result");
+    auto changed = +[](GObject *, GParamSpec *, gpointer p) { updateInsertion(static_cast<InsertionForm *>(p)); };
+    g_signal_connect(st->insert, "notify::selected", G_CALLBACK(changed), st);
+    g_signal_connect(st->tm, "notify::value", G_CALLBACK(changed), st);
+    g_signal_connect(st->overlap, "notify::value", G_CALLBACK(changed), st);
+    updateInsertion(st);
+    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<InsertionForm *>(p);
+                         if (!st->ok)
+                             return;
+                         GtkApplication *app = gtk_window_get_application(st->window->gtkWindow());
+                         Window *w = Window::create(app);
+                         w->document().setSequence(st->design.construct);
+                         w->document().markUnsaved();
+                         w->present();
+                         adw_dialog_close(st->dialog);
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<InsertionForm *>(p); });
+    adw_dialog_present(f.dialog, m_window);
+}
+
 void Window::searchFolderDialog()
 {
     auto *st = new SearchForm{};

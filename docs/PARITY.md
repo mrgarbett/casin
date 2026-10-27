@@ -67,7 +67,7 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 | C7 | Gateway BP and LR | M5 |
 | C8 | Site-directed mutagenesis | done on Linux (back-to-back primers); Mac UI pending |
 | X4 | TA, TOPO and GC cloning | done on Linux (TA, GC and blunt TOPO into a linearized vector); Mac UI pending |
-| X5 | Overlap-extension PCR, insertion by PCR | overlap-extension (SOE) PCR done on Linux; insertion by PCR is later work; Mac UI pending |
+| X5 | Overlap-extension PCR, insertion by PCR | overlap-extension (SOE) PCR and insertion by PCR (tailed primers, In-Fusion style) done on Linux; Mac UI pending |
 | X6 | Site-specific and homologous recombination | M5 |
 
 ## Primers

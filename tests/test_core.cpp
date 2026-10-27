@@ -1067,6 +1067,36 @@ static void testProtein()
     CHECK_EQ(proteinStats("").length, 0);
 }
 
+static void testInsertionByPcr()
+{
+    Sequence vec;
+    vec.name = "vec";
+    vec.circular = true;
+    for (int i = 0; i < 300; ++i)
+        vec.bases += "ACGGTCATGCTTAGCAATCG"[(i * 7 + i / 3) % 20];
+    Sequence ins;
+    ins.name = "lacZ";
+    ins.bases = "TTTTTTTTTT" "ATGACCATGATTACGCCAAGCTTGCATGCCTGCAGGTCGACTCTAGAGGATCCCCGGGTACCGAGCTCGAATTCACTGGCCGTCGTTTTACAACG"
+                "TCGTGACTGGGAAAACCCTGGCGTTACCCAACTTAATCGCCTTGCAGCACATCC" "TTTTTTTTTT";
+    const Span target{10, ins.length() - 20};
+    InsertionDesign d;
+    std::string err;
+    CHECK(designInsertion(vec, Span{150, 0}, ins, target, 60, 20, &d, &err));
+    CHECK(startsWith(d.forward.bases, vec.bases.substr(130, 20) + "ATGACC"));
+    CHECK(startsWith(d.reverse.bases, reverseComplement(vec.bases.substr(150, 20))));
+    CHECK_EQ(d.pcrProduct.length(), target.length + 40);
+    CHECK_EQ(d.construct.length(), 300 + target.length);
+    CHECK(d.construct.bases == vec.bases.substr(0, 150) + ins.slice(target) + vec.bases.substr(150));
+    CHECK(d.construct.circular && d.construct.primers.size() == 2);
+    CHECK_EQ(d.construct.history.size(), size_t(1));
+    // A selected span of the vector is replaced.
+    CHECK(designInsertion(vec, Span{150, 30}, ins, target, 60, 20, &d, &err));
+    CHECK_EQ(d.construct.length(), 270 + target.length);
+    CHECK(startsWith(d.reverse.bases, reverseComplement(vec.bases.substr(180, 20))));
+    vec.circular = false;
+    CHECK(!designInsertion(vec, Span{5, 0}, ins, target, 60, 20, &d, &err));
+}
+
 static void testPrimerDesign()
 {
     Sequence s;
@@ -1219,6 +1249,7 @@ int main(int argc, char **argv)
     testGoldenGate();
     testGibson();
     testProtein();
+    testInsertionByPcr();
     testPrimerDesign();
     testMutagenesis();
     testAlign();

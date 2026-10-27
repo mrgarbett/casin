@@ -89,6 +89,7 @@ private:
     static void actTaCloning(GSimpleAction *, GVariant *, gpointer self);
     static void actOverlapExtension(GSimpleAction *, GVariant *, gpointer self);
     static void actProtein(GSimpleAction *, GVariant *, gpointer self);
+    static void actInsertion(GSimpleAction *, GVariant *, gpointer self);
     static gboolean onCloseRequest(GtkWindow *, gpointer self);
     static void actExportFasta(GSimpleAction *, GVariant *, gpointer self);
     static void actExportMap(GSimpleAction *, GVariant *, gpointer self);
@@ -129,6 +130,7 @@ private:
     void taCloningDialog();
     void overlapExtensionDialog();
     void proteinDialog();
+    void insertionDialog();
     void pasteText(const std::string &text);
 
     Document m_doc;

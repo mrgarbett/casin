@@ -4,6 +4,7 @@
 #pragma once
 
 #include "enzymes.h"
+#include "primercheck.h"
 
 namespace oc {
 
@@ -114,5 +115,19 @@ bool restrictionClone(const Sequence &vector, const std::string &v1, const std::
 bool gibsonIntoVector(const Sequence &vector, const std::string &v1, const std::string &v2,
                       const std::vector<Sequence> &fragments, int minOverlap, Sequence *out,
                       std::vector<GibsonJoin> *joins = nullptr, std::string *error = nullptr);
+
+// Insertion by PCR (In-Fusion / Gibson primers): amplify `target` of
+// `insert` with primers whose 5' tails copy `overlap` bases of the vector on
+// either side of `site` (a caret inserts; a span is replaced). The annealing
+// parts are sized for `targetTm`. The construct is the vector with the
+// insert in place, carrying the two primers.
+struct InsertionDesign {
+    Primer forward, reverse;     // full primers; binding sites on the insert
+    PrimerDesign annealing;      // the annealing parts and their checks
+    Sequence pcrProduct;         // the insert with its vector tails
+    Sequence construct;
+};
+bool designInsertion(const Sequence &vector, Span site, const Sequence &insert, Span target, double targetTm,
+                     int overlap, InsertionDesign *out, std::string *error = nullptr);
 
 } // namespace oc

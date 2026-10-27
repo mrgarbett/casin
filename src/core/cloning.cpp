@@ -476,4 +476,58 @@ bool gibsonIntoVector(const Sequence &vector, const std::string &v1, const std::
     return true;
 }
 
+bool designInsertion(const Sequence &vector, Span site, const Sequence &insert, Span target, double targetTm,
+                     int overlap, InsertionDesign *out, std::string *error)
+{
+    auto fail = [&](const std::string &m) {
+        if (error)
+            *error = m;
+        return false;
+    };
+    const int n = vector.length();
+    if (n == 0 || insert.length() == 0)
+        return fail("Both the vector and the insert need bases");
+    if (overlap < 10)
+        return fail("Overlaps shorter than 10 bases don't anneal reliably");
+    if (site.length >= n)
+        return fail("The insertion site can't cover the whole vector");
+    const int end = site.start + site.length;
+    if (!vector.circular && (site.start < overlap || n - end < overlap))
+        return fail("The vector needs " + std::to_string(overlap) + " bases on each side of the insertion site");
+    if (vector.circular && n - site.length < 2 * overlap)
+        return fail("The vector is too short for overlaps this long");
+    InsertionDesign d;
+    std::string err;
+    if (!designPrimers(insert, target, targetTm, &d.annealing, &err))
+        return fail("Insert: " + err);
+    const std::string left = vector.slice(site.start - overlap, overlap);
+    const std::string right = vector.slice(end, overlap);
+    d.forward = d.annealing.forward;
+    d.forward.bases = left + d.forward.bases;
+    d.reverse = d.annealing.reverse;
+    d.reverse.bases = reverseComplement(right) + d.reverse.bases;
+    d.forward.name = insert.name + "-ins-F";
+    d.reverse.name = insert.name + "-ins-R";
+    if (!pcrProduct(insert, d.forward, d.reverse, &d.pcrProduct, &err))
+        return fail(err);
+    d.construct = vector;
+    d.construct.primers.clear();
+    insertFragment(d.construct, site, extractFragment(insert, target));
+    d.construct.name = vector.name + "-" + insert.name;
+    addHistory(d.construct, "Insertion by PCR: " + insert.name + " into " + vector.name + " at "
+                                + std::to_string(site.start + 1));
+    // The primers on the construct: the forward primer starts with the left
+    // tail, the reverse primer ends (on the top strand) with the right one.
+    const int m = d.construct.length();
+    const int fStart = site.start - overlap, rEnd = site.start + target.length + overlap;
+    Primer f = d.forward, r = d.reverse;
+    f.binding = {fStart, fStart + int(f.bases.size())};
+    r.binding = {rEnd - int(r.bases.size()), rEnd};
+    for (Primer *p : {&f, &r})   // left off when they would cross the origin
+        if (p->binding.start >= 0 && p->binding.end <= m)
+            d.construct.primers.push_back(*p);
+    *out = d;
+    return true;
+}
+
 } // namespace oc
