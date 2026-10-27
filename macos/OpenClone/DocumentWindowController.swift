@@ -23,6 +23,10 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     /// Map | sequence.
     private let split = NSSplitView()
     private var didFirstShow = false
+    /// The view that mirrors content under the sidebar (macOS 26), and the
+    /// safe-area inset its content was last placed for.
+    private var backgroundExtension: NSView?
+    private var placedInset: CGFloat = -1
 
     init(document: SequenceDocument) {
         core = document.core
@@ -87,6 +91,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             // macOS 26: content fills the pane (mirrored under the sidebar and
             // toolbar); the status floats over the bottom of the sequence.
             let content = Glass.extendingBackground(of: split)
+            if content !== split { backgroundExtension = content }
             for v in [content, pill] {
                 v.translatesAutoresizingMaskIntoConstraints = false
                 root.addSubview(v)
@@ -132,10 +137,41 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         Glass.extendUnderSidebar(detailItem)
 
         let splitController = NSSplitViewController()
+        Self.discardBrokenSidebarFrames()
         splitController.splitView.autosaveName = "OpenCloneSidebar"
         splitController.addSplitViewItem(sidebarItem)
         splitController.addSplitViewItem(detailItem)
         window.contentViewController = splitController
+
+        // The background extension places its content inside the safe area only
+        // when it lays out, which a sidebar collapsing or opening doesn't cause.
+        // Ask for that layout afterwards (not from inside this layout pass), and
+        // only when the inset really changed.
+        if backgroundExtension != nil {
+            NotificationCenter.default.addObserver(forName: NSSplitView.didResizeSubviewsNotification,
+                                                   object: splitController.splitView, queue: .main) { [weak self] _ in
+                DispatchQueue.main.async {
+                    guard let self = self, let view = self.backgroundExtension else { return }
+                    let inset = view.safeAreaInsets.left
+                    guard inset != self.placedInset else { return }
+                    self.placedInset = inset
+                    view.needsLayout = true
+                }
+            }
+        }
+    }
+
+    /// Builds with the safe-area pinning in Glass.swift could autosave a
+    /// sidebar billions of points wide, which then broke every launch. Forget
+    /// saved frames wider than any screen so the split view starts fresh.
+    private static func discardBrokenSidebarFrames() {
+        let key = "NSSplitView Subview Frames OpenCloneSidebar"
+        guard let frames = UserDefaults.standard.stringArray(forKey: key) else { return }
+        let broken = frames.contains { frame in
+            let parts = frame.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+            return parts.count < 4 || parts[2] > 100_000 || !parts[2].isFinite
+        }
+        if broken { UserDefaults.standard.removeObject(forKey: key) }
     }
 
     /// The first time the window shows: lay it out, then set the map/sequence

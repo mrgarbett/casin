@@ -34,17 +34,10 @@ enum Glass {
         if #available(macOS 26, *) {
             let view = NSBackgroundExtensionView()
             view.contentView = content
-            // Automatic placement isn't redone when the safe area changes (the
-            // sidebar collapsing or opening), so pin to the safe area instead.
-            view.automaticallyPlacesContentView = false
-            content.translatesAutoresizingMaskIntoConstraints = false
-            let safe = view.safeAreaLayoutGuide
-            NSLayoutConstraint.activate([
-                content.leadingAnchor.constraint(equalTo: safe.leadingAnchor),
-                content.trailingAnchor.constraint(equalTo: safe.trailingAnchor),
-                content.topAnchor.constraint(equalTo: safe.topAnchor),
-                content.bottomAnchor.constraint(equalTo: safe.bottomAnchor),
-            ])
+            // Leave placement automatic. Pinning the content to the safe area
+            // with constraints feeds the sidebar width back into itself when
+            // the sidebar opens, and the window frame runs away. Callers re-place
+            // the content when the sidebar changes (see DocumentWindowController).
             return view
         }
         #endif
