@@ -17,6 +17,9 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private let sidebar: SidebarController
     private let status = NSTextField(labelWithString: "")
     private let searchField = NSSearchField()
+    /// Keeps the glass status inside the sequence pane. A constant, updated on
+    /// resize, so a longer status can't push the map/sequence divider.
+    private var pillMaxWidth: NSLayoutConstraint?
 
     init(document: SequenceDocument) {
         core = document.core
@@ -48,8 +51,9 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         scroll.drawsBackground = false
         scroll.contentView.postsFrameChangedNotifications = true
         NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: scroll.contentView,
-                                               queue: .main) { [weak self] _ in
+                                               queue: .main) { [weak self, weak scroll] _ in
             self?.sequenceView.updateSize()
+            if let scroll = scroll { self?.pillMaxWidth?.constant = max(0, scroll.frame.width - 32) }
         }
 
         let split = NSSplitView()
@@ -87,8 +91,9 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
                 content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
                 pill.centerXAnchor.constraint(equalTo: scroll.centerXAnchor),
                 pill.bottomAnchor.constraint(equalTo: root.safeAreaLayoutGuide.bottomAnchor, constant: -12),
-                pill.widthAnchor.constraint(lessThanOrEqualTo: scroll.widthAnchor, constant: -32),
             ])
+            pillMaxWidth = pill.widthAnchor.constraint(lessThanOrEqualToConstant: 400)
+            pillMaxWidth?.isActive = true
         } else {
             // Ventura to Sequoia: content below the toolbar, flat status line under it.
             let stack = NSStackView(views: [split, status])
@@ -111,7 +116,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         }
 
         let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebar)
-        sidebarItem.minimumThickness = 240
+        sidebarItem.minimumThickness = 260
         sidebarItem.maximumThickness = 420
         sidebarItem.canCollapse = true
         let detailItem = NSSplitViewItem(viewController: detail)
@@ -146,6 +151,8 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         // The capsule hugs the text, so the text must hold it open; the pill's
         // max-width constraint still truncates it in a narrow window.
         status.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        // Secondary grey washes out over the sequence text behind the glass.
+        status.textColor = .labelColor
         return pill
     }
 
