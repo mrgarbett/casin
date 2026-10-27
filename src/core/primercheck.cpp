@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "primercheck.h"
+#include "edit.h"
 #include "sequence.h"
 #include "tm.h"
 
@@ -200,6 +201,63 @@ bool designPrimers(const Sequence &seq, Span target, double targetTm, PrimerDesi
     d.forwardCheck = bestF->check;
     d.reverseCheck = bestR->check;
     d.pair = checkPrimerPair(bestF->bases, bestR->bases);
+    *out = d;
+    return true;
+}
+
+bool designMutagenesis(const Sequence &seq, Span target, const std::string &rawReplacement, double targetTm,
+                       MutagenesisDesign *out, std::string *error)
+{
+    auto fail = [error](const char *msg) {
+        if (error)
+            *error = msg;
+        return false;
+    };
+    const int n = seq.length();
+    const std::string replacement = cleanBases(rawReplacement);
+    const int s = target.start, e = target.start + target.length;
+    if (target.length == 0 && replacement.empty())
+        return fail("type the new bases, or select bases to delete");
+    if (s < 32 || e + 32 > n)
+        return fail("the change is too close to the end or the origin; move the origin first");
+    if (cleanBases(seq.bases.substr(size_t(s), size_t(target.length))) == replacement)
+        return fail("the new bases are the same as the old ones");
+    const std::vector<Candidate> fwd = candidates(seq.bases.substr(size_t(e), 32), targetTm);
+    const std::vector<Candidate> rev = candidates(reverseComplement(seq.bases.substr(size_t(s - 32), 32)), targetTm);
+    if (fwd.empty() || rev.empty())
+        return fail("no primer can be computed for ambiguous bases");
+    const Candidate *bf = nullptr, *br = nullptr;
+    double best = 0;
+    for (const Candidate &f : fwd)
+        for (const Candidate &r : rev) {
+            const double score = f.score + r.score + std::fabs(f.check.tm - r.check.tm);
+            if (!bf || score < best) {
+                best = score;
+                bf = &f;
+                br = &r;
+            }
+        }
+    MutagenesisDesign d;
+    const std::string base = seq.name.empty() ? "mut" : seq.name + "-mut";
+    d.forward = {base + "-fwd", replacement + bf->bases, {e, e + bf->length}, Strand::Forward};
+    d.reverse = {base + "-rev", br->bases, {s - br->length, s}, Strand::Reverse};
+    d.forwardTm = bf->check.tm;
+    d.reverseTm = br->check.tm;
+    for (const std::string &w : checkPrimer(d.forward.bases).warnings)
+        if (w.rfind("Long", 0) != 0 || replacement.size() < 10)   // a long tail is expected here
+            d.warnings.push_back("Forward: " + w);
+    for (const std::string &w : br->check.warnings)
+        d.warnings.push_back("Reverse: " + w);
+    if (replacement.size() > 40)
+        d.warnings.push_back("Inserts longer than about 40 bases are easier split over both primers or made by assembly");
+    d.mutant = seq;
+    d.mutant.name = base;
+    replaceBases(d.mutant, target, replacement);
+    const int r = int(replacement.size());
+    Primer mf = d.forward, mr = d.reverse;
+    mf.binding = {s, s + r + bf->length};
+    d.mutant.primers.push_back(mf);
+    d.mutant.primers.push_back(mr);
     *out = d;
     return true;
 }

@@ -48,6 +48,22 @@ struct PrimerDesign {
 bool designPrimers(const Sequence &seq, Span target, double targetTm, PrimerDesign *out,
                    std::string *error = nullptr);
 
+// Site-directed mutagenesis with back-to-back primers (as in Q5-style kits):
+// `target` is replaced by `replacement` (empty = deletion, empty target =
+// insertion). The forward primer carries the new bases at its 5' end and
+// anneals just after the target; the reverse primer anneals just before it.
+// Annealing parts are sized for `targetTm`. The mutant keeps features and
+// carries both primers.
+struct MutagenesisDesign {
+    Sequence mutant;
+    Primer forward, reverse;      // binding sites on the template (annealing part)
+    double forwardTm = 0, reverseTm = 0;   // of the annealing parts
+    std::vector<std::string> warnings;
+};
+
+bool designMutagenesis(const Sequence &seq, Span target, const std::string &replacement, double targetTm,
+                       MutagenesisDesign *out, std::string *error = nullptr);
+
 // Where a primer can anneal: its 3' part matches the sequence, allowing a 5'
 // tail that doesn't. Each hit is the 3' stretch (at least `minBinding`
 // bases, at most `maxMismatches` mismatches, the last three bases exact)

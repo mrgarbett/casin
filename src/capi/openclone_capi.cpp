@@ -552,6 +552,17 @@ bool oc_golden_gate(const OCDocument *vector, const OCDocument *const *parts, in
     return deliver(out, p);
 }
 
+bool oc_mutagenesis(const OCDocument *doc, const char *bases, double target_tm, OCDocument *out, char **error)
+{
+    if (!doc->doc.hasSelection())
+        return failWith(error, "select the bases to change, or place the caret");
+    MutagenesisDesign d;
+    std::string err;
+    if (!designMutagenesis(doc->doc.sequence(), doc->doc.selection(), bases ? bases : "", target_tm, &d, &err))
+        return failWith(error, err);
+    return deliver(out, d.mutant);
+}
+
 bool oc_gibson(const OCDocument *vector, const char *vector_enzyme1, const char *vector_enzyme2,
                const OCDocument *const *fragments, int fragment_count, int min_overlap, OCDocument *out,
                char **error)

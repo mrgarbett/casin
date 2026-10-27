@@ -65,7 +65,7 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 | C5 | Golden Gate assembly | done on Linux; Mac UI pending |
 | C6 | Cloning history saved with each construct | M4 |
 | C7 | Gateway BP and LR | M5 |
-| C8 | Site-directed mutagenesis | M4 |
+| C8 | Site-directed mutagenesis | done on Linux (back-to-back primers); Mac UI pending |
 | X4 | TA, TOPO and GC cloning | M5 |
 | X5 | Overlap-extension PCR, insertion by PCR | M5 |
 | X6 | Site-specific and homologous recombination | M5 |

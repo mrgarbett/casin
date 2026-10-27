@@ -74,6 +74,7 @@ private:
     static void actDesignPrimers(GSimpleAction *, GVariant *, gpointer self);
     static void actChooseEnzymes(GSimpleAction *, GVariant *, gpointer self);
     static void actPrimerBySequence(GSimpleAction *, GVariant *, gpointer self);
+    static void actMutagenesis(GSimpleAction *, GVariant *, gpointer self);
     static gboolean onCloseRequest(GtkWindow *, gpointer self);
     static void actExportFasta(GSimpleAction *, GVariant *, gpointer self);
     static void actExportMap(GSimpleAction *, GVariant *, gpointer self);
@@ -101,6 +102,7 @@ private:
     void designPrimersDialog();
     void chooseEnzymesDialog();
     void primerBySequenceDialog();
+    void mutagenesisDialog();
     void pasteText(const std::string &text);
 
     Document m_doc;

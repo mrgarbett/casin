@@ -142,7 +142,8 @@ bool pcrProduct(const Sequence &templ, const Primer &fwd, const Primer &rev, Seq
     if (fwd.binding.length() <= 0 || rev.binding.length() <= 0)
         return fail("both primers need a binding site on this sequence");
     int len = rev.binding.end - fwd.binding.start;
-    if (len < 0 && templ.circular)
+    // On a circle, back-to-back primers (as for mutagenesis) copy the whole molecule.
+    if (len <= 0 && templ.circular)
         len += n;
     if (len < std::max(fwd.binding.length(), rev.binding.length()))
         return fail("the primers don't face each other; the reverse primer must bind downstream");

@@ -137,6 +137,7 @@ void Window::buildUi(GtkApplication *app)
         {"design-primers", &Window::actDesignPrimers, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"choose-enzymes", &Window::actChooseEnzymes, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"primer-by-sequence", &Window::actPrimerBySequence, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"mutagenesis", &Window::actMutagenesis, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-fasta", &Window::actExportFasta, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-map", &Window::actExportMap, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"copy", &Window::actCopy, nullptr, nullptr, nullptr, {0, 0, 0}},
@@ -196,6 +197,7 @@ void Window::buildUi(GtkApplication *app)
     g_menu_append(seqSection, "Restriction Cloning…", "win.clone");
     g_menu_append(seqSection, "Golden Gate Assembly…", "win.golden-gate");
     g_menu_append(seqSection, "Gibson Assembly…", "win.gibson");
+    g_menu_append(seqSection, "Mutagenesis…", "win.mutagenesis");
     GMenu *featureMenu = g_menu_new();
     g_menu_append(featureMenu, "Add Feature…", "win.add-feature");
     g_menu_append(featureMenu, "Edit Feature…", "win.edit-feature");
@@ -800,6 +802,7 @@ void Window::updateActions()
     enable("cut", sel);
     enable("add-feature", sel);
     enable("add-primer", sel && !m_doc.selection().wraps(m_doc.sequence().length()));
+    enable("mutagenesis", has && m_doc.hasSelection() && !m_doc.selection().wraps(m_doc.sequence().length()));
     enable("design-primers", sel && !m_doc.selection().wraps(m_doc.sequence().length()));
     enable("edit-feature", m_doc.activeFeature() >= 0);
     enable("delete-feature", m_doc.activeFeature() >= 0);
@@ -980,6 +983,11 @@ void Window::actChooseEnzymes(GSimpleAction *, GVariant *, gpointer p)
 void Window::actPrimerBySequence(GSimpleAction *, GVariant *, gpointer p)
 {
     static_cast<Window *>(p)->primerBySequenceDialog();
+}
+
+void Window::actMutagenesis(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->mutagenesisDialog();
 }
 
 void Window::showOnlyEnzymes(const std::set<std::string> &names, int maxCuts)

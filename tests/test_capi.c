@@ -163,6 +163,9 @@ int main(int argc, char **argv)
     /* Re-cloning the vector's own small EcoRI-BamHI piece gives the vector back. */
     CHECK(oc_restriction_clone(doc, "EcoRI", "BamHI", doc, "EcoRI", "BamHI", false, product, NULL));
     CHECK(oc_document_length(product) == oc_document_length(doc) && oc_document_is_modified(product));
+    oc_document_set_selection(doc, 211, 3);
+    CHECK(oc_mutagenesis(doc, "GCG", 60, product, NULL));
+    CHECK(oc_document_length(product) == oc_document_length(doc) && oc_document_primer_count(product) >= 2);
     oc_document_free(product);
     oc_document_free(pcr);
 

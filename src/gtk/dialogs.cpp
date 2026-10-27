@@ -1065,6 +1065,112 @@ void Window::primerBySequenceDialog()
 }
 
 namespace {
+struct MutagenesisForm {
+    Window *window;
+    Sequence seq;
+    Span target;
+    GtkWidget *bases, *tm, *fwd, *rev, *result, *okButton;
+    AdwDialog *dialog;
+    MutagenesisDesign design;
+    bool ok = false;
+};
+
+void updateMutagenesis(MutagenesisForm *st)
+{
+    std::string err;
+    st->ok = designMutagenesis(st->seq, st->target, text(st->bases), adw_spin_row_get_value(ADW_SPIN_ROW(st->tm)),
+                               &st->design, &err);
+    auto primerText = [](const Primer &p, double tm) {
+        char buf[64];
+        std::snprintf(buf, sizeof buf, "%zu nt · anneals %d nt at %.1f °C", p.bases.size(), p.binding.length(), tm);
+        return p.bases + "\n" + buf;
+    };
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->fwd),
+                                st->ok ? primerText(st->design.forward, st->design.forwardTm).c_str() : "");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->rev),
+                                st->ok ? primerText(st->design.reverse, st->design.reverseTm).c_str() : "");
+    std::string msg;
+    if (st->ok) {
+        const int delta = st->design.mutant.length() - st->seq.length();
+        msg = view::formatBp(st->design.mutant.length()) + " mutant"
+            + (delta > 0 ? " (" + std::to_string(delta) + " bp inserted)"
+               : delta < 0 ? " (" + std::to_string(-delta) + " bp deleted)" : "");
+        for (const std::string &w : st->design.warnings)
+            msg += "\n" + w;
+    } else {
+        msg = err;
+    }
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->result), msg.c_str());
+    gtk_widget_set_sensitive(st->okButton, st->ok);
+}
+} // namespace
+
+void Window::mutagenesisDialog()
+{
+    if (m_doc.isEmpty() || !m_doc.hasSelection())
+        return;
+    auto *st = new MutagenesisForm{};
+    st->window = this;
+    st->seq = m_doc.sequence();
+    st->target = m_doc.selection();
+    Form f = makeForm("Mutagenesis", "Open Mutant");
+    adw_dialog_set_content_height(f.dialog, 560);
+    st->dialog = f.dialog;
+    st->okButton = f.ok;
+    GtkWidget *g = addGroup(f, "Change");
+    const std::string where =
+        st->target.length == 0
+            ? "Insert after base " + view::withThousands(st->target.start)
+            : "Replace " + view::withThousands(st->target.start + 1) + "–"
+                  + view::withThousands(st->target.start + st->target.length) + ": "
+                  + (st->target.length <= 30 ? m_doc.selectedBases() : view::formatBp(st->target.length));
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(g), where.c_str());
+    st->bases = entryRow(g, st->target.length == 0 ? "Bases to insert" : "New bases (empty deletes)", "");
+    st->tm = spinRow(g, "Annealing Tm (°C)", 60, 72);
+    adw_spin_row_set_range(ADW_SPIN_ROW(st->tm), 50, 72);
+    adw_spin_row_set_value(ADW_SPIN_ROW(st->tm), 60);
+    GtkWidget *gp = addGroup(f, "Primers");
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(gp),
+                                          "Back to back: amplify the whole plasmid, then ligate the ends");
+    st->fwd = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->fwd), "Forward");
+    adw_action_row_set_subtitle_selectable(ADW_ACTION_ROW(st->fwd), TRUE);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(gp), st->fwd);
+    st->rev = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->rev), "Reverse");
+    adw_action_row_set_subtitle_selectable(ADW_ACTION_ROW(st->rev), TRUE);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(gp), st->rev);
+    st->result = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->result), "Result");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(gp), st->result);
+    g_signal_connect(st->bases, "changed", G_CALLBACK((+[](GtkEditable *, gpointer p) {
+                         updateMutagenesis(static_cast<MutagenesisForm *>(p));
+                     })),
+                     st);
+    g_signal_connect(st->tm, "notify::value", G_CALLBACK((+[](GObject *, GParamSpec *, gpointer p) {
+                         updateMutagenesis(static_cast<MutagenesisForm *>(p));
+                     })),
+                     st);
+    updateMutagenesis(st);
+    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<MutagenesisForm *>(p);
+                         if (!st->ok)
+                             return;
+                         GtkApplication *app = gtk_window_get_application(st->window->gtkWindow());
+                         Window *w = Window::create(app);
+                         w->document().setSequence(st->design.mutant);
+                         w->document().markUnsaved();
+                         w->present();
+                         adw_dialog_close(st->dialog);
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st,
+                           [](gpointer p) { delete static_cast<MutagenesisForm *>(p); });
+    adw_dialog_present(f.dialog, m_window);
+    gtk_widget_grab_focus(st->bases);
+}
+
+namespace {
 struct NewForm {
     GtkApplication *app;
     GtkWidget *name, *circular, *bases;

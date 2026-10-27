@@ -245,6 +245,9 @@ bool oc_restriction_clone(const OCDocument *vector, const char *vector_enzyme1, 
                           bool reversed, OCDocument *out, char **error);
 bool oc_golden_gate(const OCDocument *vector, const OCDocument *const *parts, int part_count, const char *enzyme,
                     OCDocument *out, char **error);
+/* Replaces the selection with `bases` (empty deletes; a caret inserts) and
+ * puts the mutant, carrying its back-to-back primers, into `out`. */
+bool oc_mutagenesis(const OCDocument *doc, const char *bases, double target_tm, OCDocument *out, char **error);
 /* The enzymes are ignored for a linear vector. */
 bool oc_gibson(const OCDocument *vector, const char *vector_enzyme1, const char *vector_enzyme2,
                const OCDocument *const *fragments, int fragment_count, int min_overlap, OCDocument *out,

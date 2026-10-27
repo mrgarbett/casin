@@ -137,11 +137,13 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   join linear fragments from open windows by their end overlaps.
 - Choose Enzymes: find enzymes that cut once (or up to three times), only inside the
   selection, never inside a chosen feature, with the ends you need; show just those.
+- Mutagenesis: replace, delete or insert bases at the selection; designs back-to-back
+  primers (new bases on the forward primer's 5′ end) and opens the mutant.
 - Add Primer by Sequence: paste a primer and it is placed where its 3′ part binds (either
   strand, up to two mismatches, 5′ tails allowed).
 - Design Primers for Selection: a primer pair that amplifies exactly the selection, sized
   for a target Tm and checked for dimers and hairpins; adds both primers in one undo step.
-- The C API exposes all of this for the Mac app (editing, digest and gel, primer checks and design, enzyme choice, PCR, restriction cloning, Golden Gate, Gibson); the Mac windows for the milestone 3 tools come next.
+- The C API exposes all of this for the Mac app (editing, digest and gel, primer checks and design, enzyme choice, PCR, restriction cloning, Golden Gate, Gibson, mutagenesis); the Mac windows for the milestone 3 tools come next.
 
 ## Next steps
 

@@ -915,6 +915,37 @@ static void testPrimerDesign()
     CHECK(findPrimerSites(s, "GGGGGGGGGGGGGGGGGGGG").empty());
 }
 
+static void testMutagenesis()
+{
+    Sequence s;
+    s.name = "p";
+    s.circular = true;
+    s.bases = "GCGTTGCATGCCTAGGATCCGTAACGGCATCAAGTCGACTTCAGCGTAGCATGAAACCCGGGTTTTAGTTGACCGGTACCATGCAAGCTTGCAGCAGGTCAG"
+              "CATCGATCGGCTAGCTAGGCGCGCCATCGAT";
+    s.features = {feat("orf", {{50, 68}})};
+    const int n = s.length();
+    // Substitute AAA (Lys) at 53..56 with GCG (Ala).
+    MutagenesisDesign d;
+    std::string err;
+    CHECK(designMutagenesis(s, {53, 3}, "GCG", 60, &d, &err));
+    CHECK_EQ(d.mutant.length(), n);
+    CHECK_EQ(d.mutant.bases.substr(50, 9), std::string("ATGGCGCCC"));
+    CHECK(startsWith(d.forward.bases, "GCGCCCGGG"));
+    CHECK_EQ(d.forward.binding.start, 56);
+    CHECK_EQ(d.reverse.binding.end, 53);
+    CHECK(d.forwardTm > 52 && d.reverseTm > 52);
+    CHECK(sameRanges(d.mutant.features[0].ranges, {{50, 68}}));
+    CHECK_EQ(d.mutant.primers.size(), size_t(2));
+    // The primers amplify the whole mutant from the change, back to back.
+    Sequence lin;
+    CHECK(pcrProduct(d.mutant, d.mutant.primers[0], d.mutant.primers[1], &lin, &err));
+    CHECK_EQ(lin.length(), n);
+    // Deletion and insertion.
+    CHECK(designMutagenesis(s, {53, 3}, "", 60, &d, &err) && d.mutant.length() == n - 3);
+    CHECK(designMutagenesis(s, {53, 0}, "CATCAT", 60, &d, &err) && d.mutant.length() == n + 6);
+    CHECK(!designMutagenesis(s, {5, 3}, "GCG", 60, &d, &err));   // too close to the origin
+}
+
 int main(int argc, char **argv)
 {
     testBasics();
@@ -933,6 +964,7 @@ int main(int argc, char **argv)
     testGoldenGate();
     testGibson();
     testPrimerDesign();
+    testMutagenesis();
     if (argc > 1)
         testSamples(argv[1]);
     else
