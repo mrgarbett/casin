@@ -37,6 +37,8 @@ enum { OC_HALIGN_LEFT = 0, OC_HALIGN_CENTER = 1, OC_HALIGN_RIGHT = 2 };
 enum { OC_VALIGN_BASELINE = 0, OC_VALIGN_MIDDLE = 1, OC_VALIGN_TOP = 2 };
 
 void oc_string_free(char *s);
+/* "0.1.0-alpha" */
+const char *oc_version(void);
 
 /* ---- document ---------------------------------------------------------- */
 

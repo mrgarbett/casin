@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "include/openclone.h"
 
+#include "core/version.h"
 #include "core/align.h"
 #include "core/cloning.h"
 #include "core/digest.h"
@@ -147,6 +148,8 @@ std::vector<view::Scene> pagesFor(const OCDocument *doc, double w, double h, OCM
 } // namespace
 
 extern "C" {
+
+const char *oc_version(void) { return OPENCLONE_VERSION; }
 
 void oc_string_free(char *s)
 {

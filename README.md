@@ -7,6 +7,11 @@ translations.
 
 *OpenClone is a working name. It isn't affiliated with any commercial product.*
 
+**Status: alpha (0.1.0-alpha).** The tools work and are tested, but file formats,
+menus and the C API may still change. The version is set in `src/core/version.h`
+and shown in About, at the right of the Linux status bar, and by `--version`.
+See [CHANGELOG.md](CHANGELOG.md).
+
 - **Linux:** GTK4 + libadwaita, drawn with cairo/Pango.
 - **macOS:** Swift + AppKit, drawn with CoreGraphics.
 - **Shared:** a plain C++17 core (no GUI toolkit) and a shared layout layer, so the

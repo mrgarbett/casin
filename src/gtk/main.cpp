@@ -5,10 +5,12 @@
 //   openclone --render-map out.png <file>      (no display needed; .svg/.pdf work too)
 //   openclone --print-pdf out.pdf <file>       (the printed pages, A4)
 //   openclone --screenshot out.png <file>      (needs a display, e.g. xvfb-run)
+//   openclone --version
 // Options for both: --size WxH  --enzymes 1|2|3|all  --select A-B (1-based)  --dark
 #include "window.h"
 
 #include "core/seqio.h"
+#include "core/version.h"
 #include "view/cairo_render.h"
 #include "view/maplayout.h"
 #include "view/printlayout.h"
@@ -171,7 +173,7 @@ void actAbout(GSimpleAction *, GVariant *, gpointer app)
     AdwDialog *about = adw_about_dialog_new();
     adw_about_dialog_set_application_name(ADW_ABOUT_DIALOG(about), "OpenClone");
     adw_about_dialog_set_application_icon(ADW_ABOUT_DIALOG(about), kAppId);
-    adw_about_dialog_set_version(ADW_ABOUT_DIALOG(about), "0.1.0");
+    adw_about_dialog_set_version(ADW_ABOUT_DIALOG(about), OPENCLONE_VERSION);
     adw_about_dialog_set_comments(ADW_ABOUT_DIALOG(about),
                                   "An open-source plasmid viewer. Opens GenBank, FASTA and SnapGene .dna files.");
     adw_about_dialog_set_license_type(ADW_ABOUT_DIALOG(about), GTK_LICENSE_GPL_3_0);
@@ -276,6 +278,11 @@ void onOpen(GApplication *app, GFile **files, int n, const char *, gpointer)
 
 int main(int argc, char **argv)
 {
+    for (int i = 1; i < argc; ++i)
+        if (std::string(argv[i]) == "--version") {
+            std::printf("openclone %s\n", OPENCLONE_VERSION);
+            return 0;
+        }
     std::string error;
     if (!parseOptions(argc, argv, &g_options, &error)) {
         std::fprintf(stderr, "openclone: %s\n", error.c_str());

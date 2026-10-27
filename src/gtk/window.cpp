@@ -2,6 +2,7 @@
 #include "window.h"
 
 #include "core/genbank.h"
+#include "core/version.h"
 #include "core/primercheck.h"
 #include "core/seqio.h"
 #include "view/cairo_render.h"
@@ -367,7 +368,16 @@ void Window::buildUi(GtkApplication *app)
     GtkWidget *toolbar = adw_toolbar_view_new();
     adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar), header);
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), m_stack);
-    adw_toolbar_view_add_bottom_bar(ADW_TOOLBAR_VIEW(toolbar), m_status);
+    // The version sits at the right of the status bar while we're in alpha.
+    GtkWidget *version = gtk_label_new("OpenClone " OPENCLONE_VERSION);
+    gtk_widget_add_css_class(version, "dim-label");
+    gtk_widget_add_css_class(version, "caption");
+    gtk_widget_set_margin_end(version, 12);
+    gtk_widget_set_hexpand(m_status, TRUE);
+    GtkWidget *statusBar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_box_append(GTK_BOX(statusBar), m_status);
+    gtk_box_append(GTK_BOX(statusBar), version);
+    adw_toolbar_view_add_bottom_bar(ADW_TOOLBAR_VIEW(toolbar), statusBar);
     adw_toolbar_view_set_bottom_bar_style(ADW_TOOLBAR_VIEW(toolbar), ADW_TOOLBAR_RAISED_BORDER);
 
     m_toasts = adw_toast_overlay_new();

@@ -24,6 +24,7 @@ int main(int argc, char **argv)
     if (argc < 2) return 2;
     snprintf(path, sizeof path, "%s/pOC-demo.dna", argv[1]);
 
+    CHECK(strcmp(oc_version(), "0.1.0-alpha") == 0);
     OCDocument *doc = oc_document_new();
     oc_document_set_callback(doc, on_change, NULL);
     CHECK(oc_document_is_empty(doc));

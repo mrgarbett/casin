@@ -43,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "Melting temperature: SantaLucia (1998) unified nearest-neighbor parameters.")
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "OpenClone",
-            .applicationVersion: "0.1.0",
+            .applicationVersion: String(cString: oc_version()),
             .credits: credits,
         ])
     }
