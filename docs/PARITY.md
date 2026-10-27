@@ -76,7 +76,7 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 | --- | --- | --- |
 | | Tm of a selection (SantaLucia 1998) | done |
 | P1 | Primer checks: GC, Tm, 3′ clamp, runs, hairpins, self- and pair dimers | done on Linux; Mac UI pending |
-| P2 | Automatic primer pair design | exact-ends design done on Linux; search window and Mac UI pending |
+| P2 | Automatic primer pair design | done on Linux (exact ends, or flanking primers within a search window); Mac UI pending |
 | P3 | Find where a primer binds, with mismatches | done on Linux (not across the origin yet); Mac UI pending |
 
 ## Verification

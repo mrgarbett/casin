@@ -151,8 +151,10 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   differences in red; View → Hide Aligned Reads clears them).
 - Add Primer by Sequence: paste a primer and it is placed where its 3′ part binds (either
   strand, up to two mismatches, 5′ tails allowed).
-- Design Primers for Selection: a primer pair that amplifies exactly the selection, sized
-  for a target Tm and checked for dimers and hairpins; adds both primers in one undo step.
+- Design Primers for Selection: a primer pair that amplifies exactly the selection, or one
+  that flanks it within a search window (the default for selections under 18 bp, such as a
+  SNP), sized for a target Tm and checked for dimers and hairpins; adds both primers in one
+  undo step.
 - Find ORFs: open reading frames from ATG to stop on both strands (across the origin too),
   longest first; add the ones you pick as CDS features with their translation.
 - Print… (Ctrl+P): the map on the first page, then the sequence in whole lines; the same

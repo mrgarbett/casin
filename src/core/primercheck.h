@@ -45,8 +45,11 @@ struct PrimerDesign {
     PairCheck pair;
 };
 
+// With `flank` = 0 the primers sit exactly on the target's ends. With a
+// flank, each primer may sit up to `flank` bases outside its end, so the
+// product contains the target; nearer primers are preferred.
 bool designPrimers(const Sequence &seq, Span target, double targetTm, PrimerDesign *out,
-                   std::string *error = nullptr);
+                   std::string *error = nullptr, int flank = 0);
 
 // Site-directed mutagenesis with back-to-back primers (as in Q5-style kits):
 // `target` is replaced by `replacement` (empty = deletion, empty target =

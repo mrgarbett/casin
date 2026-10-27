@@ -141,6 +141,7 @@ struct Candidate {
     int length;
     PrimerCheck check;
     double score;
+    int end = 0;   // flank search: the primer's 5' end in top-strand coordinates
 };
 
 std::vector<Candidate> candidates(const std::string &region, double targetTm)
@@ -160,7 +161,20 @@ std::vector<Candidate> candidates(const std::string &region, double targetTm)
 
 } // namespace
 
-bool designPrimers(const Sequence &seq, Span target, double targetTm, PrimerDesign *out, std::string *error)
+namespace {
+// The `keep` best candidates by their own score plus a small cost per base
+// away from the target.
+std::vector<Candidate> bestOf(std::vector<Candidate> all, size_t keep)
+{
+    std::sort(all.begin(), all.end(), [](const Candidate &a, const Candidate &b) { return a.score < b.score; });
+    if (all.size() > keep)
+        all.resize(keep);
+    return all;
+}
+} // namespace
+
+bool designPrimers(const Sequence &seq, Span target, double targetTm, PrimerDesign *out, std::string *error,
+                   int flank)
 {
     auto fail = [error](const char *msg) {
         if (error)
@@ -168,10 +182,55 @@ bool designPrimers(const Sequence &seq, Span target, double targetTm, PrimerDesi
         return false;
     };
     const int n = seq.length();
-    if (target.length < 18)
+    if (target.length < (flank > 0 ? 1 : 18))
         return fail("select at least 18 bases to amplify");
     if (target.start < 0 || target.start + target.length > n)
         return fail("the selection can't cross the origin");
+    if (flank > 0) {
+        const int s0 = target.start, e0 = target.start + target.length;
+        std::vector<Candidate> fwdAll, revAll;
+        for (int p = std::max(0, s0 - flank); p <= s0; ++p)
+            for (Candidate c : candidates(seq.bases.substr(size_t(p), 32), targetTm)) {
+                c.end = p;
+                c.score += 0.02 * (s0 - p);
+                fwdAll.push_back(c);
+            }
+        for (int q = e0; q <= std::min(n, e0 + flank); ++q) {
+            const int from = std::max(0, q - 32);
+            for (Candidate c : candidates(reverseComplement(seq.bases.substr(size_t(from), size_t(q - from))), targetTm)) {
+                c.end = q;
+                c.score += 0.02 * (q - e0);
+                revAll.push_back(c);
+            }
+        }
+        const std::vector<Candidate> fwd = bestOf(fwdAll, 40), rev = bestOf(revAll, 40);
+        const Candidate *bf = nullptr, *br = nullptr;
+        double best = 0;
+        for (const Candidate &f : fwd)
+            for (const Candidate &r : rev) {
+                if (f.end + f.length > r.end - r.length + 32)
+                    continue;
+                const PairCheck pc = checkPrimerPair(f.bases, r.bases);
+                const double score = f.score + r.score + std::fabs(f.check.tm - r.check.tm) + 2.0 * double(pc.warnings.size());
+                if (!bf || score < best) {
+                    best = score;
+                    bf = &f;
+                    br = &r;
+                }
+            }
+        if (!bf)
+            return fail("no primer pair found around the selection");
+        PrimerDesign d;
+        d.forward = {seq.name.empty() ? "fwd" : seq.name + "-fwd", bf->bases, {bf->end, bf->end + bf->length},
+                     Strand::Forward};
+        d.reverse = {seq.name.empty() ? "rev" : seq.name + "-rev", br->bases, {br->end - br->length, br->end},
+                     Strand::Reverse};
+        d.forwardCheck = bf->check;
+        d.reverseCheck = br->check;
+        d.pair = checkPrimerPair(bf->bases, br->bases);
+        *out = d;
+        return true;
+    }
     const std::string region = seq.bases.substr(size_t(target.start), size_t(target.length));
     const std::vector<Candidate> fwd = candidates(region, targetTm);
     const std::vector<Candidate> rev = candidates(reverseComplement(region), targetTm);

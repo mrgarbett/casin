@@ -907,7 +907,7 @@ struct DesignForm {
     Window *window;
     Sequence seq;
     Span target;
-    GtkWidget *tm, *fwd, *rev, *notes, *okButton;
+    GtkWidget *tm, *flank, *fwd, *rev, *notes, *okButton;
     AdwDialog *dialog;
     PrimerDesign design;
     bool ok = false;
@@ -923,7 +923,8 @@ std::string primerSummary(const Primer &p, const PrimerCheck &c)
 void updateDesign(DesignForm *st)
 {
     std::string err;
-    st->ok = designPrimers(st->seq, st->target, adw_spin_row_get_value(ADW_SPIN_ROW(st->tm)), &st->design, &err);
+    st->ok = designPrimers(st->seq, st->target, adw_spin_row_get_value(ADW_SPIN_ROW(st->tm)), &st->design, &err,
+                           int(adw_spin_row_get_value(ADW_SPIN_ROW(st->flank))));
     adw_action_row_set_subtitle(ADW_ACTION_ROW(st->fwd),
                                 st->ok ? primerSummary(st->design.forward, st->design.forwardCheck).c_str() : "");
     adw_action_row_set_subtitle(ADW_ACTION_ROW(st->rev),
@@ -967,6 +968,12 @@ void Window::designPrimersDialog()
     st->tm = spinRow(g, "Target Tm (°C)", 60, 72);
     adw_spin_row_set_range(ADW_SPIN_ROW(st->tm), 50, 72);
     adw_spin_row_set_value(ADW_SPIN_ROW(st->tm), 60);
+    st->flank = spinRow(g, "Search outside the selection (bp)", 0, 500);
+    adw_spin_row_set_range(ADW_SPIN_ROW(st->flank), 0, 500);
+    // A selection too short for primers on its ends (a SNP, say) gets flanking primers.
+    adw_spin_row_set_value(ADW_SPIN_ROW(st->flank), st->target.length < 18 ? 100 : 0);
+    gtk_adjustment_set_step_increment(adw_spin_row_get_adjustment(ADW_SPIN_ROW(st->flank)), 10);
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->flank), "0 = primers on the selection's ends");
     GtkWidget *gp = addGroup(f, "Primers");
     st->fwd = adw_action_row_new();
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->fwd), "Forward");
@@ -979,10 +986,11 @@ void Window::designPrimersDialog()
     st->notes = adw_action_row_new();
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->notes), "Checks");
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(gp), st->notes);
-    g_signal_connect(st->tm, "notify::value", G_CALLBACK((+[](GObject *, GParamSpec *, gpointer p) {
-                         updateDesign(static_cast<DesignForm *>(p));
-                     })),
-                     st);
+    for (GtkWidget *w : {st->tm, st->flank})
+        g_signal_connect(w, "notify::value", G_CALLBACK((+[](GObject *, GParamSpec *, gpointer p) {
+                             updateDesign(static_cast<DesignForm *>(p));
+                         })),
+                         st);
     updateDesign(st);
     g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
                          auto *st = static_cast<DesignForm *>(p);

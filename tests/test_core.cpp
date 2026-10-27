@@ -1019,6 +1019,14 @@ static void testPrimerDesign()
     CHECK(pcrProduct(s, d.forward, d.reverse, &p, &err));
     CHECK_EQ(p.length(), target.length);
     CHECK(!designPrimers(s, {0, 10}, 60, &d, &err));
+    // With a search window, a 5 bp target in the middle gets flanking primers.
+    const Span snp{80, 5};
+    CHECK(designPrimers(s, snp, 60, &d, &err, 60));
+    CHECK(d.forward.binding.start >= 20 && d.forward.binding.start <= 80);
+    CHECK(d.reverse.binding.end >= 85 && d.reverse.binding.end <= 145);
+    CHECK(pcrProduct(s, d.forward, d.reverse, &p, &err));
+    CHECK(p.bases.find(s.bases.substr(80, 5)) != std::string::npos);
+    CHECK_EQ(findPrimerSites(s, d.reverse.bases).size(), size_t(1));
 
     // Binding sites: the designed primers bind where they were made, a tailed
     // primer binds with its 3' part, and one mismatch is tolerated.
