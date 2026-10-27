@@ -633,6 +633,25 @@ static void testSnapGeneWriter()
     }
 }
 
+static void testPcr()
+{
+    Sequence t;
+    t.name = "t";
+    t.bases = "AAAAATTTGGGCCCAAATTTTTTTTTTTGGGAAACCCTTTTAAAAA";   // 46 bp
+    t.features = {feat("mid", {{10, 30}})};
+    Primer f{"f", "GAATTCTTTGGGCCC", {5, 14}, Strand::Forward};             // tail GAATTC + TTTGGGCCC
+    Primer r{"r", "GGATCCAAAGGGTTTCCC", {28, 40}, Strand::Reverse};       // tail GGATCC + rc of [28,40)
+    Sequence p;
+    std::string err;
+    CHECK(pcrProduct(t, f, r, &p, &err));
+    CHECK_EQ(p.length(), 6 + 35 + 6);
+    CHECK(startsWith(p.bases, "GAATTCTTTGGG"));
+    CHECK(endsWith(p.bases, "GGATCC"));
+    CHECK(sameRanges(p.features[0].ranges, {{11, 31}}));
+    CHECK_EQ(p.primers.size(), size_t(2));
+    CHECK(!pcrProduct(t, r, f, &p, &err));
+}
+
 static void testDigest()
 {
     // EcoRI G^AATTC at 10, BamHI G^GATCC at 30, PstI CTGCA^G (3' overhang) at 50.
@@ -679,6 +698,7 @@ int main(int argc, char **argv)
     testEditing();
     testSnapGeneWriter();
     testDigest();
+    testPcr();
     if (argc > 1)
         testSamples(argv[1]);
     else

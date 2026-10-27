@@ -129,6 +129,43 @@ int insertFragment(Sequence &seq, Span span, const Sequence &fragment)
     return pos;
 }
 
+bool pcrProduct(const Sequence &templ, const Primer &fwd, const Primer &rev, Sequence *out, std::string *error)
+{
+    auto fail = [error](const char *msg) {
+        if (error)
+            *error = msg;
+        return false;
+    };
+    const int n = templ.length();
+    if (fwd.strand != Strand::Forward || rev.strand != Strand::Reverse)
+        return fail("pick a forward primer and a reverse primer");
+    if (fwd.binding.length() <= 0 || rev.binding.length() <= 0)
+        return fail("both primers need a binding site on this sequence");
+    int len = rev.binding.end - fwd.binding.start;
+    if (len < 0 && templ.circular)
+        len += n;
+    if (len < std::max(fwd.binding.length(), rev.binding.length()))
+        return fail("the primers don't face each other; the reverse primer must bind downstream");
+    const int fwdTailLen = std::max(0, int(fwd.bases.size()) - fwd.binding.length());
+    const int revTailLen = std::max(0, int(rev.bases.size()) - rev.binding.length());
+    Sequence product = extractFragment(templ, {fwd.binding.start, len});
+    const std::string fwdTail = fwd.bases.substr(0, size_t(fwdTailLen));
+    const std::string revTail = reverseComplement(rev.bases.substr(0, size_t(revTailLen)));
+    insertBases(product, 0, fwdTail);
+    insertBases(product, product.length(), revTail);
+    product.circular = false;
+    product.name = templ.name + " PCR " + std::to_string(product.length()) + " bp";
+    product.description = "PCR product of " + fwd.name + " and " + rev.name + " on " + templ.name;
+    // The primers bind the product's ends, tails included.
+    product.primers.clear();
+    Primer f = fwd, r = rev;
+    f.binding = {0, int(fwd.bases.size())};
+    r.binding = {product.length() - int(rev.bases.size()), product.length()};
+    product.primers = {f, r};
+    *out = product;
+    return true;
+}
+
 void sortRangesTopStrand(std::vector<Range> &ranges, int n, bool circular)
 {
     Feature tmp;

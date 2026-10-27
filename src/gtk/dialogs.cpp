@@ -2,6 +2,8 @@
 // Editing dialogs: feature, primer and new sequence.
 #include "window.h"
 
+#include "core/edit.h"
+#include "view/maplayout.h"   // formatBp
 #include "view/style.h"
 
 #include <algorithm>
@@ -285,6 +287,83 @@ void Window::primerDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<PrimerForm *>(p); });
+    adw_dialog_present(f.dialog, m_window);
+}
+
+namespace {
+struct PcrForm {
+    Window *window;
+    Sequence templ;
+    std::vector<Primer> forward, reverse;
+    GtkWidget *fwd, *rev, *result;
+    AdwDialog *dialog;
+    Sequence product;
+    bool ok = false;
+};
+
+void updatePcr(PcrForm *st)
+{
+    const guint f = adw_combo_row_get_selected(ADW_COMBO_ROW(st->fwd));
+    const guint r = adw_combo_row_get_selected(ADW_COMBO_ROW(st->rev));
+    std::string err;
+    st->ok = f < st->forward.size() && r < st->reverse.size()
+          && pcrProduct(st->templ, st->forward[f], st->reverse[r], &st->product, &err);
+    const std::string text = st->ok ? view::formatBp(st->product.length()) + " product, "
+                                          + std::to_string(st->product.features.size()) + " features carried over"
+                                    : "No product: " + err;
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->result), text.c_str());
+}
+} // namespace
+
+void Window::pcrDialog()
+{
+    auto *st = new PcrForm{};
+    st->window = this;
+    st->templ = m_doc.sequence();
+    std::vector<std::string> fnames, rnames;
+    for (const Primer &p : st->templ.primers) {
+        if (p.binding.length() <= 0)
+            continue;
+        (p.strand == Strand::Reverse ? st->reverse : st->forward).push_back(p);
+        (p.strand == Strand::Reverse ? rnames : fnames).push_back(p.name);
+    }
+    if (st->forward.empty() || st->reverse.empty()) {
+        toast("PCR needs a forward and a reverse primer that bind this sequence");
+        delete st;
+        return;
+    }
+    Form f = makeForm("PCR Product", "Open Product");
+    st->dialog = f.dialog;
+    GtkWidget *g = addGroup(f);
+    auto names = [](const std::vector<std::string> &v) {
+        std::vector<const char *> out;
+        for (const std::string &s : v)
+            out.push_back(s.c_str());
+        out.push_back(nullptr);
+        return out;
+    };
+    st->fwd = comboRow(g, "Forward primer", names(fnames).data(), 0);
+    st->rev = comboRow(g, "Reverse primer", names(rnames).data(), 0);
+    st->result = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->result), "Result");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(g), st->result);
+    auto changed = +[](GObject *, GParamSpec *, gpointer p) { updatePcr(static_cast<PcrForm *>(p)); };
+    g_signal_connect(st->fwd, "notify::selected", G_CALLBACK(changed), st);
+    g_signal_connect(st->rev, "notify::selected", G_CALLBACK(changed), st);
+    updatePcr(st);
+    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<PcrForm *>(p);
+                         if (!st->ok)
+                             return;
+                         GtkApplication *app = gtk_window_get_application(st->window->gtkWindow());
+                         Window *w = Window::create(app);
+                         w->document().setSequence(st->product);
+                         w->document().markUnsaved();
+                         w->present();
+                         adw_dialog_close(st->dialog);
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<PcrForm *>(p); });
     adw_dialog_present(f.dialog, m_window);
 }
 

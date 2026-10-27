@@ -64,6 +64,7 @@ private:
     static void actDeleteFeature(GSimpleAction *, GVariant *, gpointer self);
     static void actAddPrimer(GSimpleAction *, GVariant *, gpointer self);
     static void actDigest(GSimpleAction *, GVariant *, gpointer self);
+    static void actPcr(GSimpleAction *, GVariant *, gpointer self);
     static gboolean onCloseRequest(GtkWindow *, gpointer self);
     static void actExportFasta(GSimpleAction *, GVariant *, gpointer self);
     static void actExportMap(GSimpleAction *, GVariant *, gpointer self);
@@ -84,6 +85,7 @@ private:
     void featureDialog(int index);
     void primerDialog();
     void digestDialog();
+    void pcrDialog();
     void pasteText(const std::string &text);
 
     Document m_doc;

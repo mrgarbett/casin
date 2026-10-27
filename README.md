@@ -125,6 +125,8 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
 - Digest and Gel (Ctrl+D, a first piece of milestone 3): pick enzymes and see the
   fragments with their ends and overhangs, next to a virtual gel with a ladder and
   the uncut plasmid.
+- PCR Product: pick a forward and a reverse primer; the product (with 5′ tails and the
+  features it covers) opens in a new window.
 - The C API exposes all of this for the Mac app.
 
 ## Next steps

@@ -32,6 +32,13 @@ Sequence extractFragment(const Sequence &seq, Span span);
 // Returns the boundary where the fragment begins.
 int insertFragment(Sequence &seq, Span span, const Sequence &fragment);
 
+// The product of a PCR with a forward and a reverse primer. Each primer's
+// 3' part binds its binding site; bases beyond it at the 5' end are tails
+// that end up in the product. Returns false (with *error) when the primers
+// don't face each other on the template.
+bool pcrProduct(const Sequence &templ, const Primer &forward, const Primer &reverse, Sequence *out,
+                std::string *error = nullptr);
+
 // Orders ranges in top-strand order, starting just after the feature's
 // largest uncovered gap (origin-crossing pieces come out end-then-start).
 void sortRangesTopStrand(std::vector<Range> &ranges, int n, bool circular);
