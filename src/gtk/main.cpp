@@ -124,6 +124,17 @@ void actOpen(GSimpleAction *, GVariant *, gpointer app)
     gtk::showOpenDialog(GTK_APPLICATION(app), gtk_application_get_active_window(GTK_APPLICATION(app)));
 }
 
+void actNew(GSimpleAction *, GVariant *, gpointer app)
+{
+    GtkWindow *parent = gtk_application_get_active_window(GTK_APPLICATION(app));
+    if (!parent) {
+        gtk::Window *w = gtk::Window::create(GTK_APPLICATION(app));
+        w->present();
+        parent = w->gtkWindow();
+    }
+    gtk::showNewSequenceDialog(GTK_APPLICATION(app), parent);
+}
+
 void actQuit(GSimpleAction *, GVariant *, gpointer app)
 {
     g_application_quit(G_APPLICATION(app));
@@ -149,6 +160,7 @@ void actAbout(GSimpleAction *, GVariant *, gpointer app)
 void onStartup(GApplication *app, gpointer)
 {
     static const GActionEntry entries[] = {
+        {"new", actNew, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"open", actOpen, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"quit", actQuit, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"about", actAbout, nullptr, nullptr, nullptr, {0, 0, 0}},
@@ -158,7 +170,15 @@ void onStartup(GApplication *app, gpointer)
     static const Accel accels[] = {
         {"app.open", {"<Control>o", nullptr}},
         {"app.quit", {"<Control>q", nullptr}},
-        {"win.save-genbank", {"<Control><Shift>s", nullptr}},
+        {"app.new", {"<Control>n", nullptr}},
+        {"win.save", {"<Control>s", nullptr}},
+        {"win.save-as", {"<Control><Shift>s", nullptr}},
+        {"win.undo", {"<Control>z", nullptr}},
+        {"win.redo", {"<Control><Shift>z", "<Control>y", nullptr}},
+        {"win.cut", {"<Control>x", nullptr}},
+        {"win.paste", {"<Control>v", nullptr}},
+        {"win.select-all", {"<Control>a", nullptr}},
+        {"win.add-feature", {"<Control>k", nullptr}},
         {"win.export-map", {"<Control>e", nullptr}},
         {"win.copy", {"<Control>c", nullptr}},
         {"win.copy-rc", {"<Control><Shift>c", nullptr}},

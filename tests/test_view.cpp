@@ -41,7 +41,16 @@ static void testUndo(const Sequence &seq)
     CHECK_EQ(doc.sequence().length(), int(original.size()) + 4);
     CHECK(doc.selection().start == 14 && doc.selection().length == 0);
     CHECK(doc.isModified() && doc.canUndo());
-    CHECK(doc.undoLabel() == "Insert Bases");
+    CHECK(doc.undoLabel() == "Typing");
+    doc.typeBases("C");                       // more typing joins the same step
+    doc.typeBases("C");
+    doc.undo();
+    CHECK(doc.sequence().bases == original);
+    doc.redo();
+    CHECK_EQ(doc.sequence().length(), int(original.size()) + 6);
+    doc.undo();
+    doc.setSelection({10, 0});
+    doc.typeBases("ggaa");
 
     doc.setSelection({0, 5});
     doc.deleteBackward();

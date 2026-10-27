@@ -12,7 +12,7 @@ namespace oc::gtk {
 
 namespace {
 
-enum SaveKind { SaveGenBank, SaveFasta, SaveMap };
+enum SaveKind { SaveSequence, SaveFasta, SaveMap };
 
 std::string baseName(const std::string &path)
 {
@@ -79,14 +79,23 @@ Window::Window(GtkApplication *app)
     buildUi(app);
     m_doc.onSequenceChanged([this] {
         rebuildFeatureList();
+        rebuildPrimerList();
         rebuildEnzymeList();
         updateTitle();
         gtk_stack_set_visible_child_name(GTK_STACK(m_stack), m_doc.isEmpty() ? "empty" : "document");
     });
     m_doc.onEnzymesChanged([this] { refreshEnzymeRows(); });
-    m_doc.onSelectionChanged([this] { updateStatus(); });
+    m_doc.onSelectionChanged([this] {
+        updateStatus();
+        updateActions();
+    });
+    m_doc.onHistoryChanged([this] {
+        updateTitle();
+        updateActions();
+    });
     updateTitle();
     updateStatus();
+    updateActions();
 }
 
 Window::~Window() = default;
@@ -100,7 +109,20 @@ void Window::buildUi(GtkApplication *app)
                            [](gpointer p) { delete static_cast<Window *>(p); });
 
     static const GActionEntry entries[] = {
-        {"save-genbank", &Window::actSaveGenBank, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"save", &Window::actSave, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"save-as", &Window::actSaveAs, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"undo", &Window::actUndo, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"redo", &Window::actRedo, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"cut", &Window::actCut, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"paste", &Window::actPaste, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"select-all", &Window::actSelectAll, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"reverse-complement", &Window::actReverseComplement, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"set-origin", &Window::actSetOrigin, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"circular", nullptr, nullptr, "false", &Window::actCircular, {0, 0, 0}},
+        {"add-feature", &Window::actAddFeature, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"edit-feature", &Window::actEditFeature, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"delete-feature", &Window::actDeleteFeature, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"add-primer", &Window::actAddPrimer, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-fasta", &Window::actExportFasta, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-map", &Window::actExportMap, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"copy", &Window::actCopy, nullptr, nullptr, nullptr, {0, 0, 0}},
@@ -110,6 +132,7 @@ void Window::buildUi(GtkApplication *app)
         {"show-complement", nullptr, nullptr, "true", &Window::actComplement, {0, 0, 0}},
     };
     g_action_map_add_action_entries(G_ACTION_MAP(m_window), entries, G_N_ELEMENTS(entries), this);
+    g_signal_connect(m_window, "close-request", G_CALLBACK(&Window::onCloseRequest), this);
 
     m_map = std::make_unique<MapView>(&m_doc);
     m_seq = std::make_unique<SequenceView>(&m_doc);
@@ -123,19 +146,43 @@ void Window::buildUi(GtkApplication *app)
     gtk_widget_set_tooltip_text(open, "Open a sequence (Ctrl+O)");
     gtk_actionable_set_action_name(GTK_ACTIONABLE(open), "app.open");
     adw_header_bar_pack_start(ADW_HEADER_BAR(header), open);
+    GtkWidget *undo = gtk_button_new_from_icon_name("edit-undo-symbolic");
+    gtk_widget_set_tooltip_text(undo, "Undo (Ctrl+Z)");
+    gtk_actionable_set_action_name(GTK_ACTIONABLE(undo), "win.undo");
+    adw_header_bar_pack_start(ADW_HEADER_BAR(header), undo);
+    GtkWidget *redo = gtk_button_new_from_icon_name("edit-redo-symbolic");
+    gtk_widget_set_tooltip_text(redo, "Redo (Shift+Ctrl+Z)");
+    gtk_actionable_set_action_name(GTK_ACTIONABLE(redo), "win.redo");
+    adw_header_bar_pack_start(ADW_HEADER_BAR(header), redo);
 
     GMenu *menu = g_menu_new();
     GMenu *fileSection = g_menu_new();
+    g_menu_append(fileSection, "New Sequence…", "app.new");
     g_menu_append(fileSection, "Open…", "app.open");
-    g_menu_append(fileSection, "Save As GenBank…", "win.save-genbank");
+    g_menu_append(fileSection, "Save", "win.save");
+    g_menu_append(fileSection, "Save As…", "win.save-as");
     g_menu_append(fileSection, "Export FASTA…", "win.export-fasta");
     g_menu_append(fileSection, "Export Map…", "win.export-map");
     g_menu_append_section(menu, nullptr, G_MENU_MODEL(fileSection));
     GMenu *editSection = g_menu_new();
+    g_menu_append(editSection, "Cut", "win.cut");
     g_menu_append(editSection, "Copy", "win.copy");
     g_menu_append(editSection, "Copy Reverse Complement", "win.copy-rc");
+    g_menu_append(editSection, "Paste", "win.paste");
+    g_menu_append(editSection, "Select All", "win.select-all");
     g_menu_append(editSection, "Find…", "win.find");
     g_menu_append_section(menu, nullptr, G_MENU_MODEL(editSection));
+    GMenu *seqSection = g_menu_new();
+    g_menu_append(seqSection, "Reverse Complement Sequence", "win.reverse-complement");
+    g_menu_append(seqSection, "Set Origin at Selection", "win.set-origin");
+    g_menu_append(seqSection, "Circular", "win.circular");
+    GMenu *featureMenu = g_menu_new();
+    g_menu_append(featureMenu, "Add Feature…", "win.add-feature");
+    g_menu_append(featureMenu, "Edit Feature…", "win.edit-feature");
+    g_menu_append(featureMenu, "Delete Feature", "win.delete-feature");
+    g_menu_append(featureMenu, "Add Primer…", "win.add-primer");
+    g_menu_append_submenu(seqSection, "Features and Primers", G_MENU_MODEL(featureMenu));
+    g_menu_append_section(menu, nullptr, G_MENU_MODEL(seqSection));
     GMenu *viewSection = g_menu_new();
     g_menu_append(viewSection, "Show Complement Strand", "win.show-complement");
     g_menu_append_section(menu, nullptr, G_MENU_MODEL(viewSection));
@@ -147,7 +194,7 @@ void Window::buildUi(GtkApplication *app)
     gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menuButton), G_MENU_MODEL(menu));
     gtk_menu_button_set_primary(GTK_MENU_BUTTON(menuButton), TRUE);
     gtk_widget_set_tooltip_text(menuButton, "Main menu");
-    for (GMenu *m : {fileSection, editSection, viewSection, appSection, menu})
+    for (GMenu *m : {fileSection, editSection, seqSection, featureMenu, viewSection, appSection, menu})
         g_object_unref(m);
     adw_header_bar_pack_end(ADW_HEADER_BAR(header), menuButton);
 
@@ -273,9 +320,29 @@ GtkWidget *Window::buildSidebar()
     gtk_box_append(GTK_BOX(ebox), credit);
     adw_view_stack_add_titled_with_icon(ADW_VIEW_STACK(stack), ebox, "enzymes", "Enzymes", "edit-cut-symbolic");
 
+    // Primers.
+    m_primerList = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(m_primerList), GTK_SELECTION_SINGLE);
+    gtk_widget_add_css_class(m_primerList, "navigation-sidebar");
+    g_signal_connect(m_primerList, "row-activated", G_CALLBACK((+[](GtkListBox *, GtkListBoxRow *row, gpointer p) {
+                         auto *self = static_cast<Window *>(p);
+                         const int i = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "primer"));
+                         const auto &primers = self->m_doc.sequence().primers;
+                         if (i >= 0 && i < int(primers.size()))
+                             self->m_doc.setSelection({primers[size_t(i)].binding.start,
+                                                       primers[size_t(i)].binding.length()});
+                     })),
+                     this);
+    GtkWidget *pscroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(pscroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(pscroll), m_primerList);
+    gtk_widget_set_vexpand(pscroll, TRUE);
+    adw_view_stack_add_titled_with_icon(ADW_VIEW_STACK(stack), pscroll, "primers", "Primers",
+                                        "format-justify-left-symbolic");
+
     GtkWidget *switcher = adw_view_switcher_new();
     adw_view_switcher_set_stack(ADW_VIEW_SWITCHER(switcher), ADW_VIEW_STACK(stack));
-    adw_view_switcher_set_policy(ADW_VIEW_SWITCHER(switcher), ADW_VIEW_SWITCHER_POLICY_WIDE);
+    adw_view_switcher_set_policy(ADW_VIEW_SWITCHER(switcher), ADW_VIEW_SWITCHER_POLICY_NARROW);
     gtk_widget_set_margin_top(switcher, 6);
     gtk_widget_set_margin_start(switcher, 6);
     gtk_widget_set_margin_end(switcher, 6);
@@ -319,9 +386,10 @@ void Window::updateTitle()
     std::string sub = view::formatBp(s.length()) + " · " + (s.circular ? "circular" : "linear");
     if (!m_doc.path().empty())
         sub += " · " + baseName(m_doc.path());
-    adw_window_title_set_title(ADW_WINDOW_TITLE(m_title), name.c_str());
+    const std::string shown = m_doc.isModified() ? "• " + name : name;
+    adw_window_title_set_title(ADW_WINDOW_TITLE(m_title), shown.c_str());
     adw_window_title_set_subtitle(ADW_WINDOW_TITLE(m_title), sub.c_str());
-    gtk_window_set_title(gtkWindow(), (name + " — OpenClone").c_str());
+    gtk_window_set_title(gtkWindow(), (shown + " — OpenClone").c_str());
     updateStatus();
 }
 
@@ -348,9 +416,51 @@ void Window::rebuildFeatureList()
             sub += " · ←";
         adw_action_row_set_subtitle(ADW_ACTION_ROW(row), sub.c_str());
         adw_action_row_add_prefix(ADW_ACTION_ROW(row), swatch(view::FeatureStyle::fill(f.type, f.color)));
+        GtkWidget *edit = gtk_button_new_from_icon_name("document-edit-symbolic");
+        gtk_widget_add_css_class(edit, "flat");
+        gtk_widget_set_valign(edit, GTK_ALIGN_CENTER);
+        gtk_widget_set_tooltip_text(edit, "Edit feature");
+        g_object_set_data(G_OBJECT(edit), "feature", GINT_TO_POINTER(int(i)));
+        g_signal_connect(edit, "clicked", G_CALLBACK((+[](GtkButton *b, gpointer p) {
+                             static_cast<Window *>(p)->featureDialog(
+                                 GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "feature")));
+                         })),
+                         this);
+        adw_action_row_add_suffix(ADW_ACTION_ROW(row), edit);
         gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), TRUE);
         g_object_set_data(G_OBJECT(row), "feature", GINT_TO_POINTER(int(i)));
         gtk_list_box_append(GTK_LIST_BOX(m_featureList), row);
+    }
+}
+
+void Window::rebuildPrimerList()
+{
+    gtk_list_box_remove_all(GTK_LIST_BOX(m_primerList));
+    const Sequence &s = m_doc.sequence();
+    for (size_t i = 0; i < s.primers.size(); ++i) {
+        const Primer &pr = s.primers[i];
+        GtkWidget *row = adw_action_row_new();
+        adw_preferences_row_set_use_markup(ADW_PREFERENCES_ROW(row), FALSE);
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), pr.name.c_str());
+        std::string sub = std::to_string(pr.bases.size()) + " nt";
+        if (pr.binding.length() > 0)
+            sub += " · " + view::withThousands(pr.binding.start + 1) + "–" + view::withThousands(pr.binding.end)
+                 + (pr.strand == Strand::Reverse ? " · ←" : " · →");
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(row), sub.c_str());
+        GtkWidget *del = gtk_button_new_from_icon_name("user-trash-symbolic");
+        gtk_widget_add_css_class(del, "flat");
+        gtk_widget_set_valign(del, GTK_ALIGN_CENTER);
+        gtk_widget_set_tooltip_text(del, "Delete primer");
+        g_object_set_data(G_OBJECT(del), "primer", GINT_TO_POINTER(int(i)));
+        g_signal_connect(del, "clicked", G_CALLBACK((+[](GtkButton *b, gpointer p) {
+                             static_cast<Window *>(p)->m_doc.removePrimer(
+                                 GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "primer")));
+                         })),
+                         this);
+        adw_action_row_add_suffix(ADW_ACTION_ROW(row), del);
+        gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), TRUE);
+        g_object_set_data(G_OBJECT(row), "primer", GINT_TO_POINTER(int(i)));
+        gtk_list_box_append(GTK_LIST_BOX(m_primerList), row);
     }
 }
 
@@ -545,11 +655,246 @@ void Window::actComplement(GSimpleAction *a, GVariant *state, gpointer p)
     self->m_seq->setShowComplement(g_variant_get_boolean(state));
 }
 
-void Window::actSaveGenBank(GSimpleAction *, GVariant *, gpointer p)
+void Window::actSave(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->save();
+}
+
+void Window::actSaveAs(GSimpleAction *, GVariant *, gpointer p)
 {
     auto *self = static_cast<Window *>(p);
-    if (!self->m_doc.isEmpty())
-        self->saveDialog("Save As GenBank", self->m_doc.sequence().name + ".gb", SaveGenBank);
+    if (self->m_doc.isEmpty())
+        return;
+    const std::string ext = fileExtension(self->m_doc.path());
+    self->saveDialog("Save As (.dna, .gb or .fasta)", self->m_doc.sequence().name + (ext == "dna" ? ".dna" : ".gb"),
+                     SaveSequence);
+}
+
+namespace {
+// The format a path saves in; FASTA drops features, so it is export-only.
+FileFormat saveFormatFor(const std::string &path)
+{
+    const std::string ext = fileExtension(path);
+    if (ext == "dna")
+        return FileFormat::SnapGene;
+    if (ext == "fa" || ext == "fasta" || ext == "fna" || ext == "fas")
+        return FileFormat::Fasta;
+    return FileFormat::GenBank;
+}
+}
+
+bool Window::saveTo(const std::string &path, FileFormat format)
+{
+    std::string error;
+    if (!saveSequenceFile(path, m_doc.sequence(), format, &error)) {
+        showError("Could not save", error);
+        return false;
+    }
+    if (format != FileFormat::Fasta) {
+        m_doc.setPath(path);
+        m_doc.markSaved();
+    }
+    toast("Saved " + baseName(path));
+    return true;
+}
+
+bool Window::save(bool closeAfter)
+{
+    if (m_doc.isEmpty())
+        return false;
+    const std::string &path = m_doc.path();
+    if (!path.empty() && saveFormatFor(path) != FileFormat::Fasta) {
+        if (!saveTo(path, saveFormatFor(path)))
+            return false;
+        if (closeAfter) {
+            m_closeConfirmed = true;
+            gtk_window_close(gtkWindow());
+        }
+        return true;
+    }
+    saveDialog("Save As (.dna, .gb or .fasta)", m_doc.sequence().name + ".dna", SaveSequence, closeAfter);
+    return false;
+}
+
+gboolean Window::onCloseRequest(GtkWindow *, gpointer p)
+{
+    auto *self = static_cast<Window *>(p);
+    if (self->m_closeConfirmed || !self->m_doc.isModified())
+        return FALSE;
+    const std::string name = self->m_doc.sequence().name.empty() ? "this sequence" : self->m_doc.sequence().name;
+    AdwDialog *d = adw_alert_dialog_new(("Save changes to " + name + "?").c_str(),
+                                        "Unsaved changes are lost when the window closes.");
+    adw_alert_dialog_add_responses(ADW_ALERT_DIALOG(d), "cancel", "Cancel", "discard", "Discard", "save", "Save",
+                                   nullptr);
+    adw_alert_dialog_set_response_appearance(ADW_ALERT_DIALOG(d), "discard", ADW_RESPONSE_DESTRUCTIVE);
+    adw_alert_dialog_set_response_appearance(ADW_ALERT_DIALOG(d), "save", ADW_RESPONSE_SUGGESTED);
+    adw_alert_dialog_set_default_response(ADW_ALERT_DIALOG(d), "save");
+    adw_alert_dialog_set_close_response(ADW_ALERT_DIALOG(d), "cancel");
+    g_signal_connect(d, "response", G_CALLBACK((+[](AdwAlertDialog *, const char *response, gpointer p) {
+                         auto *self = static_cast<Window *>(p);
+                         if (g_strcmp0(response, "discard") == 0) {
+                             self->m_closeConfirmed = true;
+                             gtk_window_close(self->gtkWindow());
+                         } else if (g_strcmp0(response, "save") == 0) {
+                             self->save(true);
+                         }
+                     })),
+                     self);
+    adw_dialog_present(d, self->m_window);
+    return TRUE;
+}
+
+void Window::updateActions()
+{
+    auto enable = [this](const char *name, bool on) {
+        GAction *a = g_action_map_lookup_action(G_ACTION_MAP(m_window), name);
+        if (a)
+            g_simple_action_set_enabled(G_SIMPLE_ACTION(a), on);
+    };
+    const bool has = !m_doc.isEmpty();
+    const bool sel = m_doc.hasSelection() && m_doc.selection().length > 0;
+    enable("undo", m_doc.canUndo());
+    enable("redo", m_doc.canRedo());
+    for (const char *name : {"save", "save-as", "export-fasta", "export-map", "paste", "select-all",
+                             "reverse-complement", "circular"})
+        enable(name, has);
+    enable("cut", sel);
+    enable("add-feature", sel);
+    enable("add-primer", sel && !m_doc.selection().wraps(m_doc.sequence().length()));
+    enable("edit-feature", m_doc.activeFeature() >= 0);
+    enable("delete-feature", m_doc.activeFeature() >= 0);
+    enable("set-origin", has && m_doc.sequence().circular && m_doc.hasSelection());
+    GAction *circ = g_action_map_lookup_action(G_ACTION_MAP(m_window), "circular");
+    if (circ)
+        g_simple_action_set_state(G_SIMPLE_ACTION(circ), g_variant_new_boolean(m_doc.sequence().circular));
+    m_seq->setEditable(has);
+}
+
+void Window::actUndo(GSimpleAction *, GVariant *, gpointer p)
+{
+    auto *self = static_cast<Window *>(p);
+    if (!self->m_doc.canUndo())
+        return;
+    const std::string label = self->m_doc.undoLabel();
+    self->m_doc.undo();
+    self->toast("Undid " + toLower(label));
+}
+
+void Window::actRedo(GSimpleAction *, GVariant *, gpointer p)
+{
+    auto *self = static_cast<Window *>(p);
+    if (!self->m_doc.canRedo())
+        return;
+    const std::string label = self->m_doc.redoLabel();
+    self->m_doc.redo();
+    self->toast("Redid " + toLower(label));
+}
+
+void Window::actCut(GSimpleAction *, GVariant *, gpointer p)
+{
+    auto *self = static_cast<Window *>(p);
+    GtkWidget *focus = gtk_root_get_focus(GTK_ROOT(self->m_window));
+    if (focus && GTK_IS_TEXT(focus)) {
+        gtk_widget_activate_action(focus, "clipboard.cut", nullptr);
+        return;
+    }
+    const std::string bases = self->m_doc.selectedBases();
+    if (bases.empty())
+        return;
+    gdk_clipboard_set_text(gtk_widget_get_clipboard(self->m_window), bases.c_str());
+    self->m_doc.deleteSelection();
+    self->toast("Cut " + view::formatBp(int(bases.size())));
+}
+
+void Window::pasteText(const std::string &text)
+{
+    if (!m_doc.typeBases(text))
+        toast("The clipboard holds no DNA bases");
+}
+
+void Window::actPaste(GSimpleAction *, GVariant *, gpointer p)
+{
+    auto *self = static_cast<Window *>(p);
+    GtkWidget *focus = gtk_root_get_focus(GTK_ROOT(self->m_window));
+    if (focus && GTK_IS_TEXT(focus)) {
+        gtk_widget_activate_action(focus, "clipboard.paste", nullptr);
+        return;
+    }
+    gdk_clipboard_read_text_async(
+        gtk_widget_get_clipboard(self->m_window), nullptr,
+        [](GObject *src, GAsyncResult *res, gpointer data) {
+            char *text = gdk_clipboard_read_text_finish(GDK_CLIPBOARD(src), res, nullptr);
+            // The window may have closed meanwhile; look it up again by weak pointer.
+            auto *weak = static_cast<GWeakRef *>(data);
+            GObject *win = static_cast<GObject *>(g_weak_ref_get(weak));
+            if (win && text)
+                if (Window *self = static_cast<Window *>(g_object_get_data(win, "oc-window")))
+                    self->pasteText(text);
+            if (win)
+                g_object_unref(win);
+            g_free(text);
+            g_weak_ref_clear(weak);
+            delete weak;
+        },
+        [&] {
+            auto *weak = new GWeakRef;
+            g_weak_ref_init(weak, self->m_window);
+            return weak;
+        }());
+}
+
+void Window::actSelectAll(GSimpleAction *, GVariant *, gpointer p)
+{
+    auto *self = static_cast<Window *>(p);
+    GtkWidget *focus = gtk_root_get_focus(GTK_ROOT(self->m_window));
+    if (focus && GTK_IS_TEXT(focus)) {
+        gtk_editable_select_region(GTK_EDITABLE(focus), 0, -1);
+        return;
+    }
+    self->m_doc.setSelection({0, self->m_doc.sequence().length()});
+}
+
+void Window::actReverseComplement(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->m_doc.reverseComplementAll();
+}
+
+void Window::actSetOrigin(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->m_doc.setOriginAtSelection();
+}
+
+void Window::actCircular(GSimpleAction *, GVariant *state, gpointer p)
+{
+    static_cast<Window *>(p)->m_doc.setCircular(g_variant_get_boolean(state));
+}
+
+void Window::actAddFeature(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->featureDialog(-1);
+}
+
+void Window::actEditFeature(GSimpleAction *, GVariant *, gpointer p)
+{
+    auto *self = static_cast<Window *>(p);
+    if (self->m_doc.activeFeature() >= 0)
+        self->featureDialog(self->m_doc.activeFeature());
+}
+
+void Window::actDeleteFeature(GSimpleAction *, GVariant *, gpointer p)
+{
+    auto *self = static_cast<Window *>(p);
+    const int i = self->m_doc.activeFeature();
+    if (i < 0)
+        return;
+    const std::string name = self->m_doc.sequence().features[size_t(i)].name;
+    self->m_doc.removeFeature(i);
+    self->toast("Deleted " + name);
+}
+
+void Window::actAddPrimer(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->primerDialog();
 }
 
 void Window::actExportFasta(GSimpleAction *, GVariant *, gpointer p)
@@ -570,15 +915,16 @@ namespace {
 struct SaveRequest {
     Window *window;
     int kind;
+    bool closeAfter;
 };
 }
 
-void Window::saveDialog(const std::string &title, const std::string &suggested, int kind)
+void Window::saveDialog(const std::string &title, const std::string &suggested, int kind, bool closeAfter)
 {
     GtkFileDialog *dialog = gtk_file_dialog_new();
     gtk_file_dialog_set_title(dialog, title.c_str());
     gtk_file_dialog_set_initial_name(dialog, suggested.c_str());
-    auto *req = new SaveRequest{this, kind};
+    auto *req = new SaveRequest{this, kind, closeAfter};
     gtk_file_dialog_save(dialog, gtkWindow(), nullptr,
                          [](GObject *src, GAsyncResult *res, gpointer data) {
                              auto *r = static_cast<SaveRequest *>(data);
@@ -590,17 +936,15 @@ void Window::saveDialog(const std::string &title, const std::string &suggested, 
                                  g_free(cpath);
                                  g_object_unref(file);
                                  Window *w = r->window;
-                                 std::string error;
-                                 bool ok = true;
                                  if (r->kind == SaveMap) {
                                      w->exportMap(path);
                                  } else {
-                                     const FileFormat fmt = r->kind == SaveGenBank ? FileFormat::GenBank : FileFormat::Fasta;
-                                     ok = saveSequenceFile(path, w->m_doc.sequence(), fmt, &error);
-                                     if (ok)
-                                         w->toast("Saved " + baseName(path));
-                                     else
-                                         w->showError("Could not save", error);
+                                     const FileFormat fmt =
+                                         r->kind == SaveFasta ? FileFormat::Fasta : saveFormatFor(path);
+                                     if (w->saveTo(path, fmt) && r->closeAfter && !w->m_doc.isModified()) {
+                                         w->m_closeConfirmed = true;
+                                         gtk_window_close(w->gtkWindow());
+                                     }
                                  }
                              } else if (err) {
                                  g_error_free(err);   // cancelled

@@ -3,6 +3,7 @@
 
 #include "mapview.h"
 #include "seqview.h"
+#include "core/seqio.h"
 #include "view/document.h"
 
 #include <adwaita.h>
@@ -48,7 +49,21 @@ private:
     static void onEnzymeToggled(GtkCheckButton *, gpointer self);
     static void onSearchActivate(GtkSearchEntry *, gpointer self);
     static gboolean onDrop(GtkDropTarget *, const GValue *value, double x, double y, gpointer self);
-    static void actSaveGenBank(GSimpleAction *, GVariant *, gpointer self);
+    static void actSave(GSimpleAction *, GVariant *, gpointer self);
+    static void actSaveAs(GSimpleAction *, GVariant *, gpointer self);
+    static void actUndo(GSimpleAction *, GVariant *, gpointer self);
+    static void actRedo(GSimpleAction *, GVariant *, gpointer self);
+    static void actCut(GSimpleAction *, GVariant *, gpointer self);
+    static void actPaste(GSimpleAction *, GVariant *, gpointer self);
+    static void actSelectAll(GSimpleAction *, GVariant *, gpointer self);
+    static void actReverseComplement(GSimpleAction *, GVariant *, gpointer self);
+    static void actSetOrigin(GSimpleAction *, GVariant *, gpointer self);
+    static void actCircular(GSimpleAction *, GVariant *, gpointer self);
+    static void actAddFeature(GSimpleAction *, GVariant *, gpointer self);
+    static void actEditFeature(GSimpleAction *, GVariant *, gpointer self);
+    static void actDeleteFeature(GSimpleAction *, GVariant *, gpointer self);
+    static void actAddPrimer(GSimpleAction *, GVariant *, gpointer self);
+    static gboolean onCloseRequest(GtkWindow *, gpointer self);
     static void actExportFasta(GSimpleAction *, GVariant *, gpointer self);
     static void actExportMap(GSimpleAction *, GVariant *, gpointer self);
     static void actCopy(GSimpleAction *, GVariant *, gpointer self);
@@ -57,7 +72,17 @@ private:
     static void actClose(GSimpleAction *, GVariant *, gpointer self);
     static void actComplement(GSimpleAction *, GVariant *, gpointer self);
     void copyText(const std::string &text, const char *what);
-    void saveDialog(const std::string &title, const std::string &suggested, int kind);
+    void saveDialog(const std::string &title, const std::string &suggested, int kind, bool closeAfter = false);
+    // Saves to the document's own path when its format keeps everything;
+    // otherwise asks where. Returns true when it saved right away.
+    bool save(bool closeAfter = false);
+    bool saveTo(const std::string &path, FileFormat format);
+    void updateActions();
+    void rebuildPrimerList();
+    // Feature dialog: index < 0 adds a feature from the selection.
+    void featureDialog(int index);
+    void primerDialog();
+    void pasteText(const std::string &text);
 
     Document m_doc;
     GtkWidget *m_window = nullptr;
@@ -69,6 +94,8 @@ private:
     GtkWidget *m_split = nullptr;
     GtkWidget *m_featureList = nullptr;
     GtkWidget *m_enzymeList = nullptr;
+    GtkWidget *m_primerList = nullptr;
+    bool m_closeConfirmed = false;
     GtkWidget *m_filter = nullptr;
     std::unique_ptr<MapView> m_map;
     std::unique_ptr<SequenceView> m_seq;
@@ -86,5 +113,7 @@ private:
 // windows of their own.
 void openFiles(GtkApplication *app, const std::vector<std::string> &paths, Window *preferred = nullptr);
 void showOpenDialog(GtkApplication *app, GtkWindow *parent);
+// A new window with a sequence typed or pasted by the user.
+void showNewSequenceDialog(GtkApplication *app, GtkWindow *parent);
 
 } // namespace oc::gtk

@@ -73,6 +73,8 @@ public:
     // True when the sequence differs from the last load or save.
     bool isModified() const { return m_state != m_savedState; }
     void markSaved();
+    // For a new sequence that has never been saved.
+    void markUnsaved();
 
     // Replaces the selection (or inserts at the caret) with `text`, cleaned to
     // IUPAC bases. Returns false when nothing in `text` is DNA.
@@ -115,8 +117,9 @@ private:
     };
     // Snapshots for undo, runs `change`, then selects `after` (a caret when
     // its length is 0) and notifies. `change` returns false to cancel.
+    // With `merge`, the change joins the previous undo step instead (typing).
     void edit(const std::string &label, const std::function<bool(Sequence &)> &change,
-              const std::function<Span()> &after);
+              const std::function<Span()> &after, bool merge = false);
     Step snapshot(const std::string &label) const;
     void restore(Step &step);
     void sequenceEdited();
@@ -139,6 +142,7 @@ private:
     std::vector<Step> m_undo, m_redo;
     unsigned m_state = 0, m_savedState = 0, m_nextState = 0;
     bool m_inEdit = false;
+    bool m_typing = false;   // the last step was typed at the caret, so more typing joins it
     std::vector<Listener> m_seqListeners, m_selListeners, m_enzListeners, m_histListeners;
 };
 

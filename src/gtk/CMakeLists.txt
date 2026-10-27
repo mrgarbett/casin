@@ -10,6 +10,7 @@ target_link_libraries(openclone_cairo PUBLIC openclone_view PkgConfig::PANGOCAIR
 add_executable(openclone
     main.cpp
     window.cpp
+    dialogs.cpp
     mapview.cpp
     seqview.cpp)
 target_include_directories(openclone PRIVATE ${PROJECT_SOURCE_DIR}/src)

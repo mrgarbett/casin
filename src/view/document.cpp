@@ -28,6 +28,7 @@ void Document::setSequence(Sequence seq, std::string path)
     m_activeSite = -1;
     m_undo.clear();
     m_redo.clear();
+    m_typing = false;
     m_state = m_savedState = ++m_nextState;
     recomputeSites();
     emit(m_seqListeners);
@@ -94,6 +95,7 @@ void Document::setEnzymeHidden(const std::string &name, bool hidden)
 
 void Document::setSelection(Span s)
 {
+    m_typing = false;
     const int n = m_seq.length();
     if (n == 0)
         return;
@@ -110,6 +112,7 @@ void Document::setSelection(Span s)
 
 void Document::clearSelection()
 {
+    m_typing = false;
     m_hasSelection = false;
     m_selection = {};
     m_activeFeature = -1;
@@ -126,6 +129,7 @@ std::string Document::selectedBases() const
 
 void Document::activateFeature(int index)
 {
+    m_typing = false;
     if (index < 0 || index >= int(m_seq.features.size()))
         return;
     m_selection = m_seq.features[size_t(index)].span(m_seq.length(), m_seq.circular);
@@ -137,6 +141,7 @@ void Document::activateFeature(int index)
 
 void Document::activateSite(int visibleIndex)
 {
+    m_typing = false;
     if (visibleIndex < 0 || visibleIndex >= int(m_visibleSites.size()))
         return;
     const CutSite &s = m_visibleSites[size_t(visibleIndex)];
@@ -210,14 +215,18 @@ void Document::sequenceEdited()
 }
 
 void Document::edit(const std::string &label, const std::function<bool(Sequence &)> &change,
-                    const std::function<Span()> &after)
+                    const std::function<Span()> &after, bool merge)
 {
-    Step before = snapshot(label);
+    merge = merge && m_typing && !m_undo.empty();
+    m_typing = false;
+    Step before = merge ? Step{} : snapshot(label);
     if (!change(m_seq))
         return;
-    m_undo.push_back(std::move(before));
-    if (m_undo.size() > kMaxUndo)
-        m_undo.erase(m_undo.begin());
+    if (!merge) {
+        m_undo.push_back(std::move(before));
+        if (m_undo.size() > kMaxUndo)
+            m_undo.erase(m_undo.begin());
+    }
     m_redo.clear();
     m_state = ++m_nextState;
     const int n = m_seq.length();
@@ -240,6 +249,7 @@ void Document::edit(const std::string &label, const std::function<bool(Sequence 
 
 void Document::undo()
 {
+    m_typing = false;
     if (m_undo.empty())
         return;
     Step step = std::move(m_undo.back());
@@ -264,6 +274,12 @@ void Document::markSaved()
     emit(m_histListeners);
 }
 
+void Document::markUnsaved()
+{
+    m_savedState = 0;   // states start at 1
+    emit(m_histListeners);
+}
+
 bool Document::typeBases(const std::string &text)
 {
     const std::string bases = cleanBases(text);
@@ -271,12 +287,13 @@ bool Document::typeBases(const std::string &text)
         return false;
     const Span sel = m_hasSelection ? m_selection : Span{m_seq.length(), 0};
     int at = 0;
-    edit(sel.length > 0 ? "Replace Bases" : "Insert Bases",
+    edit(sel.length > 0 ? "Replace Bases" : "Typing",
          [&](Sequence &s) {
              at = replaceBases(s, sel, bases);
              return true;
          },
-         [&] { return Span{at + int(bases.size()), 0}; });
+         [&] { return Span{at + int(bases.size()), 0}; }, sel.length == 0);
+    m_typing = true;
     return true;
 }
 
