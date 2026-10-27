@@ -30,11 +30,13 @@ add_library(openclone_core STATIC
     src/core/align.cpp
     src/core/orf.cpp
     src/core/embl.cpp
+    src/core/enzymesets.cpp
     src/core/genbank.cpp
     src/core/fasta.cpp
     src/core/xml.cpp
     src/core/snapgene.cpp
     src/core/enzymes.cpp
+    src/core/suppliers.cpp
     src/core/tm.cpp
     src/core/seqio.cpp)
 target_include_directories(openclone_core PUBLIC src)

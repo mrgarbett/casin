@@ -157,6 +157,8 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   longest first; add the ones you pick as CDS features with their translation.
 - Print… (Ctrl+P): the map on the first page, then the sequence in whole lines; the same
   pages come out of `openclone --print-pdf out.pdf <file>` without a display.
+- Enzyme sets: the Enzymes panel picks a set (Type IIS, enzymes sold by a supplier, or one you
+  saved from the checked enzymes); saved sets are shared by every window.
 - View → Map Display: show or hide enzyme sites, primers and each feature type on the map
   (exported maps follow the same choices).
 - View → Translate Frames: show the three forward reading frames, or all six, around the

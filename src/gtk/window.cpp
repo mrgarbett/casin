@@ -87,6 +87,7 @@ Window *Window::fromWidget(GtkWidget *w)
 Window::Window(GtkApplication *app)
 {
     buildUi(app);
+    rebuildEnzymeSets();
     m_doc.onSequenceChanged([this] {
         rebuildFeatureList();
         rebuildPrimerList();
@@ -406,7 +407,24 @@ GtkWidget *Window::buildSidebar()
     gtk_widget_add_css_class(credit, "dim-label");
     gtk_widget_add_css_class(credit, "caption");
     gtk_widget_set_margin_bottom(credit, 6);
+    // Enzyme sets: built-in (Type IIS, by supplier) and saved ones.
+    GtkWidget *setRow = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    gtk_widget_set_margin_start(setRow, 8);
+    gtk_widget_set_margin_end(setRow, 8);
+    m_setDrop = gtk_drop_down_new(G_LIST_MODEL(gtk_string_list_new(nullptr)), nullptr);
+    gtk_widget_set_hexpand(m_setDrop, TRUE);
+    gtk_widget_set_tooltip_text(m_setDrop, "Enzyme set");
+    g_signal_connect(m_setDrop, "notify::selected", G_CALLBACK(&Window::onEnzymeSetChanged), this);
+    GtkWidget *saveSet = gtk_button_new_from_icon_name("document-save-symbolic");
+    gtk_widget_set_tooltip_text(saveSet, "Save the checked enzymes as a set");
+    g_signal_connect_swapped(saveSet, "clicked", G_CALLBACK(+[](gpointer p) {
+                                 static_cast<Window *>(p)->saveEnzymeSetDialog();
+                             }),
+                             this);
+    gtk_box_append(GTK_BOX(setRow), m_setDrop);
+    gtk_box_append(GTK_BOX(setRow), saveSet);
     gtk_box_append(GTK_BOX(ebox), m_filter);
+    gtk_box_append(GTK_BOX(ebox), setRow);
     gtk_box_append(GTK_BOX(ebox), escroll);
     gtk_box_append(GTK_BOX(ebox), credit);
     adw_view_stack_add_titled_with_icon(ADW_VIEW_STACK(stack), ebox, "enzymes", "Enzymes", "edit-cut-symbolic");
@@ -684,6 +702,111 @@ void Window::onFilterChanged(GObject *dd, GParamSpec *, gpointer p)
     static const int values[] = {1, 2, 3, 0};
     const guint i = gtk_drop_down_get_selected(GTK_DROP_DOWN(dd));
     static_cast<Window *>(p)->m_doc.setMaxCuts(values[std::min<guint>(i, 3)]);
+}
+
+namespace {
+std::string enzymeSetsPath()
+{
+    gchar *path = g_build_filename(g_get_user_config_dir(), "openclone", "enzyme-sets.txt", nullptr);
+    std::string out = path;
+    g_free(path);
+    return out;
+}
+
+std::vector<EnzymeSet> savedEnzymeSets()
+{
+    std::string text;
+    return readFile(enzymeSetsPath(), &text) ? parseEnzymeSets(text) : std::vector<EnzymeSet>{};
+}
+} // namespace
+
+void Window::rebuildEnzymeSets(const std::string &select)
+{
+    m_sets = {{"All enzymes", {}}};
+    for (const EnzymeSet &s : savedEnzymeSets())
+        m_sets.push_back(s);
+    for (const EnzymeSet &s : builtinEnzymeSets())
+        m_sets.push_back(s);
+    GtkStringList *names = gtk_string_list_new(nullptr);
+    guint selected = 0;
+    for (size_t i = 0; i < m_sets.size(); ++i) {
+        gtk_string_list_append(names, m_sets[i].name.c_str());
+        if (!select.empty() && m_sets[i].name == select)
+            selected = guint(i);
+    }
+    m_settingSet = true;
+    gtk_drop_down_set_model(GTK_DROP_DOWN(m_setDrop), G_LIST_MODEL(names));
+    g_object_unref(names);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(m_setDrop), selected);
+    m_settingSet = false;
+}
+
+void Window::onEnzymeSetChanged(GObject *dd, GParamSpec *, gpointer p)
+{
+    auto *self = static_cast<Window *>(p);
+    const guint i = gtk_drop_down_get_selected(GTK_DROP_DOWN(dd));
+    if (self->m_settingSet || i >= self->m_sets.size())
+        return;
+    std::set<std::string> names;
+    if (i == 0) {
+        for (const Enzyme &e : self->m_doc.enzymes())
+            names.insert(e.name);
+    } else {
+        names.insert(self->m_sets[i].enzymes.begin(), self->m_sets[i].enzymes.end());
+    }
+    self->m_doc.showOnlyEnzymes(names, self->m_doc.maxCuts());
+}
+
+void Window::saveEnzymeSetDialog()
+{
+    std::vector<std::string> checked;
+    for (const Enzyme &e : m_doc.enzymes())
+        if (!m_doc.isEnzymeHidden(e.name))
+            checked.push_back(e.name);
+    AdwDialog *dialog = adw_alert_dialog_new("Save Enzyme Set", nullptr);
+    adw_alert_dialog_format_body(ADW_ALERT_DIALOG(dialog), "%zu checked enzymes. Saved sets appear in every window.",
+                                 checked.size());
+    GtkWidget *entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "Name");
+    gtk_entry_set_activates_default(GTK_ENTRY(entry), TRUE);
+    adw_alert_dialog_set_extra_child(ADW_ALERT_DIALOG(dialog), entry);
+    adw_alert_dialog_add_responses(ADW_ALERT_DIALOG(dialog), "cancel", "Cancel", "save", "Save", nullptr);
+    adw_alert_dialog_set_response_appearance(ADW_ALERT_DIALOG(dialog), "save", ADW_RESPONSE_SUGGESTED);
+    adw_alert_dialog_set_default_response(ADW_ALERT_DIALOG(dialog), "save");
+    g_object_set_data(G_OBJECT(dialog), "entry", entry);
+    g_object_set_data_full(G_OBJECT(dialog), "enzymes", new std::vector<std::string>(checked),
+                           [](gpointer v) { delete static_cast<std::vector<std::string> *>(v); });
+    g_signal_connect(dialog, "response", G_CALLBACK((+[](AdwAlertDialog *d, const char *response, gpointer p) {
+                         if (std::string(response) != "save")
+                             return;
+                         auto *self = static_cast<Window *>(p);
+                         auto *entry = static_cast<GtkWidget *>(g_object_get_data(G_OBJECT(d), "entry"));
+                         std::string name = trim(gtk_editable_get_text(GTK_EDITABLE(entry)));
+                         std::replace(name.begin(), name.end(), '\n', ' ');
+                         if (name.empty())
+                             return;
+                         EnzymeSet set{name, *static_cast<std::vector<std::string> *>(
+                                                 g_object_get_data(G_OBJECT(d), "enzymes"))};
+                         std::vector<EnzymeSet> sets = savedEnzymeSets();
+                         sets.erase(std::remove_if(sets.begin(), sets.end(),
+                                                   [&](const EnzymeSet &s) { return s.name == name; }),
+                                    sets.end());
+                         sets.push_back(set);
+                         const std::string path = enzymeSetsPath();
+                         gchar *dir = g_path_get_dirname(path.c_str());
+                         g_mkdir_with_parents(dir, 0755);
+                         g_free(dir);
+                         std::string error;
+                         if (!writeFile(path, formatEnzymeSets(sets), &error)) {
+                             self->showError("Could not save the enzyme set", error);
+                             return;
+                         }
+                         self->rebuildEnzymeSets(name);
+                         self->toast("Saved enzyme set " + name);
+                     })),
+                     this);
+    adw_dialog_present(dialog, m_window);
+    adw_dialog_set_focus(dialog, entry);
 }
 
 void Window::onEnzymeToggled(GtkCheckButton *b, gpointer p)

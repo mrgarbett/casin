@@ -204,8 +204,18 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
     double maxLabelW = 0;
     for (const LabelGlyph &g : m_labels)
         maxLabelW = std::max(maxLabelW, g.rect.w);
+    // Without enzyme labels, still leave room for feature and primer callouts.
+    const Font calloutFont{11, false, false};
+    if (m_labels.empty()) {
+        for (const Feature &f : m_seq.features)
+            if (shows(f) && !f.ranges.empty())
+                maxLabelW = std::max(maxLabelW, tm.width(f.name, calloutFont) + 12);
+        for (const Primer &pr : m_seq.primers)
+            if (m_options.primers && pr.binding.length() > 0)
+                maxLabelW = std::max(maxLabelW, tm.width(pr.name, calloutFont) + 12);
+    }
     maxLabelW = std::min(maxLabelW, 160.0);
-    const double colW = m_labels.empty() ? 0 : maxLabelW + 26;
+    const double colW = maxLabelW > 0 ? maxLabelW + 26 : 0;
 
     // Lanes: longest features first so short ones can stack outside them.
     std::vector<int> order;
@@ -349,7 +359,6 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
 
     // Callouts for features whose names don't fit on their arrows. They share
     // the label columns with the enzymes and are never dropped.
-    const Font calloutFont{11, false, false};
     for (const FeatureGlyph &fg : m_features) {
         if (!fg.label.empty())
             continue;

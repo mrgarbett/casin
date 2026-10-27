@@ -47,6 +47,25 @@ const Enzyme *findEnzyme(const std::string &name);
 // linear ones. The returned pointers refer into `enzymes`.
 std::vector<CutSite> findSites(const Sequence &seq, const std::vector<Enzyme> &enzymes);
 
+// Commercial suppliers (REBASE codes) and which of them sell an enzyme.
+struct Supplier {
+    char code;
+    const char *name;
+};
+const std::vector<Supplier> &suppliers();
+std::string enzymeSuppliers(const std::string &name);   // e.g. "BN"; "" if unknown
+
+// A named list of enzymes to show.
+struct EnzymeSet {
+    std::string name;
+    std::vector<std::string> enzymes;
+};
+// Type IIS, then one set per supplier that sells any of commonEnzymes().
+std::vector<EnzymeSet> builtinEnzymeSets();
+// Saved sets, one per line: "name: EcoRI, BamHI, ...". Unknown enzymes are dropped.
+std::vector<EnzymeSet> parseEnzymeSets(const std::string &text);
+std::string formatEnzymeSets(const std::vector<EnzymeSet> &sets);
+
 struct PatternMatch {
     int start;       // top-strand start of the match
     int length;

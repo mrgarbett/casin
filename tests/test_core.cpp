@@ -444,6 +444,23 @@ static void testFastaAndIO()
     CHECK_EQ(fileBaseName("/tmp/dir.v2/my file.fasta"), std::string("my file"));
 }
 
+static void testEnzymeSets()
+{
+    CHECK(enzymeSuppliers("EcoRI").find('N') != std::string::npos);   // NEB sells EcoRI
+    CHECK(enzymeSuppliers("NoSuchEnzyme").empty());
+    const std::vector<EnzymeSet> builtin = builtinEnzymeSets();
+    CHECK(builtin.size() > 3);
+    bool bsa = false;
+    for (const std::string &e : builtin.front().enzymes)
+        bsa = bsa || e == "BsaI";
+    CHECK(bsa);
+    const std::vector<EnzymeSet> sets = parseEnzymeSets("# comment\nMCS: EcoRI, bamhi, Nope ,PstI\n\nEmpty:\n");
+    CHECK_EQ(sets.size(), size_t(2));
+    CHECK(sets.size() == 2 && sets[0].name == "MCS" && sets[0].enzymes.size() == 3 && sets[0].enzymes[1] == "BamHI");
+    CHECK_EQ(formatEnzymeSets(sets), "MCS: EcoRI, BamHI, PstI\nEmpty:\n");
+    CHECK_EQ(parseEnzymeSets(formatEnzymeSets(sets)).size(), size_t(2));
+}
+
 static void testEmbl(const std::string &dir)
 {
     // A record in the ENA layout.
@@ -1129,6 +1146,7 @@ int main(int argc, char **argv)
     testMutagenesis();
     testAlign();
     testOrfs();
+    testEnzymeSets();
     if (argc > 1) {
         testEmbl(argv[1]);
         testSamples(argv[1]);

@@ -40,6 +40,8 @@ private:
     GtkWidget *buildSidebar();
     void rebuildFeatureList();
     void rebuildEnzymeList();
+    void rebuildEnzymeSets(const std::string &select = {});
+    void saveEnzymeSetDialog();
     void refreshEnzymeRows();
     void updateTitle();
     void updateStatus();
@@ -48,6 +50,7 @@ private:
 
     static void onDarkChanged(GObject *, GParamSpec *, gpointer self);
     static void onFilterChanged(GObject *, GParamSpec *, gpointer self);
+    static void onEnzymeSetChanged(GObject *, GParamSpec *, gpointer self);
     static void onFeatureRowActivated(GtkListBox *, GtkListBoxRow *row, gpointer self);
     static void onEnzymeRowActivated(GtkListBox *, GtkListBoxRow *row, gpointer self);
     static void onEnzymeToggled(GtkCheckButton *, gpointer self);
@@ -131,6 +134,9 @@ private:
     GtkWidget *m_primerList = nullptr;
     bool m_closeConfirmed = false;
     GtkWidget *m_filter = nullptr;
+    GtkWidget *m_setDrop = nullptr;
+    std::vector<EnzymeSet> m_sets;   // [0] = all enzymes
+    bool m_settingSet = false;
     std::unique_ptr<MapView> m_map;
     std::unique_ptr<SequenceView> m_seq;
     // Chromatogram strip, shown for a document opened from a trace file.

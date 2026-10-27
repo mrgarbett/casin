@@ -51,7 +51,7 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 | | Common Type II and Type IIS enzymes from REBASE, cutter filters | done |
 | Z1 | Cuts on both strands, offset cuts, two-cut enzymes | done |
 | Z2 | Dam/Dcm methylation sensitivity | planned |
-| Z3 | Saved enzyme sets, supplier filter | planned |
+| Z3 | Saved enzyme sets, supplier filter | done on Linux (Type IIS and per-supplier sets from REBASE, plus your own saved sets); Mac UI pending |
 | X2 | Choose enzymes by criteria (cuts once in a region, spares the insert) | done on Linux; Mac UI pending |
 
 ## Cloning simulation
