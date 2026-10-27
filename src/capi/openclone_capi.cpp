@@ -9,6 +9,7 @@
 #include "core/orf.h"
 #include "core/protein.h"
 #include "core/primercheck.h"
+#include "core/search.h"
 #include "core/seqio.h"
 #include "view/document.h"
 #include "view/gellayout.h"
@@ -18,6 +19,7 @@
 #include "view/style.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -373,6 +375,26 @@ int oc_document_add_primer_from_selection(OCDocument *doc, const char *name, int
 
 void oc_document_remove_primer(OCDocument *doc, int index) { doc->doc.removePrimer(index); }
 
+int oc_document_add_primer_sequence(OCDocument *doc, const char *name, const char *bases, char **error)
+{
+    std::string b;
+    for (const char *p = bases ? bases : ""; *p; ++p)
+        if (std::isalpha(static_cast<unsigned char>(*p)))
+            b += char(std::toupper(static_cast<unsigned char>(*p)));
+    const std::vector<PrimerSite> sites = findPrimerSites(doc->doc.sequence(), b);
+    if (b.size() < 15 || sites.empty()) {
+        failWith(error, b.size() < 15 ? "a primer needs at least 15 bases" : "the primer doesn't bind this sequence");
+        return -1;
+    }
+    Primer p;
+    p.name = name && *name ? name : "primer";
+    p.bases = b;
+    p.binding = sites.front().binding;
+    p.strand = sites.front().strand;
+    doc->doc.addPrimers({p}, "Add Primer");
+    return int(doc->doc.sequence().primers.size()) - 1;
+}
+
 int oc_document_enzyme_count(const OCDocument *doc) { return int(doc->doc.enzymes().size()); }
 
 bool oc_document_enzyme(OCDocument *doc, int index, OCEnzymeInfo *out)
@@ -723,6 +745,32 @@ bool oc_overlap_extension(const OCDocument *const *fragments, int fragment_count
     if (!overlapExtension(frags, min_overlap, &p, nullptr, &err))
         return failWith(error, err);
     return deliver(out, p);
+}
+
+bool oc_insertion_by_pcr(const OCDocument *vector, const OCDocument *insert, double target_tm, int overlap,
+                         OCDocument *out, char **primers, char **error)
+{
+    const Sequence &ins = insert->doc.sequence();
+    Span target{0, ins.length()};
+    const Span sel = insert->doc.selection();
+    if (insert->doc.hasSelection() && sel.length >= 18 && !sel.wraps(ins.length()))
+        target = sel;
+    InsertionDesign d;
+    std::string err;
+    if (!designInsertion(vector->doc.sequence(), vector->doc.selection(), ins, target, target_tm, overlap, &d, &err))
+        return failWith(error, err);
+    if (primers)
+        *primers = dupString(d.forward.name + "\t" + d.forward.bases + "\n" + d.reverse.name + "\t" + d.reverse.bases);
+    return deliver(out, d.construct);
+}
+
+char *oc_search_folder(const char *folder, const char *query)
+{
+    std::vector<std::string> lines;
+    for (const FolderHit &h : searchFolder(folder ? folder : "", query ? query : ""))
+        lines.push_back(h.path + "\t" + h.name + "\t" + std::to_string(h.length) + "\t" + (h.circular ? "1" : "0") + "\t"
+                        + h.match);
+    return dupString(joinLines(lines));
 }
 
 char *oc_align_read(const OCDocument *reference, const OCDocument *read, OCAlignmentInfo *out, char **error)

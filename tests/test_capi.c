@@ -227,6 +227,25 @@ int main(int argc, char **argv)
     CHECK(!oc_overlap_extension(soeFrags, 1, 15, product, NULL));
     oc_document_free(fa);
     oc_document_free(fb);
+    /* Insertion by PCR: the PCR product into the vector at base 100. */
+    oc_document_set_selection(doc, 100, 0);
+    char *ins_primers = NULL;
+    CHECK(oc_insertion_by_pcr(doc, pcr, 60, 20, product, &ins_primers, NULL));
+    CHECK(oc_document_length(product) == oc_document_length(doc) + oc_document_length(pcr));
+    CHECK(ins_primers && strchr(ins_primers, '\n') != NULL);
+    oc_string_free(ins_primers);
+    /* A primer added by sequence binds where it came from. */
+    oc_document_set_selection(doc, 500, 22);
+    char *pb = oc_document_selected_bases(doc);
+    const int before = oc_document_primer_count(doc);
+    const int pi = oc_document_add_primer_sequence(doc, "by-seq", pb, NULL);
+    OCPrimerInfo pinf;
+    CHECK(pi == before && oc_document_primer(doc, pi, &pinf) && pinf.start == 500 && pinf.length == 22);
+    oc_string_free(pb);
+    CHECK(oc_document_add_primer_sequence(doc, "short", "ACGT", NULL) == -1);
+    char *hits = oc_search_folder(argv[1], "GAATTC");
+    CHECK(hits && strstr(hits, "pOC-demo") != NULL);
+    oc_string_free(hits);
     oc_document_free(trace);
     oc_document_free(product);
     oc_document_free(pcr);

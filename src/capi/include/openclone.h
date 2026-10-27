@@ -160,6 +160,9 @@ bool oc_document_primer(OCDocument *doc, int index, OCPrimerInfo *out);
 /* A primer binding the selection; returns its index or -1. */
 int oc_document_add_primer_from_selection(OCDocument *doc, const char *name, int strand);
 void oc_document_remove_primer(OCDocument *doc, int index);
+/* Adds a primer by its sequence where its 3' part binds best (a 5' tail is
+ * allowed); returns its index, or -1 with *error when it doesn't bind. */
+int oc_document_add_primer_sequence(OCDocument *doc, const char *name, const char *bases, char **error);
 
 /* ---- text metrics supplied by the frontend ------------------------------ */
 
@@ -319,6 +322,17 @@ bool oc_gibson(const OCDocument *vector, const char *vector_enzyme1, const char 
 bool oc_overlap_extension(const OCDocument *const *fragments, int fragment_count, int min_overlap, OCDocument *out,
                           char **error);
 
+/* Insertion by PCR: primers that amplify the insert's selection (or all of
+ * it) with tails copying `overlap` bases of the vector on each side of the
+ * vector's selection or caret. `out` gets the construct, carrying the two
+ * primers; *primers gets "name<TAB>bases" lines for both. */
+bool oc_insertion_by_pcr(const OCDocument *vector, const OCDocument *insert, double target_tm, int overlap,
+                         OCDocument *out, char **primers, char **error);
+/* ---- search ------------------------------------------------------------------ */
+/* Sequence files under `folder` (and subfolders) matching `query` by name,
+ * description, feature, primer or DNA on both strands. One hit per line:
+ * "path<TAB>name<TAB>length<TAB>circular(0/1)<TAB>what matched". */
+char *oc_search_folder(const char *folder, const char *query);
 /* ---- verification ---------------------------------------------------------- */
 
 typedef struct {
