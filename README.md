@@ -138,6 +138,8 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   join linear fragments from open windows by their end overlaps.
 - Choose Enzymes: find enzymes that cut once (or up to three times), only inside the
   selection, never inside a chosen feature, with the ends you need; show just those.
+- TA, GC and TOPO Cloning: a PCR product into a linearized vector (this window), either
+  orientation, with the overhang bases filled in; opens the circular product.
 - Mutagenesis: replace, delete or insert bases at the selection; designs back-to-back
   primers (new bases on the forward primer's 5′ end) and opens the mutant.
 - Cloning History: products of PCR, cloning, assembly and mutagenesis remember each step

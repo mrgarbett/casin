@@ -90,6 +90,15 @@ bool gibsonAssemble(const std::vector<Sequence> &fragments, int minOverlap, Sequ
 // Whole workflows as the apps offer them. Products are named after their
 // inputs and keep the vector's numbering when its origin survives the cut.
 
+// TA, GC and blunt (TOPO-style) cloning of a PCR product into a linearized
+// vector. `vector` is the vector's double-stranded part, `insert` the PCR
+// product as amplified. With overhang 'T' (TA) the vector's 3' T overhangs
+// pair with the A the polymerase adds to the product; with 'C' (GC) its 3' C
+// overhangs pair with an added G; with 0 the ends are blunt. The product is
+// circular: vector, overhang base, insert (reversed if asked), its partner.
+bool overhangClone(const Sequence &vector, const Sequence &insert, char overhang, bool reversed, Sequence *out,
+                   std::string *error = nullptr);
+
 // The vector (circular) cut with v1 and v2, keeping the larger piece; the
 // insert cut with i1 and i2, keeping the piece between the cuts (the smaller
 // one for a circular donor), placed forward or reversed.

@@ -1293,6 +1293,95 @@ void runSearch(SearchForm *st)
 }
 } // namespace
 
+namespace {
+struct TaForm {
+    Window *window;
+    Sequence vector;
+    std::vector<Sequence> inserts;
+    GtkWidget *insert, *method, *orientation, *result, *okButton;
+    AdwDialog *dialog;
+    Sequence product;
+    bool ok = false;
+};
+
+void updateTa(TaForm *st)
+{
+    const guint i = adw_combo_row_get_selected(ADW_COMBO_ROW(st->insert));
+    const guint m = adw_combo_row_get_selected(ADW_COMBO_ROW(st->method));
+    const bool reversed = adw_combo_row_get_selected(ADW_COMBO_ROW(st->orientation)) == 1;
+    const char overhang = m == 0 ? 'T' : m == 1 ? 'C' : 0;
+    std::string err;
+    st->ok = i < st->inserts.size() && overhangClone(st->vector, st->inserts[i], overhang, reversed, &st->product, &err);
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->result),
+                                st->ok ? (st->product.name + ", " + view::formatBp(st->product.length()) + " circular").c_str()
+                                       : err.c_str());
+    gtk_widget_set_sensitive(st->okButton, st->ok);
+}
+} // namespace
+
+void Window::taCloningDialog()
+{
+    if (m_doc.sequence().circular) {
+        toast("TA, GC and TOPO cloning start from a linearized vector; open it as a linear sequence");
+        return;
+    }
+    auto *st = new TaForm{};
+    st->window = this;
+    st->vector = m_doc.sequence();
+    std::vector<std::string> names;
+    GtkApplication *app = gtk_window_get_application(gtkWindow());
+    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
+        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+        if (w && w != this && !w->isEmpty() && !w->document().sequence().circular) {
+            st->inserts.push_back(w->document().sequence());
+            names.push_back(st->inserts.back().name);
+        }
+    }
+    if (st->inserts.empty()) {
+        toast("Open the PCR product (a linear sequence) in another window first");
+        delete st;
+        return;
+    }
+    Form f = makeForm("TA, GC and TOPO Cloning", "Open Product");
+    st->dialog = f.dialog;
+    st->okButton = f.ok;
+    GtkWidget *g = addGroup(f, ("Into " + st->vector.name).c_str());
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(g),
+                                          "This window is the linearized vector without its overhangs");
+    std::vector<const char *> v;
+    for (const std::string &n : names)
+        v.push_back(n.c_str());
+    v.push_back(nullptr);
+    st->insert = comboRow(g, "PCR product", v.data(), 0);
+    static const char *methods[] = {"TA (3′ T overhangs)", "GC (3′ C overhangs)", "Blunt (TOPO blunt)", nullptr};
+    st->method = comboRow(g, "Method", methods, 0);
+    static const char *orient[] = {"Forward", "Reversed", nullptr};
+    st->orientation = comboRow(g, "Orientation", orient, 0);
+    st->result = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->result), "Product");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(g), st->result);
+    for (GtkWidget *w : {st->insert, st->method, st->orientation})
+        g_signal_connect(w, "notify::selected", G_CALLBACK((+[](GObject *, GParamSpec *, gpointer p) {
+                             updateTa(static_cast<TaForm *>(p));
+                         })),
+                         st);
+    updateTa(st);
+    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<TaForm *>(p);
+                         if (!st->ok)
+                             return;
+                         GtkApplication *app = gtk_window_get_application(st->window->gtkWindow());
+                         Window *w = Window::create(app);
+                         w->document().setSequence(st->product);
+                         w->document().markUnsaved();
+                         w->present();
+                         adw_dialog_close(st->dialog);
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<TaForm *>(p); });
+    adw_dialog_present(f.dialog, m_window);
+}
+
 void Window::searchFolderDialog()
 {
     auto *st = new SearchForm{};

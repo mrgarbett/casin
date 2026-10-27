@@ -374,6 +374,41 @@ bool restrictionClone(const Sequence &vector, const std::string &v1, const std::
     return true;
 }
 
+bool overhangClone(const Sequence &vector, const Sequence &insert, char overhang, bool reversed, Sequence *out,
+                   std::string *error)
+{
+    auto fail = [error](const char *msg) {
+        if (error)
+            *error = msg;
+        return false;
+    };
+    if (vector.empty() || insert.empty())
+        return fail("both the vector and the insert need bases");
+    if (vector.circular)
+        return fail("the vector must be linear (opened, with its overhangs left out)");
+    if (insert.circular)
+        return fail("the insert must be a linear PCR product");
+    Sequence product = vector;
+    product.circular = false;
+    const std::string head = overhang ? std::string(1, overhang) : std::string();
+    const std::string tail = overhang ? complement(head) : std::string();
+    insertBases(product, product.length(), head);
+    Sequence ins = insert;
+    if (reversed)
+        reverseComplementSequence(ins);
+    insertFragment(product, {product.length(), 0}, ins);
+    insertBases(product, product.length(), tail);
+    product.circular = true;
+    product.name = vector.name + "-" + insert.name;
+    product.description.clear();
+    product.history = vector.history;
+    const char *how = overhang == 'T' ? "TA cloning" : overhang == 'C' ? "GC cloning" : "Blunt (TOPO-style) cloning";
+    addHistory(product, std::string(how) + ": " + insert.name + (reversed ? " (reversed)" : "") + " into "
+                            + vector.name);
+    *out = product;
+    return true;
+}
+
 bool gibsonIntoVector(const Sequence &vector, const std::string &v1, const std::string &v2,
                       const std::vector<Sequence> &fragments, int minOverlap, Sequence *out,
                       std::vector<GibsonJoin> *joins, std::string *error)

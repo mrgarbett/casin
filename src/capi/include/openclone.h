@@ -285,6 +285,10 @@ bool oc_pcr_product(const OCDocument *templ, int forward_primer, int reverse_pri
 bool oc_restriction_clone(const OCDocument *vector, const char *vector_enzyme1, const char *vector_enzyme2,
                           const OCDocument *insert, const char *insert_enzyme1, const char *insert_enzyme2,
                           bool reversed, OCDocument *out, char **error);
+/* TA (overhang 'T'), GC ('C') or blunt (0) cloning of a PCR product into a
+ * linearized vector (its double-stranded part). */
+bool oc_overhang_clone(const OCDocument *vector, const OCDocument *insert, char overhang, bool reversed,
+                       OCDocument *out, char **error);
 bool oc_golden_gate(const OCDocument *vector, const OCDocument *const *parts, int part_count, const char *enzyme,
                     OCDocument *out, char **error);
 /* Replaces the selection with `bases` (empty deletes; a caret inserts) and

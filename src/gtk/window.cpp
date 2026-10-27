@@ -157,6 +157,7 @@ void Window::buildUi(GtkApplication *app)
         {"export-map", &Window::actExportMap, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"print", &Window::actPrint, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"search-folder", &Window::actSearchFolder, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"ta-cloning", &Window::actTaCloning, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"copy", &Window::actCopy, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"copy-rc", &Window::actCopyRc, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"find", &Window::actFind, nullptr, nullptr, nullptr, {0, 0, 0}},
@@ -230,6 +231,7 @@ void Window::buildUi(GtkApplication *app)
     g_menu_append(cloneMenu, "Restriction Cloning…", "win.clone");
     g_menu_append(cloneMenu, "Golden Gate Assembly…", "win.golden-gate");
     g_menu_append(cloneMenu, "Gibson Assembly…", "win.gibson");
+    g_menu_append(cloneMenu, "TA, GC and TOPO Cloning…", "win.ta-cloning");
     g_menu_append(cloneMenu, "Mutagenesis…", "win.mutagenesis");
     g_menu_append(cloneMenu, "Cloning History…", "win.history");
     g_menu_append_submenu(seqSection, "Cloning", G_MENU_MODEL(cloneMenu));
@@ -1068,7 +1070,7 @@ void Window::updateActions()
     enable("undo", m_doc.canUndo());
     enable("redo", m_doc.canRedo());
     for (const char *name : {"save", "save-as", "export-fasta", "export-map", "print", "paste", "select-all",
-                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "choose-enzymes", "primer-by-sequence", "history", "align", "compare", "orfs", "map-options"})
+                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "ta-cloning", "choose-enzymes", "primer-by-sequence", "history", "align", "compare", "orfs", "map-options"})
         enable(name, has);
     enable("cut", sel);
     enable("add-feature", sel);
@@ -1351,6 +1353,11 @@ void Window::saveDialog(const std::string &title, const std::string &suggested, 
                          },
                          req);
     g_object_unref(dialog);
+}
+
+void Window::actTaCloning(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->taCloningDialog();
 }
 
 void Window::actSearchFolder(GSimpleAction *, GVariant *, gpointer p)

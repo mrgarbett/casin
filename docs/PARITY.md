@@ -66,7 +66,7 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 | C6 | Cloning history saved with each construct | steps as text, kept in GenBank and `.dna`; Mac UI pending. Graphical history and re-running steps are later work |
 | C7 | Gateway BP and LR | M5 |
 | C8 | Site-directed mutagenesis | done on Linux (back-to-back primers); Mac UI pending |
-| X4 | TA, TOPO and GC cloning | M5 |
+| X4 | TA, TOPO and GC cloning | done on Linux (TA, GC and blunt TOPO into a linearized vector); Mac UI pending |
 | X5 | Overlap-extension PCR, insertion by PCR | M5 |
 | X6 | Site-specific and homologous recombination | M5 |
 

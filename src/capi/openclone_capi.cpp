@@ -617,6 +617,16 @@ bool oc_pcr_product(const OCDocument *templ, int forward_primer, int reverse_pri
     return deliver(out, p);
 }
 
+bool oc_overhang_clone(const OCDocument *vector, const OCDocument *insert, char overhang, bool reversed,
+                       OCDocument *out, char **error)
+{
+    Sequence p;
+    std::string err;
+    if (!overhangClone(vector->doc.sequence(), insert->doc.sequence(), overhang, reversed, &p, &err))
+        return failWith(error, err);
+    return deliver(out, p);
+}
+
 bool oc_restriction_clone(const OCDocument *vector, const char *vector_enzyme1, const char *vector_enzyme2,
                           const OCDocument *insert, const char *insert_enzyme1, const char *insert_enzyme2,
                           bool reversed, OCDocument *out, char **error)

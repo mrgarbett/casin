@@ -445,6 +445,33 @@ static void testFastaAndIO()
     CHECK_EQ(fileBaseName("/tmp/dir.v2/my file.fasta"), std::string("my file"));
 }
 
+static void testOverhangClone()
+{
+    Sequence v, ins;
+    v.name = "pTA";
+    v.bases = "AAAACCCC";
+    ins.name = "pcr";
+    ins.bases = "GGGTTT";
+    Feature f;
+    f.type = "CDS";
+    f.name = "x";
+    f.strand = Strand::Forward;
+    f.ranges = {{0, 3}};
+    ins.features = {f};
+    Sequence p;
+    std::string err;
+    CHECK(overhangClone(v, ins, 'T', false, &p, &err));
+    CHECK(p.circular && p.bases == "AAAACCCCTGGGTTTA");
+    CHECK(p.features.size() == 1 && p.features[0].ranges[0].start == 9 && p.features[0].strand == Strand::Forward);
+    CHECK(!p.history.empty() && p.history.back().find("TA cloning") != std::string::npos);
+    CHECK(overhangClone(v, ins, 'T', true, &p, &err));
+    CHECK(p.bases == "AAAACCCCTAAACCCA" && p.features[0].strand == Strand::Reverse);
+    CHECK(overhangClone(v, ins, 'C', false, &p, &err) && p.bases == "AAAACCCCCGGGTTTG");
+    CHECK(overhangClone(v, ins, 0, false, &p, &err) && p.bases == "AAAACCCCGGGTTT");
+    v.circular = true;
+    CHECK(!overhangClone(v, ins, 'T', false, &p, &err));
+}
+
 static void testEnzymeSets()
 {
     CHECK(enzymeSuppliers("EcoRI").find('N') != std::string::npos);   // NEB sells EcoRI
@@ -1165,6 +1192,7 @@ int main(int argc, char **argv)
     testAlign();
     testOrfs();
     testEnzymeSets();
+    testOverhangClone();
     if (argc > 1) {
         testEmbl(argv[1]);
         testSamples(argv[1]);
