@@ -1,6 +1,14 @@
-# Flatpak manifest for the GTK app. Build from the repo root:
+# Flatpak manifest for the GTK app. From the repo root, build and install:
+#   flatpak-builder --user --install-deps-from=flathub --force-clean --install \
+#       build-flatpak/app packaging/flatpak/io.github.openclone.OpenClone.yml
+# or build into a repo and make a single-file bundle:
 #   flatpak-builder --user --install-deps-from=flathub --force-clean \
 #       --repo=build-flatpak/repo build-flatpak/app packaging/flatpak/io.github.openclone.OpenClone.yml
+#   flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+#       build-flatpak/repo openclone.flatpak io.github.openclone.OpenClone
+# The sandbox can't see host files, so pass them on the command line through
+# the document portal:
+#   flatpak run --file-forwarding io.github.openclone.OpenClone @@ samples/pOC-demo.dna @@
 # The app ID follows the current packaging names; it moves to
 # io.github.mrgarbett.Restricto with the rename.
 id: io.github.openclone.OpenClone

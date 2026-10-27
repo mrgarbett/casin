@@ -68,6 +68,13 @@ flatpak install --user ./openclone.flatpak
 flatpak run io.github.openclone.OpenClone
 ```
 
+The sandbox only sees files you hand it (file dialog, drag and drop, or Files).
+To open a file from the command line, forward it through the document portal:
+
+```sh
+flatpak run --file-forwarding io.github.openclone.OpenClone @@ samples/pOC-demo.dna @@
+```
+
 To build it yourself from the repo:
 
 ```sh

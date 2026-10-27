@@ -59,6 +59,22 @@ jobs:
               --repo=build-flatpak/repo build-flatpak/app packaging/flatpak/io.github.openclone.OpenClone.yml
           flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
               build-flatpak/repo openclone.flatpak io.github.openclone.OpenClone
+      - name: Smoke test inside the sandbox
+        run: |
+          sudo apt-get install -y dbus-daemon fuse3
+          flatpak install --user -y --noninteractive ./openclone.flatpak
+          out="$HOME/.var/app/io.github.openclone.OpenClone/demo-map.png"
+          mkdir -p "$(dirname "$out")"
+          # The document portal needs a session bus.
+          dbus-run-session -- flatpak run --file-forwarding io.github.openclone.OpenClone \
+              --render-map "$out" @@ "$PWD/samples/pOC-demo.dna" @@
+          test -s "$out"
+          # Without forwarding the host file is invisible; the error must say what to do.
+          if flatpak run io.github.openclone.OpenClone --render-map "$out" "$PWD/samples/pOC-demo.dna" 2>err.txt; then
+              echo "expected the unforwarded run to fail"; exit 1
+          fi
+          cat err.txt
+          grep -q -- "--file-forwarding" err.txt
       - uses: actions/upload-artifact@v4
         with:
           name: flatpak-bundle

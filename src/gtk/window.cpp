@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <unistd.h>
 
 namespace oc::gtk {
 
@@ -672,6 +673,13 @@ void Window::screenshot(const std::string &path, void (*done)(bool, gpointer), g
 
 // ---- app-level helpers -------------------------------------------------------------
 
+std::string withSandboxHint(const std::string &path, const std::string &error)
+{
+    if (access("/.flatpak-info", F_OK) != 0 || access(path.c_str(), R_OK) == 0)
+        return error;
+    return error + " (inside Flatpak, pass files with --file-forwarding @@ FILE @@)";
+}
+
 void openFiles(GtkApplication *app, const std::vector<std::string> &paths, Window *preferred)
 {
     for (const std::string &path : paths) {
@@ -685,7 +693,7 @@ void openFiles(GtkApplication *app, const std::vector<std::string> &paths, Windo
         std::string error;
         if (!target->load(path, &error)) {
             target->present();
-            target->showError("Could not open " + baseName(path), error);
+            target->showError("Could not open " + baseName(path), withSandboxHint(path, error));
             continue;
         }
         target->present();

@@ -96,7 +96,7 @@ int renderMap(const Options &o)
     Sequence seq;
     std::string err;
     if (!loadSequenceFile(o.files[0], &seq, &err)) {
-        std::fprintf(stderr, "openclone: %s\n", err.c_str());
+        std::fprintf(stderr, "openclone: %s\n", gtk::withSandboxHint(o.files[0], err).c_str());
         return 1;
     }
     Document doc;
@@ -213,6 +213,8 @@ void onOpen(GApplication *app, GFile **files, int n, const char *, gpointer)
         gtk::Window *w = gtk::Window::create(GTK_APPLICATION(app));
         std::string err;
         if (paths.empty() || !w->load(paths[0], &err)) {
+            if (!paths.empty())
+                err = gtk::withSandboxHint(paths[0], err);
             std::fprintf(stderr, "openclone: %s\n", err.c_str());
             g_exitCode = 1;
             g_application_quit(app);
