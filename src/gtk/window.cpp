@@ -2,11 +2,13 @@
 #include "window.h"
 
 #include "core/genbank.h"
+#include "core/primercheck.h"
 #include "core/seqio.h"
 #include "view/style.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace oc::gtk {
 
@@ -450,11 +452,26 @@ void Window::rebuildPrimerList()
         GtkWidget *row = adw_action_row_new();
         adw_preferences_row_set_use_markup(ADW_PREFERENCES_ROW(row), FALSE);
         adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), pr.name.c_str());
+        const PrimerCheck check = checkPrimer(pr.bases);
         std::string sub = std::to_string(pr.bases.size()) + " nt";
+        if (!std::isnan(check.tm)) {
+            char buf[48];
+            std::snprintf(buf, sizeof buf, " · Tm %.1f °C · GC %.0f%%", check.tm, check.gc * 100);
+            sub += buf;
+        }
         if (pr.binding.length() > 0)
             sub += " · " + view::withThousands(pr.binding.start + 1) + "–" + view::withThousands(pr.binding.end)
                  + (pr.strand == Strand::Reverse ? " · ←" : " · →");
         adw_action_row_set_subtitle(ADW_ACTION_ROW(row), sub.c_str());
+        if (!check.warnings.empty()) {
+            std::string tip;
+            for (const std::string &w : check.warnings)
+                tip += (tip.empty() ? "" : "\n") + w;
+            GtkWidget *warn = gtk_image_new_from_icon_name("dialog-warning-symbolic");
+            gtk_widget_add_css_class(warn, "warning");
+            gtk_widget_set_tooltip_text(warn, tip.c_str());
+            adw_action_row_add_suffix(ADW_ACTION_ROW(row), warn);
+        }
         GtkWidget *del = gtk_button_new_from_icon_name("user-trash-symbolic");
         gtk_widget_add_css_class(del, "flat");
         gtk_widget_set_valign(del, GTK_ALIGN_CENTER);

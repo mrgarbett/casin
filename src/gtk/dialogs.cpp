@@ -3,6 +3,7 @@
 #include "window.h"
 
 #include "core/edit.h"
+#include "core/primercheck.h"
 #include "view/maplayout.h"   // formatBp
 #include "view/style.h"
 
@@ -308,9 +309,12 @@ void updatePcr(PcrForm *st)
     std::string err;
     st->ok = f < st->forward.size() && r < st->reverse.size()
           && pcrProduct(st->templ, st->forward[f], st->reverse[r], &st->product, &err);
-    const std::string text = st->ok ? view::formatBp(st->product.length()) + " product, "
-                                          + std::to_string(st->product.features.size()) + " features carried over"
-                                    : "No product: " + err;
+    std::string text = st->ok ? view::formatBp(st->product.length()) + " product, "
+                                    + std::to_string(st->product.features.size()) + " features carried over"
+                              : "No product: " + err;
+    if (st->ok)
+        for (const std::string &w : checkPrimerPair(st->forward[f].bases, st->reverse[r].bases).warnings)
+            text += "\n" + w;
     adw_action_row_set_subtitle(ADW_ACTION_ROW(st->result), text.c_str());
 }
 } // namespace

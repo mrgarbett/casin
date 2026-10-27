@@ -75,7 +75,7 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 | ID | Capability | Status |
 | --- | --- | --- |
 | | Tm of a selection (SantaLucia 1998) | done |
-| P1 | Hairpins, dimers, 3' stability | M3 |
+| P1 | Primer checks: GC, Tm, 3′ clamp, runs, hairpins, self- and pair dimers | done on Linux; Mac UI pending |
 | P2 | Automatic primer pair design | M3 |
 | P3 | Find where a primer binds, with mismatches | planned |
 

@@ -2,6 +2,7 @@
 // Headless tests for openclone_core. Usage: core_tests <samples-dir>
 #include "core/digest.h"
 #include "core/edit.h"
+#include "core/primercheck.h"
 #include "core/enzymes.h"
 #include "core/fasta.h"
 #include "core/genbank.h"
@@ -652,6 +653,28 @@ static void testPcr()
     CHECK(!pcrProduct(t, r, f, &p, &err));
 }
 
+static void testPrimerChecks()
+{
+    // A well-behaved 20-mer.
+    PrimerCheck good = checkPrimer("GTAAAACGACGGCCAGTGAG");
+    CHECK_EQ(good.length, 20);
+    CHECK(good.tm > 52 && good.tm < 65);
+    CHECK(good.hairpinStem < 4);
+    CHECK(good.warnings.empty());
+    // Palindromic: pairs with itself end to end.
+    PrimerCheck pal = checkPrimer("GCGAATTCGCGAATTCGC");
+    CHECK(pal.selfDimer >= 16 && pal.selfDimer3 >= 16);
+    CHECK(!pal.warnings.empty());
+    // GGGGC ... GCCCC folds back with a 5 bp stem and a 4 base loop.
+    PrimerCheck hp = checkPrimer("ATGGGGCAAAAGCCCCATTA");
+    CHECK(hp.hairpinStem >= 5);
+    CHECK(checkPrimer("ATATATATTTAAAT").warnings.size() >= 2);   // short, low GC, no clamp
+    // A pair whose 3' ends anneal.
+    PairCheck pr = checkPrimerPair("ACGTTGCAAGTCAGGATCCG", "TTTTTTTTTTTTTTCGGATC");
+    CHECK(pr.dimer3 >= 6);
+    CHECK(!pr.warnings.empty());
+}
+
 static void testDigest()
 {
     // EcoRI G^AATTC at 10, BamHI G^GATCC at 30, PstI CTGCA^G (3' overhang) at 50.
@@ -698,6 +721,7 @@ int main(int argc, char **argv)
     testEditing();
     testSnapGeneWriter();
     testDigest();
+    testPrimerChecks();
     testPcr();
     if (argc > 1)
         testSamples(argv[1]);
