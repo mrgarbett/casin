@@ -447,11 +447,9 @@ void updateClone(CloneForm *st)
         std::string otherErr;
         Sequence other;
         if (ligateCircular({backbone, placed}, &st->product, &err)) {
-            st->ok = true;
-            st->product.name = st->vector.name + "-" + donor.name;
-            // Keep the vector's numbering when its origin survived the cut.
-            if (backbone.originOffset() > 0)
-                rotateOrigin(st->product, backbone.originOffset());
+            // The product as the core workflow makes it: named, numbered and with its history.
+            st->ok = restrictionClone(st->vector, comboText(st->vLeft), comboText(st->vRight), donor,
+                                      comboText(st->iLeft), comboText(st->iRight), reverse, &st->product, &err);
             const bool both = ligateCircular({backbone, reverse ? insert : flipPiece(insert)}, &other, &otherErr);
             text = view::formatBp(st->product.length()) + " product: " + view::formatBp(backbone.length())
                  + " backbone + " + view::formatBp(insert.length()) + " insert"
@@ -785,6 +783,16 @@ void updateGibson(GibsonForm *st)
     std::string text;
     const int minOverlap = int(adw_spin_row_get_value(ADW_SPIN_ROW(st->overlap)));
     st->ok = tryGibson(st, comboText(st->vLeft), comboText(st->vRight), minOverlap, &text);
+    if (st->ok) {
+        // The product as the core workflow makes it: named, numbered and with its history.
+        std::vector<Sequence> frags;
+        for (size_t i = 0; i < st->parts.size(); ++i)
+            if (st->chosen[i])
+                frags.push_back(st->parts[i]);
+        std::string err;
+        st->ok = gibsonIntoVector(st->vector, comboText(st->vLeft), comboText(st->vRight), frags, minOverlap,
+                                  &st->product, nullptr, &err);
+    }
     adw_action_row_set_subtitle(ADW_ACTION_ROW(st->result), text.c_str());
     gtk_widget_set_sensitive(st->okButton, st->ok);
 }
@@ -1168,6 +1176,30 @@ void Window::mutagenesisDialog()
                            [](gpointer p) { delete static_cast<MutagenesisForm *>(p); });
     adw_dialog_present(f.dialog, m_window);
     gtk_widget_grab_focus(st->bases);
+}
+
+void Window::historyDialog()
+{
+    const std::vector<std::string> &history = m_doc.sequence().history;
+    Form f = makeForm("Cloning History", "Done");
+    adw_dialog_set_content_height(f.dialog, 420);
+    g_signal_connect_swapped(f.ok, "clicked", G_CALLBACK(adw_dialog_close), f.dialog);
+    GtkWidget *g = addGroup(f, m_doc.sequence().name.c_str());
+    if (history.empty())
+        adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(g),
+                                              "No recorded steps. Products of PCR, cloning, assembly and "
+                                              "mutagenesis remember how they were made.");
+    for (const std::string &h : history) {
+        GtkWidget *row = adw_action_row_new();
+        const size_t sp = h.find(' ');
+        const bool dated = sp == 10;
+        adw_preferences_row_set_use_markup(ADW_PREFERENCES_ROW(row), FALSE);
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), dated ? h.substr(11).c_str() : h.c_str());
+        if (dated)
+            adw_action_row_set_subtitle(ADW_ACTION_ROW(row), h.substr(0, 10).c_str());
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(g), row);
+    }
+    adw_dialog_present(f.dialog, m_window);
 }
 
 namespace {

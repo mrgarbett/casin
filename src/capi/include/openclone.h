@@ -149,6 +149,10 @@ typedef struct {
     int strand;          /* OC_STRAND_FORWARD or OC_STRAND_REVERSE */
 } OCPrimerInfo;
 
+/* How the construct was made, oldest step first ("2026-10-27 PCR with ..."). */
+int oc_document_history_count(const OCDocument *doc);
+const char *oc_document_history(OCDocument *doc, int index);
+
 int oc_document_primer_count(const OCDocument *doc);
 bool oc_document_primer(OCDocument *doc, int index, OCPrimerInfo *out);
 /* A primer binding the selection; returns its index or -1. */

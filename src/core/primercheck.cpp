@@ -253,6 +253,9 @@ bool designMutagenesis(const Sequence &seq, Span target, const std::string &rawR
     d.mutant = seq;
     d.mutant.name = base;
     replaceBases(d.mutant, target, replacement);
+    const std::string old = seq.bases.substr(size_t(s), size_t(target.length));
+    addHistory(d.mutant, "Mutagenesis at " + std::to_string(s + 1) + ": " + (old.empty() ? "-" : old) + " to "
+                             + (replacement.empty() ? "-" : replacement));
     const int r = int(replacement.size());
     Primer mf = d.forward, mr = d.reverse;
     mf.binding = {s, s + r + bf->length};

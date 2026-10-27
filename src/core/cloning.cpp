@@ -264,6 +264,12 @@ bool goldenGate(const std::vector<Sequence> &inputs, const Enzyme &enzyme, Seque
     // Keep the vector's numbering when its origin is in the backbone.
     if (pieces[0].originOffset() > 0)
         rotateOrigin(*out, pieces[0].originOffset());
+    out->history = inputs[0].history;
+    std::string parts;
+    for (const AssemblyStep &s : chain)
+        if (s.input > 0)
+            parts += (parts.empty() ? "" : ", ") + inputs[size_t(s.input)].name + (s.flipped ? " (reversed)" : "");
+    addHistory(*out, "Golden Gate with " + enzyme.name + ": " + parts + " into " + inputs[0].name);
     if (steps)
         *steps = chain;
     return true;
@@ -362,6 +368,9 @@ bool restrictionClone(const Sequence &vector, const std::string &v1, const std::
     out->name = vector.name + "-" + insert.name;
     if (backbone.originOffset() > 0)
         rotateOrigin(*out, backbone.originOffset());
+    out->history = vector.history;
+    addHistory(*out, "Restriction cloning: " + insert.name + " (" + i1 + ", " + i2 + (reversed ? ", reversed" : "")
+                         + ") into " + vector.name + " (" + v1 + ", " + v2 + ")");
     return true;
 }
 
@@ -393,6 +402,13 @@ bool gibsonIntoVector(const Sequence &vector, const std::string &v1, const std::
             out->name += "-" + inputs[size_t(step.input)].name;
     if (vector.circular && backbone.originOffset() > 0)
         rotateOrigin(*out, backbone.originOffset());
+    out->history = vector.history;
+    std::string parts;
+    for (const GibsonJoin &step : j)
+        if (step.input > 0)
+            parts += (parts.empty() ? "" : ", ") + inputs[size_t(step.input)].name + (step.flipped ? " (reversed)" : "");
+    addHistory(*out, "Gibson assembly: " + parts + " into " + vector.name
+                         + (vector.circular ? " (" + v1 + ", " + v2 + ")" : ""));
     if (joins)
         *joins = j;
     return true;

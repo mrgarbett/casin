@@ -163,6 +163,8 @@ bool pcrProduct(const Sequence &templ, const Primer &fwd, const Primer &rev, Seq
     f.binding = {0, int(fwd.bases.size())};
     r.binding = {product.length() - int(rev.bases.size()), product.length()};
     product.primers = {f, r};
+    product.history = templ.history;
+    addHistory(product, "PCR with " + fwd.name + " and " + rev.name + " on " + templ.name);
     *out = product;
     return true;
 }

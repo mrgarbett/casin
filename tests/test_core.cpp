@@ -795,6 +795,14 @@ static void testCloning()
     CHECK(restrictionClone(v, "EcoRI", "BamHI", ins, "EcoRI", "BamHI", false, &product, &err));
     CHECK_EQ(product.length(), 76 - 41 + 11 + 29 - 3);
     CHECK_EQ(product.name, std::string("vec-ins"));
+    CHECK_EQ(product.history.size(), size_t(1));
+    CHECK(product.history.size() == 1 && product.history[0].find("Restriction cloning: ins (EcoRI, BamHI) into vec") != std::string::npos);
+    // The history survives GenBank and .dna round trips.
+    product.history.insert(product.history.begin(), "2026-01-02 PCR with a & b <x>");
+    Sequence back;
+    CHECK(readGenBank(writeGenBank(product), &back, &err) && back.history == product.history);
+    back = {};
+    CHECK(readSnapGene(writeSnapGene(product), &back, &err) && back.history == product.history);
     CHECK(startsWith(product.bases, std::string(10, 'A') + "GAATTC"));
     CHECK(!restrictionClone(v, "EcoRI", "BamHI", ins, "EcoRI", "BamHI", true, &product, &err));
     CHECK(!restrictionClone(v, "EcoRI", "NotI", ins, "EcoRI", "BamHI", false, &product, &err));

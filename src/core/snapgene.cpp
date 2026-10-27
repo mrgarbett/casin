@@ -132,6 +132,20 @@ void parseNotes(const std::string &xmlText, Sequence &seq)
         return;
     if (const xml::Element *d = root->child("Description"))
         seq.description = xml::stripHtml(d->text);
+    // Our cloning history, one "History: " line per step.
+    if (const xml::Element *c = root->child("Comments")) {
+        std::string html = c->text;
+        size_t pos = 0;
+        while (pos <= html.size()) {
+            size_t br = html.find("<br>", pos);
+            if (br == std::string::npos)
+                br = html.size();
+            const std::string line = trim(xml::stripHtml(html.substr(pos, br - pos)));
+            if (line.rfind("History: ", 0) == 0)
+                seq.history.push_back(line.substr(9));
+            pos = br + 4;
+        }
+    }
 }
 
 void putU32BE(std::string &out, uint32_t v)
@@ -311,6 +325,12 @@ std::string writeSnapGene(const Sequence &seq)
     if (!seq.description.empty())
         notes += "<Description>" + escapeXml("<html><body>" + escapeXml(seq.description) + "</body></html>")
                + "</Description>";
+    if (!seq.history.empty()) {
+        std::string lines;
+        for (const std::string &h : seq.history)
+            lines += (lines.empty() ? "" : "<br>") + escapeXml("History: " + h);
+        notes += "<Comments>" + escapeXml("<html><body>" + lines + "</body></html>") + "</Comments>";
+    }
     putPacket(out, kNotes, notes + "</Notes>");
     putPacket(out, kFeatures, featuresXml(seq));
     return out;

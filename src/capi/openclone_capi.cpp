@@ -309,6 +309,15 @@ void oc_document_remove_feature(OCDocument *doc, int index) { doc->doc.removeFea
 
 int oc_document_primer_count(const OCDocument *doc) { return int(doc->doc.sequence().primers.size()); }
 
+int oc_document_history_count(const OCDocument *doc) { return int(doc->doc.sequence().history.size()); }
+
+const char *oc_document_history(OCDocument *doc, int index)
+{
+    const std::vector<std::string> &h = doc->doc.sequence().history;
+    doc->scratch1 = index >= 0 && index < int(h.size()) ? h[size_t(index)] : std::string();
+    return doc->scratch1.c_str();
+}
+
 bool oc_document_primer(OCDocument *doc, int index, OCPrimerInfo *out)
 {
     const Sequence &s = doc->doc.sequence();

@@ -166,6 +166,7 @@ int main(int argc, char **argv)
     oc_document_set_selection(doc, 211, 3);
     CHECK(oc_mutagenesis(doc, "GCG", 60, product, NULL));
     CHECK(oc_document_length(product) == oc_document_length(doc) && oc_document_primer_count(product) >= 2);
+    CHECK(oc_document_history_count(product) == 1 && strstr(oc_document_history(product, 0), "Mutagenesis") != NULL);
     oc_document_free(product);
     oc_document_free(pcr);
 
