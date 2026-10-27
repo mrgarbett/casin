@@ -8,6 +8,7 @@
 //   OpenClone --render-map out.png <file>      (.pdf works too)
 import AppKit
 import OpenCloneCore
+import UniformTypeIdentifiers
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let launchFiles: [String]
@@ -108,6 +109,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+/// Another installed app (ApE, SnapGene, ...) may export its own UTI for .gb or
+/// .dna; Launch Services then prefers it over our imported types and the default
+/// controller refuses the file. Fall back to our types by filename extension.
+final class DocumentController: NSDocumentController {
+    override func typeForContents(of url: URL) throws -> String {
+        let type = try super.typeForContents(of: url)
+        if documentClass(forType: type) != nil { return type }
+        let ext = url.pathExtension.lowercased()
+        for ours in ["io.github.openclone.genbank", "io.github.openclone.snapgene-dna", "io.github.openclone.fasta"] {
+            if let ut = UTType(ours), ut.tags[.filenameExtension]?.contains(ext) == true { return ours }
+        }
+        return type
+    }
+}
+
 // MARK: - Entry point
 
 func renderMapHeadless(_ args: [String]) -> Int32 {
@@ -142,6 +158,7 @@ for arg in arguments {
 }
 
 let app = NSApplication.shared
+_ = DocumentController()   // the first instance becomes NSDocumentController.shared
 let delegate = AppDelegate(launchFiles: files)
 app.delegate = delegate
 app.setActivationPolicy(.regular)
