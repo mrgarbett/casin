@@ -179,6 +179,7 @@ void onStartup(GApplication *app, gpointer)
         {"win.paste", {"<Control>v", nullptr}},
         {"win.select-all", {"<Control>a", nullptr}},
         {"win.add-feature", {"<Control>k", nullptr}},
+        {"win.digest", {"<Control>d", nullptr}},
         {"win.export-map", {"<Control>e", nullptr}},
         {"win.copy", {"<Control>c", nullptr}},
         {"win.copy-rc", {"<Control><Shift>c", nullptr}},

@@ -63,6 +63,7 @@ private:
     static void actEditFeature(GSimpleAction *, GVariant *, gpointer self);
     static void actDeleteFeature(GSimpleAction *, GVariant *, gpointer self);
     static void actAddPrimer(GSimpleAction *, GVariant *, gpointer self);
+    static void actDigest(GSimpleAction *, GVariant *, gpointer self);
     static gboolean onCloseRequest(GtkWindow *, gpointer self);
     static void actExportFasta(GSimpleAction *, GVariant *, gpointer self);
     static void actExportMap(GSimpleAction *, GVariant *, gpointer self);
@@ -82,6 +83,7 @@ private:
     // Feature dialog: index < 0 adds a feature from the selection.
     void featureDialog(int index);
     void primerDialog();
+    void digestDialog();
     void pasteText(const std::string &text);
 
     Document m_doc;

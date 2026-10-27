@@ -122,6 +122,9 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   primers; primers are drawn on the sequence and the map.
 - Copy and paste keep the features and primers inside the copied bases.
 - Enzymes that cut on both sides of their site (BaeI, BcgI, BsaXI, CspCI).
+- Digest and Gel (Ctrl+D, a first piece of milestone 3): pick enzymes and see the
+  fragments with their ends and overhangs, next to a virtual gel with a ladder and
+  the uncut plasmid.
 - The C API exposes all of this for the Mac app.
 
 ## Next steps

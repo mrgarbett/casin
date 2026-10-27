@@ -58,7 +58,7 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 
 | ID | Capability | Status |
 | --- | --- | --- |
-| C1 | Restriction digest and virtual agarose gel | M3 |
+| C1 | Restriction digest and virtual agarose gel | done on Linux; Mac UI pending |
 | C2 | Restriction-ligation cloning | M3 |
 | C3 | PCR product from two primers | M3 |
 | C4 | Gibson, HiFi and In-Fusion assembly | M3 |

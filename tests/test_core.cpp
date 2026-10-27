@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Headless tests for openclone_core. Usage: core_tests <samples-dir>
+#include "core/digest.h"
 #include "core/edit.h"
 #include "core/enzymes.h"
 #include "core/fasta.h"
@@ -632,6 +633,40 @@ static void testSnapGeneWriter()
     }
 }
 
+static void testDigest()
+{
+    // EcoRI G^AATTC at 10, BamHI G^GATCC at 30, PstI CTGCA^G (3' overhang) at 50.
+    Sequence s;
+    s.bases = std::string(10, 'T') + "GAATTC" + std::string(14, 'T') + "GGATCC" + std::string(14, 'T') + "CTGCAG"
+            + std::string(20, 'T');   // 76 bp
+    std::vector<Enzyme> use{*findEnzyme("EcoRI"), *findEnzyme("BamHI"), *findEnzyme("PstI")};
+    DigestResult lin = digest(s, use);
+    CHECK(!lin.uncut);
+    CHECK_EQ(lin.fragments.size(), size_t(4));
+    if (lin.fragments.size() == 4) {
+        CHECK(lin.fragments[0].start == 0 && lin.fragments[0].length == 11);
+        CHECK(lin.fragments[0].leftEnzyme.empty() && lin.fragments[0].rightEnzyme == "EcoRI");
+        CHECK_EQ(lin.fragments[1].length, 20);
+        CHECK_EQ(lin.fragments[2].rightOverhang, -4);   // PstI leaves a 3' overhang
+        CHECK_EQ(lin.fragments[1].leftOverhang, 4);     // EcoRI leaves a 5' overhang
+        int total = 0;
+        for (const DigestFragment &f : lin.fragments)
+            total += f.length;
+        CHECK_EQ(total, s.length());
+    }
+    s.circular = true;
+    DigestResult circ = digest(s, use);
+    CHECK_EQ(circ.fragments.size(), size_t(3));
+    if (circ.fragments.size() == 3) {
+        CHECK_EQ(circ.fragments[2].length, 76 - 55 + 11);   // PstI to EcoRI, across the origin
+        CHECK_EQ(circ.fragments[2].rightEnzyme, std::string("EcoRI"));
+    }
+    std::vector<Enzyme> none{*findEnzyme("NotI")};
+    DigestResult uncut = digest(s, none);
+    CHECK(uncut.uncut && uncut.fragments.size() == 1 && uncut.fragments[0].length == 76);
+    CHECK(!commonLadders().empty() && commonLadders()[0].bands.front() > commonLadders()[0].bands.back());
+}
+
 int main(int argc, char **argv)
 {
     testBasics();
@@ -643,6 +678,7 @@ int main(int argc, char **argv)
     testFastaAndIO();
     testEditing();
     testSnapGeneWriter();
+    testDigest();
     if (argc > 1)
         testSamples(argv[1]);
     else

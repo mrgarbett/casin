@@ -127,6 +127,7 @@ void Window::buildUi(GtkApplication *app)
         {"edit-feature", &Window::actEditFeature, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"delete-feature", &Window::actDeleteFeature, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"add-primer", &Window::actAddPrimer, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"digest", &Window::actDigest, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-fasta", &Window::actExportFasta, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-map", &Window::actExportMap, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"copy", &Window::actCopy, nullptr, nullptr, nullptr, {0, 0, 0}},
@@ -180,6 +181,7 @@ void Window::buildUi(GtkApplication *app)
     g_menu_append(seqSection, "Reverse Complement Sequence", "win.reverse-complement");
     g_menu_append(seqSection, "Set Origin at Selection", "win.set-origin");
     g_menu_append(seqSection, "Circular", "win.circular");
+    g_menu_append(seqSection, "Digest and Gel…", "win.digest");
     GMenu *featureMenu = g_menu_new();
     g_menu_append(featureMenu, "Add Feature…", "win.add-feature");
     g_menu_append(featureMenu, "Edit Feature…", "win.edit-feature");
@@ -762,7 +764,7 @@ void Window::updateActions()
     enable("undo", m_doc.canUndo());
     enable("redo", m_doc.canRedo());
     for (const char *name : {"save", "save-as", "export-fasta", "export-map", "paste", "select-all",
-                             "reverse-complement", "circular"})
+                             "reverse-complement", "circular", "digest"})
         enable(name, has);
     enable("cut", sel);
     enable("add-feature", sel);
@@ -906,6 +908,11 @@ void Window::actDeleteFeature(GSimpleAction *, GVariant *, gpointer p)
 void Window::actAddPrimer(GSimpleAction *, GVariant *, gpointer p)
 {
     static_cast<Window *>(p)->primerDialog();
+}
+
+void Window::actDigest(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->digestDialog();
 }
 
 void Window::actExportFasta(GSimpleAction *, GVariant *, gpointer p)

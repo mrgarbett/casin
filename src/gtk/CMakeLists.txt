@@ -11,6 +11,7 @@ add_executable(openclone
     main.cpp
     window.cpp
     dialogs.cpp
+    digestdialog.cpp
     mapview.cpp
     seqview.cpp)
 target_include_directories(openclone PRIVATE ${PROJECT_SOURCE_DIR}/src)
