@@ -78,6 +78,28 @@ private:
     view::ApproxTextMeasurer m_approx;
 };
 
+Strand strandFromC(int strand)
+{
+    return strand == OC_STRAND_FORWARD ? Strand::Forward : strand == OC_STRAND_REVERSE ? Strand::Reverse : Strand::None;
+}
+
+// A footprint as feature ranges, split at the origin when it wraps.
+std::vector<Range> rangesFor(const Sequence &s, int start, int length)
+{
+    const int n = s.length();
+    if (n == 0 || length <= 0)
+        return {};
+    length = std::min(length, n);
+    start = s.circular ? ((start % n) + n) % n : std::clamp(start, 0, n);
+    if (start + length <= n)
+        return {{start, start + length}};
+    if (!s.circular)
+        return {{start, n}};
+    return {{start, n}, {0, start + length - n}};
+}
+
+
+
 } // namespace
 
 struct OCDocument {
@@ -98,6 +120,17 @@ struct OCSeqLayout {
 struct OCScene {
     view::Scene scene;
 };
+
+namespace {
+bool deliver(OCDocument *out, const Sequence &product)
+{
+    if (!out)
+        return false;
+    out->doc.setSequence(product);
+    out->doc.markUnsaved();
+    return true;
+}
+} // namespace
 
 extern "C" {
 
@@ -221,29 +254,6 @@ bool oc_document_feature(OCDocument *doc, int index, OCFeatureInfo *out)
 
 // ---- editing -------------------------------------------------------------------
 
-namespace {
-
-Strand strandFromC(int strand)
-{
-    return strand == OC_STRAND_FORWARD ? Strand::Forward : strand == OC_STRAND_REVERSE ? Strand::Reverse : Strand::None;
-}
-
-// A footprint as feature ranges, split at the origin when it wraps.
-std::vector<Range> rangesFor(const Sequence &s, int start, int length)
-{
-    const int n = s.length();
-    if (n == 0 || length <= 0)
-        return {};
-    length = std::min(length, n);
-    start = s.circular ? ((start % n) + n) % n : std::clamp(start, 0, n);
-    if (start + length <= n)
-        return {{start, start + length}};
-    if (!s.circular)
-        return {{start, n}};
-    return {{start, n}, {0, start + length - n}};
-}
-
-} // namespace
 
 bool oc_document_can_undo(const OCDocument *doc) { return doc->doc.canUndo(); }
 bool oc_document_can_redo(const OCDocument *doc) { return doc->doc.canRedo(); }
@@ -506,16 +516,6 @@ void oc_document_show_only_enzymes(OCDocument *doc, const char *const *names, in
 
 /* ---- cloning ---- */
 
-namespace {
-bool deliver(OCDocument *out, const Sequence &product)
-{
-    if (!out)
-        return false;
-    out->doc.setSequence(product);
-    out->doc.markUnsaved();
-    return true;
-}
-} // namespace
 
 bool oc_pcr_product(const OCDocument *templ, int forward_primer, int reverse_primer, OCDocument *out, char **error)
 {
