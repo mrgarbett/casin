@@ -85,7 +85,7 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 | --- | --- | --- |
 | V1 | Sanger `.ab1` traces | done on Linux (chromatogram, quality, click to select); Mac UI pending |
 | V2 | Align a sequence to the reference | done on Linux (one read at a time, differences listed); Mac UI pending |
-| V3 | Traces aligned to the reference | M4 |
+| V3 | Traces aligned to the reference | reads drawn under the sequence with differences marked, on Linux; chromatograms under the reference and Mac UI pending |
 | V4 | Detect common features | M5 |
 | X7 | Multiple sequence alignment | M5 |
 | X10 | Search a folder of sequence files | M5 |

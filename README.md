@@ -146,7 +146,8 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   goes to a new file. `samples/demo-trace.ab1` is a simulated read.
 - Align Read: align a read from another window (a trace, FASTA or any linear sequence) to
   this sequence on either strand, across the origin, and list the differences; click one to
-  select it, or add the read as a feature.
+  select it, add the read as a feature, or show it under the sequence (several reads at once,
+  differences in red; View → Hide Aligned Reads clears them).
 - Add Primer by Sequence: paste a primer and it is placed where its 3′ part binds (either
   strand, up to two mismatches, 5′ tails allowed).
 - Design Primers for Selection: a primer pair that amplifies exactly the selection, sized

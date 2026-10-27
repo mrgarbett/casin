@@ -33,4 +33,14 @@ struct ReadAlignment {
 bool alignRead(const Sequence &reference, const std::string &read, ReadAlignment *out, std::string *error = nullptr,
                int minMatches = 30);
 
+// A read laid over the reference, for drawing under the sequence.
+struct ReadTrack {
+    std::string name;
+    bool reverse = false;
+    Span refSpan;                 // as in the alignment; may wrap a circular reference
+    std::string bases;            // one per reference base of refSpan; '-' where the read has a deletion
+    std::vector<int> insertions;  // reference positions with read bases inserted just before them
+};
+ReadTrack readTrack(const ReadAlignment &a, int refLength, const std::string &name);
+
 } // namespace oc

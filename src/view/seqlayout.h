@@ -3,6 +3,7 @@
 
 #include "scene.h"
 #include "style.h"
+#include "../core/align.h"
 #include "../core/enzymes.h"
 #include "../core/sequence.h"
 
@@ -22,12 +23,14 @@ struct SeqViewState {
 // then feature lanes (CDS lanes get an amino-acid row). Forward primers sit
 // just above the top strand, reverse primers just below the bottom one.
 // With `frames` = 3 or 6, the forward reading frames are translated above the
-// strands and (for 6) the reverse frames below them.
+// strands and (for 6) the reverse frames below them. Aligned reads get a row
+// each under the ruler, with differences from the reference highlighted.
 // Holds references to `seq` and `sites`.
 class SequenceLayout {
 public:
     SequenceLayout(const oc::Sequence &seq, const std::vector<CutSite> &sites, const Theme &theme,
-                   TextMeasurer &measure, double width, bool showComplement, int frames = 0);
+                   TextMeasurer &measure, double width, bool showComplement, int frames = 0,
+                   std::vector<ReadTrack> reads = {});
 
     double totalHeight() const { return m_totalHeight; }
     int basesPerLine() const { return m_bpl; }
@@ -39,6 +42,7 @@ public:
     int featureAt(Point p) const;      // -1 if none
     int siteAt(Point p) const;         // -1 if none
     int primerAt(Point p) const;       // -1 if none
+    int readAt(Point p) const;         // -1 if none
     double lineTopFor(int pos) const;
     double lineHeightFor(int pos) const;
     std::string tooltipAt(Point p) const;
@@ -73,14 +77,17 @@ private:
         std::vector<bool> laneHasAA;
         std::vector<PrimerPiece> primers;
         int primerRowsTop = 0, primerRowsBottom = 0;
+        std::vector<int> reads;   // reads that cover part of this line, one row each
         // y offsets within the line
-        double yFramesTop = 0, yFramesBottom = 0, yPrimersTop = 0, yTop = 0, yBottom = 0, yPrimersBottom = 0, yRuler = 0, yLanes = 0;
+        double yFramesTop = 0, yFramesBottom = 0, yPrimersTop = 0, yTop = 0, yBottom = 0, yPrimersBottom = 0, yRuler = 0, yReads = 0, yLanes = 0;
     };
 
     double colX(int col) const;        // left edge of the base at column col
     double boundaryX(int b) const;     // x of the boundary before column b
     int lineIndexAt(double y) const;
     double laneY(const Line &l, int lane) const;
+    // Up to two pieces of the reference that a read covers.
+    std::vector<Range> readRanges(const ReadTrack &r) const;
     Rect primerRect(const Line &l, const PrimerPiece &p) const;   // content coordinates
     void buildLine(Line &line, TextMeasurer &tm);
 
@@ -89,6 +96,7 @@ private:
     Theme m_theme;
     bool m_complement;
     int m_frames = 0;
+    std::vector<ReadTrack> m_reads;
     int m_n = 0;
     int m_bpl = 10;
     double m_width = 0;

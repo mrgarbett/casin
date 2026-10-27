@@ -276,6 +276,11 @@ typedef struct {
  * "position<TAB>reference bases<TAB>read bases" (1-based, "" for an
  * insertion or deletion side), or NULL with *error when it doesn't align. */
 char *oc_align_read(const OCDocument *reference, const OCDocument *read, OCAlignmentInfo *out, char **error);
+/* Aligns `read` and shows it under `reference`'s sequence (layouts made
+ * afterwards draw it). Aligning the same read again replaces it. */
+bool oc_document_show_read(OCDocument *reference, const OCDocument *read, char **error);
+int oc_document_read_count(const OCDocument *doc);
+void oc_document_clear_reads(OCDocument *doc);
 
 /* ---- scenes ---------------------------------------------------------------- */
 

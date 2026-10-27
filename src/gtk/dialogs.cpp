@@ -1209,7 +1209,7 @@ struct AlignForm {
     Window *window;
     Sequence reference;
     std::vector<Sequence> reads;
-    GtkWidget *read, *summary, *diffs, *okButton;
+    GtkWidget *read, *summary, *diffs, *okButton, *featureButton;
     AdwDialog *dialog;
     ReadAlignment alignment;
     bool ok = false;
@@ -1257,6 +1257,7 @@ void updateAlign(AlignForm *st)
     }
     adw_action_row_set_subtitle(ADW_ACTION_ROW(st->summary), text.c_str());
     gtk_widget_set_sensitive(st->okButton, st->ok);
+    gtk_widget_set_sensitive(st->featureButton, st->ok);
 }
 } // namespace
 
@@ -1281,7 +1282,7 @@ void Window::alignDialog()
         delete st;
         return;
     }
-    Form f = makeForm("Align Read", "Add as Feature");
+    Form f = makeForm("Align Read", "Show Under Sequence");
     adw_dialog_set_content_height(f.dialog, 560);
     st->dialog = f.dialog;
     st->okButton = f.ok;
@@ -1293,6 +1294,9 @@ void Window::alignDialog()
     st->read = comboRow(g, "Read", v.data(), 0);
     st->summary = adw_action_row_new();
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->summary), "Alignment");
+    st->featureButton = gtk_button_new_with_label("Add as Feature");
+    gtk_widget_set_valign(st->featureButton, GTK_ALIGN_CENTER);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(st->summary), st->featureButton);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(g), st->summary);
     GtkWidget *gd = addGroup(f, "Differences");
     adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(gd), "Click one to select it in the sequence");
@@ -1313,6 +1317,19 @@ void Window::alignDialog()
                      st);
     updateAlign(st);
     g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<AlignForm *>(p);
+                         if (!st->ok)
+                             return;
+                         const guint i = adw_combo_row_get_selected(ADW_COMBO_ROW(st->read));
+                         Document &doc = st->window->document();
+                         doc.addRead(readTrack(st->alignment, doc.sequence().length(), st->reads[i].name));
+                         const int pos = st->alignment.diffs.empty() ? st->alignment.refSpan.start
+                                                                     : st->alignment.diffs.front().refPos;
+                         doc.setSelection({pos, st->alignment.diffs.empty() ? 0 : 1});
+                         adw_dialog_close(st->dialog);
+                     })),
+                     st);
+    g_signal_connect(st->featureButton, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
                          auto *st = static_cast<AlignForm *>(p);
                          if (!st->ok)
                              return;

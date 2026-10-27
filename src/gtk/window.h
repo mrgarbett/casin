@@ -88,6 +88,7 @@ private:
     static void actClose(GSimpleAction *, GVariant *, gpointer self);
     static void actComplement(GSimpleAction *, GVariant *, gpointer self);
     static void actFrames(GSimpleAction *, GVariant *, gpointer self);
+    static void actClearReads(GSimpleAction *, GVariant *, gpointer self);
     void copyText(const std::string &text, const char *what);
     void saveDialog(const std::string &title, const std::string &suggested, int kind, bool closeAfter = false);
     // Saves to the document's own path when its format keeps everything;

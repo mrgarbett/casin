@@ -177,6 +177,10 @@ int main(int argc, char **argv)
     CHECK(diffs && ai.diff_count == 1 && ai.ref_start == 950 && !ai.reverse);
     CHECK(diffs && strncmp(diffs, "1251\t", 5) == 0);
     oc_string_free(diffs);
+    CHECK(oc_document_show_read(doc, trace, NULL) && oc_document_read_count(doc) == 1);
+    CHECK(oc_document_show_read(doc, trace, NULL) && oc_document_read_count(doc) == 1);   /* replaced */
+    oc_document_clear_reads(doc);
+    CHECK(oc_document_read_count(doc) == 0);
     CHECK(oc_document_path(trace)[0] == '\0');   /* a trace isn't saved back over itself */
     oc_document_free(trace);
     oc_document_free(product);

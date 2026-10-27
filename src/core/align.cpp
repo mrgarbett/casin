@@ -178,4 +178,21 @@ bool alignRead(const Sequence &reference, const std::string &rawRead, ReadAlignm
     return true;
 }
 
+ReadTrack readTrack(const ReadAlignment &a, int refLength, const std::string &name)
+{
+    ReadTrack t;
+    t.name = name;
+    t.reverse = a.reverse;
+    t.refSpan = a.refSpan;
+    for (size_t k = 0; k < a.refAligned.size() && k < a.readAligned.size(); ++k) {
+        if (a.refAligned[k] == '-') {
+            const int pos = a.refSpan.start + int(t.bases.size());
+            t.insertions.push_back(refLength > 0 ? pos % refLength : pos);
+        } else {
+            t.bases += a.readAligned[k];
+        }
+    }
+    return t;
+}
+
 } // namespace oc

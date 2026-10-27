@@ -97,6 +97,7 @@ Window::Window(GtkApplication *app)
             gtk_widget_set_visible(m_traceBox, m_trace && m_trace->bases == m_doc.sequence().bases);
     });
     m_doc.onEnzymesChanged([this] { refreshEnzymeRows(); });
+    m_doc.onReadsChanged([this] { updateActions(); });
     m_doc.onSelectionChanged([this] {
         updateStatus();
         updateActions();
@@ -156,6 +157,7 @@ void Window::buildUi(GtkApplication *app)
         {"close", &Window::actClose, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"show-complement", nullptr, nullptr, "true", &Window::actComplement, {0, 0, 0}},
         {"frames", nullptr, "s", "'0'", &Window::actFrames, {0, 0, 0}},
+        {"clear-reads", &Window::actClearReads, nullptr, nullptr, nullptr, {0, 0, 0}},
     };
     g_action_map_add_action_entries(G_ACTION_MAP(m_window), entries, G_N_ELEMENTS(entries), this);
     g_signal_connect(m_window, "close-request", G_CALLBACK(&Window::onCloseRequest), this);
@@ -232,6 +234,7 @@ void Window::buildUi(GtkApplication *app)
     g_menu_append(framesMenu, "Forward Frames", "win.frames::3");
     g_menu_append(framesMenu, "All Six Frames", "win.frames::6");
     g_menu_append_submenu(viewSection, "Translate Frames", G_MENU_MODEL(framesMenu));
+    g_menu_append(viewSection, "Hide Aligned Reads", "win.clear-reads");
     g_menu_append_section(menu, nullptr, G_MENU_MODEL(viewSection));
     GMenu *appSection = g_menu_new();
     g_menu_append(appSection, "About OpenClone", "app.about");
@@ -813,6 +816,11 @@ void Window::actFrames(GSimpleAction *a, GVariant *state, gpointer p)
     self->m_seq->setFrames(std::atoi(g_variant_get_string(state, nullptr)));
 }
 
+void Window::actClearReads(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->m_doc.clearReads();
+}
+
 void Window::actSave(GSimpleAction *, GVariant *, gpointer p)
 {
     static_cast<Window *>(p)->save();
@@ -924,6 +932,7 @@ void Window::updateActions()
     enable("edit-feature", m_doc.activeFeature() >= 0);
     enable("delete-feature", m_doc.activeFeature() >= 0);
     enable("set-origin", has && m_doc.sequence().circular && m_doc.hasSelection());
+    enable("clear-reads", !m_doc.reads().empty());
     GAction *circ = g_action_map_lookup_action(G_ACTION_MAP(m_window), "circular");
     if (circ)
         g_simple_action_set_state(G_SIMPLE_ACTION(circ), g_variant_new_boolean(m_doc.sequence().circular));

@@ -607,6 +607,22 @@ char *oc_align_read(const OCDocument *reference, const OCDocument *read, OCAlign
     return dupString(joinLines(lines));
 }
 
+bool oc_document_show_read(OCDocument *reference, const OCDocument *read, char **error)
+{
+    ReadAlignment a;
+    std::string err;
+    const Sequence &ref = reference->doc.sequence();
+    if (!alignRead(ref, read->doc.sequence().bases, &a, &err)) {
+        failWith(error, err);
+        return false;
+    }
+    reference->doc.addRead(readTrack(a, ref.length(), read->doc.sequence().name));
+    return true;
+}
+
+int oc_document_read_count(const OCDocument *doc) { return int(doc->doc.reads().size()); }
+void oc_document_clear_reads(OCDocument *doc) { doc->doc.clearReads(); }
+
 OCMapLayout *oc_map_layout_new(const OCDocument *doc, double width, double height, bool dark,
                                OCMeasureText measure, void *context)
 {
@@ -662,7 +678,7 @@ OCSeqLayout *oc_seq_layout_new_frames(const OCDocument *doc, double width, bool 
     auto *l = new OCSeqLayout;
     l->layout = std::make_unique<view::SequenceLayout>(doc->doc.sequence(), doc->doc.visibleSites(),
                                                        dark ? view::Theme::darkTheme() : view::Theme::light(), tm,
-                                                       width, show_complement, frames);
+                                                       width, show_complement, frames, doc->doc.reads());
     return l;
 }
 

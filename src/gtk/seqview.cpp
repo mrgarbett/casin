@@ -50,6 +50,7 @@ SequenceView::SequenceView(Document *doc) : m_doc(doc)
         invalidate();
     });
     m_doc->onEnzymesChanged([this] { invalidate(); });
+    m_doc->onReadsChanged([this] { invalidate(); });
     m_doc->onSelectionChanged([this] {
         // Keep in sync with selections made elsewhere (map, lists, find).
         if (!m_dragging && m_doc->hasSelection())
@@ -107,7 +108,7 @@ void SequenceView::ensureLayout()
         return;
     m_layout = std::make_unique<view::SequenceLayout>(m_doc->sequence(), m_doc->visibleSites(),
                                                       m_dark ? view::Theme::darkTheme() : view::Theme::light(),
-                                                      m_measure, m_w, m_complement, m_frames);
+                                                      m_measure, m_w, m_complement, m_frames, m_doc->reads());
     updateAdjustment();
 }
 

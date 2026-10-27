@@ -4,6 +4,7 @@
 // subscribe to the change notifications (a plain-C++ stand-in for signals).
 #pragma once
 
+#include "../core/align.h"
 #include "../core/enzymes.h"
 #include "../core/sequence.h"
 
@@ -43,6 +44,13 @@ public:
     bool enzymePassesFilter(const std::string &name) const;
     // Shows just these enzymes, with the cut filter set to `maxCuts`.
     void showOnlyEnzymes(const std::set<std::string> &names, int maxCuts);
+
+    // ---- aligned reads ----
+    // Reads shown under the sequence. They are a view, not part of the file,
+    // and are dropped when the sequence changes.
+    const std::vector<ReadTrack> &reads() const { return m_reads; }
+    void addRead(ReadTrack read);
+    void clearReads();
 
     // ---- selection ----
     bool hasSelection() const { return m_hasSelection; }
@@ -111,6 +119,8 @@ public:
     void onEnzymesChanged(Listener l) { m_enzListeners.push_back(std::move(l)); }
     // Undo/redo availability or the modified flag changed.
     void onHistoryChanged(Listener l) { m_histListeners.push_back(std::move(l)); }
+    // Reads were added or dropped.
+    void onReadsChanged(Listener l) { m_readListeners.push_back(std::move(l)); }
     // True while the current sequence change came from an edit, not a load.
     bool isEditing() const { return m_inEdit; }
 
@@ -141,6 +151,7 @@ private:
     std::vector<CutSite> m_allSites;
     std::vector<CutSite> m_visibleSites;
     std::vector<int> m_countByEnzyme;
+    std::vector<ReadTrack> m_reads;
     int m_maxCuts = 1;
     std::set<std::string> m_hidden;
     Span m_selection;
@@ -151,7 +162,7 @@ private:
     unsigned m_state = 0, m_savedState = 0, m_nextState = 0;
     bool m_inEdit = false;
     bool m_typing = false;   // the last step was typed at the caret, so more typing joins it
-    std::vector<Listener> m_seqListeners, m_selListeners, m_enzListeners, m_histListeners;
+    std::vector<Listener> m_seqListeners, m_selListeners, m_enzListeners, m_histListeners, m_readListeners;
 };
 
 } // namespace oc

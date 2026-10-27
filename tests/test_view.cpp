@@ -159,6 +159,17 @@ int main(int argc, char **argv)
                     letters += t->text;
         CHECK(letters.find("MK*") != std::string::npos);
         CHECK(six.positionAt({0, six.lineTopFor(0) + six.lineHeightFor(0) / 2}) == 0);
+        // An aligned read adds a row; its mismatch is drawn and the row has a tooltip.
+        ReadTrack r;
+        r.name = "read1";
+        r.refSpan = {0, 10};
+        r.bases = "ATGAACTAGC";
+        SequenceLayout withRead(orf, none, theme, tm, 900, true, 0, {r});
+        CHECK(withRead.totalHeight() > plain.totalHeight());
+        bool found = false;
+        for (double y = 0; y < withRead.totalHeight() && !found; y += 1)
+            found = withRead.readAt({200, y}) == 0;
+        CHECK(found);
     }
     testUndo(seq);
     {

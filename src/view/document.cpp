@@ -29,6 +29,7 @@ void Document::setSequence(Sequence seq, std::string path)
     m_undo.clear();
     m_redo.clear();
     m_typing = false;
+    m_reads.clear();
     m_state = m_savedState = ++m_nextState;
     recomputeSites();
     emit(m_seqListeners);
@@ -214,8 +215,30 @@ void Document::restore(Step &step)
     emit(m_histListeners);
 }
 
+void Document::addRead(ReadTrack read)
+{
+    // Aligning the same read again replaces it.
+    for (ReadTrack &r : m_reads)
+        if (r.name == read.name) {
+            r = std::move(read);
+            emit(m_readListeners);
+            return;
+        }
+    m_reads.push_back(std::move(read));
+    emit(m_readListeners);
+}
+
+void Document::clearReads()
+{
+    if (m_reads.empty())
+        return;
+    m_reads.clear();
+    emit(m_readListeners);
+}
+
 void Document::sequenceEdited()
 {
+    m_reads.clear();
     m_activeFeature = -1;
     m_activeSite = -1;
     recomputeSites();

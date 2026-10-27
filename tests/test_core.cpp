@@ -15,6 +15,7 @@
 #include "core/snapgene.h"
 #include "core/tm.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -1017,6 +1018,13 @@ static void testAlign()
         ins = ins || (d.ref.empty() && d.read == "T");
     }
     CHECK(del && ins);
+    // Laid over the reference: one character per reference base, gaps as '-'.
+    const ReadTrack track = readTrack(al, ref.length(), "r1");
+    CHECK_EQ(int(track.bases.size()), al.refSpan.length);
+    CHECK_EQ(int(std::count(track.bases.begin(), track.bases.end(), '-')), 2);
+    CHECK_EQ(int(track.insertions.size()), 1);
+    CHECK(track.insertions.size() == 1 && track.insertions[0] < 40);   // after the origin
+    CHECK_EQ(track.bases.substr(0, 10), ref.bases.substr(110, 10));
     CHECK(!alignRead(ref, "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG", &al, &err));
 }
 
