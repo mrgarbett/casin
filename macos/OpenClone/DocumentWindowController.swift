@@ -143,6 +143,9 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             status.translatesAutoresizingMaskIntoConstraints = true
             return nil
         }
+        // The capsule hugs the text, so the text must hold it open; the pill's
+        // max-width constraint still truncates it in a narrow window.
+        status.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         return pill
     }
 
