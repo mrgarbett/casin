@@ -205,6 +205,7 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
     for (const LabelGlyph &g : m_labels)
         maxLabelW = std::max(maxLabelW, g.rect.w);
     // Without enzyme labels, still leave room for feature and primer callouts.
+    // (With them, a longer callout is pulled inward to stay on the map.)
     const Font calloutFont{11, false, false};
     if (m_labels.empty()) {
         for (const Feature &f : m_seq.features)
@@ -241,7 +242,14 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
     m_featureOuter = m_r + 6 + laneCount * (m_laneH + kLaneGap);
     m_innerR = m_r * 0.62;
 
-    // Ticks, inside the backbone.
+    // Ticks, inside the backbone, with labels kept clear of the name and
+    // length in the centre (see renderCircular).
+    const std::string centreName = m_seq.name.empty() ? "Untitled" : m_seq.name;
+    const double nameSize = clampd(m_innerR / 7, 11, 18);
+    const Font centreFont{nameSize, true, false}, lengthFont{nameSize * 0.72, false, false};
+    const double centreW = std::max(tm.width(centreName, centreFont), tm.width(formatBp(m_n), lengthFont));
+    const Rect centre{m_c.x - centreW / 2 - 4, m_c.y - 2 - tm.height(centreFont) - 2, centreW + 8,
+                      tm.height(centreFont) + nameSize * 0.6 + 10 + tm.height(lengthFont)};
     const int step = niceStep(m_n, int(clampd(m_r / 14, 6, 24)));
     const Font tickFont{std::max(8.0, std::min(10.0, m_r / 14)), false, false};
     for (int p = 0; p < m_n; p += step) {
@@ -262,6 +270,9 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
         // Push the label inward far enough that its box clears the ticks.
         const double extra = std::fabs(std::sin(a)) * tw / 2 + std::fabs(std::cos(a)) * th / 2;
         t.pos = polar(a, m_r - 10 - extra);
+        const Rect box{t.pos.x - tw / 2, t.pos.y - th / 2, tw, th};
+        if (box.intersects(centre))
+            continue;
         t.halign = HAlign::Center;
         t.valign = VAlign::Middle;
         m_tickLabels.push_back(t);
@@ -436,7 +447,10 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
             const double dy = y[i] - m_c.y;
             const double rr = rLabel + 4;
             const double dx = std::fabs(dy) < rr ? std::sqrt(rr * rr - dy * dy) : 0;
-            const double x = m_c.x + side * (dx + 6);
+            // Keep the whole label inside the map when the pane is narrow.
+            const double room = m_w - 2 * kMargin;
+            const double x = side > 0 ? std::min(m_c.x + dx + 6, kMargin + std::max(0.0, room - g.rect.w))
+                                      : std::max(m_c.x - dx - 6, m_w - kMargin - std::max(0.0, room - g.rect.w));
             const double a = g.angle;
             g.leader = {polar(a, g.anchorR), polar(a, m_featureOuter + 6), {x - side * 3, y[i]}};
             g.align = side > 0 ? HAlign::Left : HAlign::Right;
@@ -725,7 +739,7 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
 
     // Name and length in the center.
     const std::string name = m_seq.name.empty() ? "Untitled" : m_seq.name;
-    const double nameSize = clampd(m_innerR / 7, 11, 18);
+    const double nameSize = clampd(m_innerR / 7, 11, 18);   // as in layoutCircular
     s.label(name, {m_c.x, m_c.y - 2}, {nameSize, true, false}, m_theme.text, HAlign::Center, VAlign::Baseline);
     s.label(formatBp(m_n), {m_c.x, m_c.y + nameSize * 0.6 + 4}, {nameSize * 0.72, false, false},
             m_theme.mutedText, HAlign::Center, VAlign::Top);

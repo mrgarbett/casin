@@ -104,7 +104,7 @@ int main(int argc, char **argv)
 
     // All cutters: many labels. None may overlap and all stay inside the view.
     const std::vector<CutSite> sites = findSites(seq, commonEnzymes());
-    for (auto size : {std::pair<double, double>{900, 700}, {600, 500}, {1400, 900}}) {
+    for (auto size : {std::pair<double, double>{900, 700}, {600, 500}, {1400, 900}, {330, 540}}) {
         MapLayout map(seq, sites, theme, tm, size.first, size.second);
         MapState st;
         Scene sc = map.render(st);
@@ -119,6 +119,7 @@ int main(int argc, char **argv)
         CHECK(labels.size() > 10);
         for (size_t i = 0; i < labels.size(); ++i) {
             CHECK(labels[i].y >= 0 && labels[i].y + labels[i].h <= size.second);
+            CHECK(labels[i].x >= 0 && labels[i].x + labels[i].w <= size.first);
             for (size_t j = i + 1; j < labels.size(); ++j)
                 CHECK(!labels[i].intersects(labels[j]));
         }
