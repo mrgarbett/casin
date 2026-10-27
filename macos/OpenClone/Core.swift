@@ -19,6 +19,7 @@ enum Change {
     static let sequence = Int32(OC_CHANGED_SEQUENCE)
     static let selection = Int32(OC_CHANGED_SELECTION)
     static let enzymes = Int32(OC_CHANGED_ENZYMES)
+    static let history = Int32(OC_CHANGED_HISTORY)
 }
 
 struct FeatureInfo {
@@ -62,6 +63,19 @@ final class CoreDocument {
 
     func observe(_ observer: @escaping (Int32) -> Void) { observers.append(observer) }
 
+    // MARK: View options (the window's map and sequence views follow these)
+
+    /// Reading frames translated in the sequence view: 0, 3 or 6.
+    var frames = 0 { didSet { viewOptionsChanged() } }
+    var mapShowsEnzymes = true { didSet { viewOptionsChanged() } }
+    var mapShowsPrimers = true { didSet { viewOptionsChanged() } }
+    var mapHiddenTypes: Set<String> = [] { didSet { viewOptionsChanged() } }
+
+    /// Views rebuild their layouts on an enzyme change, so report one.
+    private func viewOptionsChanged() {
+        for observer in observers { observer(Change.enzymes) }
+    }
+
     func load(path: String) throws {
         var err: UnsafeMutablePointer<CChar>?
         if !oc_document_load(handle, path, &err) {
@@ -79,6 +93,7 @@ final class CoreDocument {
     }
 
     var isEmpty: Bool { oc_document_is_empty(handle) }
+    var isModified: Bool { oc_document_is_modified(handle) }
     var name: String { String(cString: oc_document_name(handle)) }
     var length: Int { Int(oc_document_length(handle)) }
     var isCircular: Bool { oc_document_is_circular(handle) }
@@ -156,5 +171,23 @@ let measureText: OCMeasureText = { _, text, size, bold, mono in
 extension NSView {
     var isDarkAppearance: Bool {
         effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    }
+}
+
+// MARK: - C strings
+
+/// Calls `body` with the strings as a C array of `const char *`.
+func withCStrings<R>(_ strings: [String], _ body: (UnsafePointer<UnsafePointer<CChar>?>) -> R) -> R {
+    let copies = strings.map { strdup($0) }
+    defer { copies.forEach { free($0) } }
+    // One trailing nil keeps the buffer non-empty for an empty list.
+    let pointers: [UnsafePointer<CChar>?] = copies.map { $0.map { UnsafePointer($0) } } + [nil]
+    return pointers.withUnsafeBufferPointer { body($0.baseAddress!) }
+}
+
+/// A fixed-size C char array (imported as a tuple) as a String.
+func tupleString<T>(_ tuple: T) -> String {
+    withUnsafeBytes(of: tuple) { raw in
+        String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
     }
 }

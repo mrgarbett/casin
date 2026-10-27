@@ -10,6 +10,7 @@
 #include <map>
 #include <tuple>
 #include <string>
+#include <vector>
 
 namespace oc::view {
 
@@ -37,5 +38,10 @@ void drawScene(cairo_t *cr, const Scene &scene);
 // Writes the scene to .png, .svg or .pdf (chosen by extension). PNG is
 // rendered at `scale` (2 = HiDPI).
 bool exportScene(const Scene &scene, const std::string &path, std::string *error = nullptr, double scale = 2.0);
+
+// Writes printed pages to a PDF of the given paper size (points), each page
+// scaled to fit inside the margin.
+bool exportPdfPages(const std::vector<Scene> &pages, const std::string &path, double paperW = 595, double paperH = 842,
+                    double margin = 36, std::string *error = nullptr);
 
 } // namespace oc::view

@@ -3,6 +3,7 @@
 #include "maplayout.h"   // withThousands
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 
 namespace oc::view {
@@ -14,8 +15,10 @@ const int kMaxEnzymeRows = 6;
 }
 
 SequenceLayout::SequenceLayout(const oc::Sequence &seq, const std::vector<CutSite> &sites, const Theme &theme,
-                               TextMeasurer &tm, double width, bool showComplement)
+                               TextMeasurer &tm, double width, bool showComplement, int frames,
+                               std::vector<ReadTrack> reads)
     : m_seq(seq), m_sites(sites), m_theme(theme), m_complement(showComplement),
+      m_frames(frames >= 6 ? 6 : frames >= 3 ? 3 : 0), m_reads(std::move(reads)),
       m_n(seq.length()), m_width(width)
 {
     m_charW = tm.width("ACGTACGTAC", m_baseFont) / 10.0;
@@ -129,6 +132,39 @@ SequenceLayout::SequenceLayout(const oc::Sequence &seq, const std::vector<CutSit
             }
         }
     }
+    // Primer pieces, rows assigned greedily per side within each line.
+    for (size_t pi = 0; pi < m_seq.primers.size(); ++pi) {
+        const Primer &pr = m_seq.primers[pi];
+        const Range r = pr.binding;
+        if (r.length() <= 0 || r.end > m_n)
+            continue;
+        const bool fwd = pr.strand != Strand::Reverse;
+        for (int li = r.start / m_bpl; li < int(m_lines.size()) && m_lines[size_t(li)].start < r.end; ++li) {
+            Line &line = m_lines[size_t(li)];
+            const int a = std::max(r.start, line.start) - line.start;
+            const int b = std::min(r.end, line.start + line.len) - line.start;
+            if (b <= a)
+                continue;
+            const bool head = fwd ? r.end == line.start + b : r.start == line.start + a;
+            line.primers.push_back({int(pi), 0, a, b, head, fwd});
+        }
+    }
+    for (Line &line : m_lines) {
+        std::vector<int> endTop, endBottom;
+        for (PrimerPiece &p : line.primers) {
+            std::vector<int> &ends = p.top ? endTop : endBottom;
+            size_t row = 0;
+            while (row < ends.size() && p.a < ends[row] + 1)
+                ++row;
+            if (row == ends.size())
+                ends.push_back(0);
+            ends[row] = p.b;
+            p.row = int(row);
+        }
+        line.primerRowsTop = int(endTop.size());
+        line.primerRowsBottom = int(endBottom.size());
+    }
+
     y = 0;
     for (size_t li = 0; li < m_lines.size(); ++li) {
         Line &line = m_lines[li];
@@ -166,13 +202,31 @@ SequenceLayout::SequenceLayout(const oc::Sequence &seq, const std::vector<CutSit
 
         line.y = y;
         double off = kLinePadTop + line.enzymeRows * m_labelH + (line.enzymeRows ? 3 : 0);
+        line.yFramesTop = off;
+        if (m_frames)
+            off += 3 * m_aaH + 2;
+        line.yPrimersTop = off;
+        off += line.primerRowsTop * m_primerH;
         line.yTop = off;
         off += m_baseH;
         line.yBottom = off;
         if (m_complement)
             off += m_baseH;
+        line.yPrimersBottom = off;
+        off += line.primerRowsBottom * m_primerH;
+        line.yFramesBottom = off;
+        if (m_frames == 6)
+            off += 2 + 3 * m_aaH;
         line.yRuler = off;
         off += m_rulerH;
+        for (size_t r = 0; r < m_reads.size(); ++r)
+            for (const Range &rr : readRanges(m_reads[r]))
+                if (rr.start < line.start + line.len && line.start < rr.end) {
+                    line.reads.push_back(int(r));
+                    break;
+                }
+        line.yReads = off;
+        off += line.reads.size() * (m_aaH + 1) + (line.reads.empty() ? 0 : 3);
         line.yLanes = off + 2;
         off += 2;
         for (bool aa : line.laneHasAA)
@@ -201,6 +255,25 @@ double SequenceLayout::laneY(const Line &l, int lane) const
     for (int i = 0; i < lane; ++i)
         y += m_laneH + 2 + (l.laneHasAA[size_t(i)] ? m_aaH : 0);
     return y;
+}
+
+Rect SequenceLayout::primerRect(const Line &l, const PrimerPiece &p) const
+{
+    const double y = p.top ? l.y + l.yTop - (p.row + 1) * m_primerH : l.y + l.yPrimersBottom + p.row * m_primerH;
+    const double x0 = boundaryX(p.a), x1 = boundaryX(p.b);
+    return {x0, y + 2, x1 - x0, m_primerH - 4};
+}
+
+int SequenceLayout::primerAt(Point p) const
+{
+    const int li = lineIndexAt(p.y);
+    if (li < 0)
+        return -1;
+    const Line &l = m_lines[size_t(li)];
+    for (const PrimerPiece &pc : l.primers)
+        if (primerRect(l, pc).contains(p))
+            return pc.primer;
+    return -1;
 }
 
 int SequenceLayout::lineIndexAt(double y) const
@@ -268,19 +341,56 @@ int SequenceLayout::siteAt(Point p) const
         return -1;
     const Line &l = m_lines[size_t(li)];
     for (const SiteLabel &s : l.labels) {
-        const double yRow = l.y + l.yTop - 3 - (s.row + 1) * m_labelH;
+        const double yRow = l.y + l.yFramesTop - 3 - (s.row + 1) * m_labelH;
         if (Rect{s.x, yRow, s.w, m_labelH}.contains(p))
             return s.sites.front();
     }
     return -1;
 }
 
+std::vector<Range> SequenceLayout::readRanges(const ReadTrack &r) const
+{
+    const int len = int(r.bases.size());
+    const int start = m_n > 0 ? ((r.refSpan.start % m_n) + m_n) % m_n : 0;
+    if (start + len <= m_n)
+        return {{start, start + len}};
+    return {{start, m_n}, {0, start + len - m_n}};
+}
+
+int SequenceLayout::readAt(Point p) const
+{
+    const int li = lineIndexAt(p.y);
+    if (li < 0 || li >= int(m_lines.size()))
+        return -1;
+    const Line &l = m_lines[size_t(li)];
+    const double dy = p.y - l.y - l.yReads;
+    const int row = dy >= 0 ? int(dy / (m_aaH + 1)) : -1;
+    return row >= 0 && row < int(l.reads.size()) ? l.reads[size_t(row)] : -1;
+}
+
 std::string SequenceLayout::tooltipAt(Point p) const
 {
+    const int ri = readAt(p);
+    if (ri >= 0) {
+        const ReadTrack &r = m_reads[size_t(ri)];
+        int diffs = int(r.insertions.size());
+        const int start = readRanges(r).front().start;
+        for (size_t i = 0; i < r.bases.size(); ++i)
+            if (std::toupper(static_cast<unsigned char>(r.bases[i]))
+                != std::toupper(static_cast<unsigned char>(m_seq.bases[size_t((start + int(i)) % m_n)])))
+                ++diffs;
+        return r.name + " (read, " + (r.reverse ? "bottom" : "top") + " strand), " + formatBp(int(r.bases.size()))
+             + ", " + std::to_string(diffs) + (diffs == 1 ? " difference" : " differences");
+    }
     const int si = siteAt(p);
     if (si >= 0) {
         const CutSite &c = m_sites[size_t(si)];
         return c.enzyme->name + "  " + c.enzyme->site + "  cuts after " + withThousands(c.cutTop);
+    }
+    const int pi = primerAt(p);
+    if (pi >= 0) {
+        const Primer &pr = m_seq.primers[size_t(pi)];
+        return pr.name + " (primer), " + std::to_string(pr.bases.size()) + " nt  " + pr.bases;
     }
     const int fi = featureAt(p);
     if (fi >= 0) {
@@ -357,10 +467,39 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
                     VAlign::Top);
         }
 
+        // Reading-frame translations: +1..+3 count from base 1, -1..-3 from the last base.
+        for (int row = 0; row < m_frames; ++row) {
+            const bool fwd = row < 3;
+            const int k = row % 3;
+            const double fy = fwd ? y0 + l.yFramesTop + k * m_aaH : y0 + l.yFramesBottom + 2 + k * m_aaH;
+            const std::string tag = (fwd ? "+" : "\u2212") + std::to_string(k + 1);
+            s.label(tag, {m_left - 10, fy + (m_aaH - 1) / 2}, m_smallFont, m_theme.mutedText, HAlign::Right,
+                    VAlign::Middle);
+            // First codon whose middle base is on this line.
+            int p = l.start - 1;
+            const int phase = fwd ? k : ((m_n - k) % 3 + 3) % 3;
+            p += ((phase - p) % 3 + 3) % 3;
+            for (; p + 1 < l.start + l.len; p += 3) {
+                if (p < 0 || p + 3 > m_n)
+                    continue;
+                std::string codon = m_seq.bases.substr(size_t(p), 3);
+                if (!fwd)
+                    codon = reverseComplement(codon);
+                const char aa = translateCodon(codon.c_str());
+                const double cx = colX(p + 1 - l.start) + m_charW / 2;
+                if (aa == '*' || aa == 'M')
+                    s.rect({cx - m_charW * 1.5, fy, m_charW * 3, m_aaH - 1},
+                           (aa == '*' ? m_theme.cutMarker : m_theme.accent).withAlpha(0.16));
+                const Color ac = aa == '*' ? m_theme.cutMarker : aa == 'M' ? m_theme.accent : m_theme.mutedText;
+                s.label(std::string(1, aa), {cx, fy + (m_aaH - 1) / 2}, m_baseFont, ac, HAlign::Center,
+                        VAlign::Middle);
+            }
+        }
+
         // Enzyme labels with a short tick down to the strand.
         for (const SiteLabel &lab : l.labels) {
             const bool isActive = active && std::find(lab.sites.begin(), lab.sites.end(), st.activeSite) != lab.sites.end();
-            const double yRow = top - 3 - (lab.row + 1) * m_labelH;
+            const double yRow = y0 + l.yFramesTop - 3 - (lab.row + 1) * m_labelH;
             Font f = m_smallFont;
             f.bold = lab.unique;
             const Color c = isActive ? m_theme.cutMarker
@@ -387,6 +526,66 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
                 if (std::fabs(xa - xb) > 0.5)
                     s.line({xa, mid}, {xb, mid}, m_theme.cutMarker, 2);
             }
+        }
+
+        // Primers: thin arrows pointing 5' to 3' on the strand they read.
+        for (const PrimerPiece &pc : l.primers) {
+            const Primer &pr = m_seq.primers[size_t(pc.primer)];
+            Rect r = primerRect(l, pc);
+            r.y -= scrollY;
+            const double x0 = r.x + 0.5, x1 = r.x + r.w - 0.5, ym = r.y + r.h / 2;
+            const double head = pc.head ? std::min(r.h * 0.8, (x1 - x0) * 0.5) : 0;
+            std::vector<Point> poly;
+            if (pc.head && pc.top)
+                poly = {{x0, r.y}, {x1 - head, r.y}, {x1, ym}, {x1 - head, r.y + r.h}, {x0, r.y + r.h}};
+            else if (pc.head)
+                poly = {{x0, ym}, {x0 + head, r.y}, {x1, r.y}, {x1, r.y + r.h}, {x0 + head, r.y + r.h}};
+            else
+                poly = {{x0, r.y}, {x1, r.y}, {x1, r.y + r.h}, {x0, r.y + r.h}};
+            s.polygon(poly, m_theme.primer, m_theme.featureOutline, 0.6);
+            Font nf{9, true, false};
+            ApproxTextMeasurer approx;
+            const double nx = (!pc.top && pc.head) ? x0 + head + 2 : x0 + 2;
+            if (approx.width(pr.name, nf) < x1 - x0 - head - 4)
+                s.label(pr.name, {nx, ym}, nf, FeatureStyle::textOn(m_theme.primer), HAlign::Left, VAlign::Middle);
+        }
+
+        // Aligned reads: matching bases quiet, differences marked.
+        for (size_t row = 0; row < l.reads.size(); ++row) {
+            const ReadTrack &r = m_reads[size_t(l.reads[row])];
+            const double ry0 = y0 + l.yReads + row * (m_aaH + 1);
+            const double ym = ry0 + (m_aaH - 1) / 2;
+            std::string tag = r.name;
+            ApproxTextMeasurer approx;
+            while (tag.size() > 1 && approx.width(tag, m_smallFont) > m_left - 14)
+                tag.pop_back();
+            s.label(tag, {m_left - 10, ym}, m_smallFont, m_theme.mutedText, HAlign::Right, VAlign::Middle);
+            int offset = 0;
+            for (const Range &rr : readRanges(r)) {
+                const int a = std::max(rr.start, l.start), b = std::min(rr.end, l.start + l.len);
+                if (b > a) {
+                    s.rect({boundaryX(a - l.start), ry0, boundaryX(b - l.start) - boundaryX(a - l.start), m_aaH - 1},
+                           m_theme.accent.withAlpha(0.08));
+                    for (int pos = a; pos < b; ++pos) {
+                        const char q = r.bases[size_t(offset + pos - rr.start)];
+                        const char ref = m_seq.bases[size_t(pos)];
+                        const bool same = std::toupper(static_cast<unsigned char>(q))
+                                       == std::toupper(static_cast<unsigned char>(ref));
+                        const double cx = colX(pos - l.start) + m_charW / 2;
+                        if (!same)
+                            s.rect({colX(pos - l.start), ry0, m_charW, m_aaH - 1}, m_theme.cutMarker.withAlpha(0.2));
+                        s.label(std::string(1, q), {cx, ym}, m_baseFont, same ? m_theme.mutedText : m_theme.cutMarker,
+                                HAlign::Center, VAlign::Middle);
+                    }
+                }
+                offset += rr.length();
+            }
+            for (int ins : r.insertions)
+                if (ins > l.start && ins < l.start + l.len) {
+                    const double x = boundaryX(ins - l.start);
+                    s.polygon({{x - 3, ry0}, {x + 3, ry0}, {x, ry0 + 4}}, m_theme.cutMarker);
+                    s.line({x, ry0}, {x, ry0 + m_aaH - 1}, m_theme.cutMarker, 1.5);
+                }
         }
 
         // Feature lanes and translations.

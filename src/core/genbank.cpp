@@ -273,7 +273,7 @@ std::string firstWord(const std::string &line)
 
 bool readGenBank(const std::string &data, Sequence *out, std::string *error)
 {
-    enum class Mode { Header, Definition, Features, Origin, Done };
+    enum class Mode { Header, Definition, Comment, Features, Origin, Done };
     Mode mode = Mode::Header;
     Sequence seq;
     std::string definition;
@@ -323,6 +323,11 @@ bool readGenBank(const std::string &data, Sequence *out, std::string *error)
             } else if (keyword == "DEFINITION") {
                 definition = trim(line.substr(10));
                 mode = Mode::Definition;
+            } else if (keyword == "COMMENT") {
+                mode = Mode::Comment;
+                const std::string text = trim(line.substr(7));
+                if (text.rfind("History: ", 0) == 0)
+                    seq.history.push_back(text.substr(9));
             } else if (keyword == "FEATURES") {
                 mode = Mode::Features;
             } else if (keyword == "ORIGIN") {
@@ -334,6 +339,12 @@ bool readGenBank(const std::string &data, Sequence *out, std::string *error)
         }
         if (mode == Mode::Definition) {
             definition += " " + trim(line);
+            continue;
+        }
+        if (mode == Mode::Comment) {
+            const std::string text = trim(line);
+            if (text.rfind("History: ", 0) == 0)
+                seq.history.push_back(text.substr(9));
             continue;
         }
         const std::string text = trim(line);
@@ -512,6 +523,8 @@ std::string writeGenBank(const Sequence &seq)
         out += (i == 0 ? "DEFINITION  " : std::string(12, ' ')) + defLines[i] + "\n";
     out += "ACCESSION   .\nVERSION     .\nKEYWORDS    .\n";
     out += "SOURCE      synthetic DNA construct\n  ORGANISM  synthetic DNA construct\n";
+    for (size_t i = 0; i < seq.history.size(); ++i)
+        out += (i == 0 ? "COMMENT     " : std::string(12, ' ')) + "History: " + seq.history[i] + "\n";
     out += "FEATURES             Location/Qualifiers\n";
 
     const std::string indent(kQualIndent, ' ');

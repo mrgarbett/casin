@@ -3,13 +3,17 @@
 //
 // Headless checks:
 //   openclone --render-map out.png <file>      (no display needed; .svg/.pdf work too)
+//   openclone --print-pdf out.pdf <file>       (the printed pages, A4)
 //   openclone --screenshot out.png <file>      (needs a display, e.g. xvfb-run)
+//   openclone --version
 // Options for both: --size WxH  --enzymes 1|2|3|all  --select A-B (1-based)  --dark
 #include "window.h"
 
 #include "core/seqio.h"
+#include "core/version.h"
 #include "view/cairo_render.h"
 #include "view/maplayout.h"
+#include "view/printlayout.h"
 
 #include <adwaita.h>
 #include <cstdio>
@@ -25,7 +29,7 @@ namespace {
 const char *kAppId = "io.github.openclone.OpenClone";
 
 struct Options {
-    std::string renderMap, screenshot;
+    std::string renderMap, screenshot, printPdf;
     int width = 0, height = 0;
     int maxCuts = 1;
     int selStart = -1, selEnd = -1;
@@ -50,6 +54,9 @@ bool parseOptions(int argc, char **argv, Options *o, std::string *error)
         std::string v;
         if (a == "--render-map") {
             if (!next(&o->renderMap))
+                return false;
+        } else if (a == "--print-pdf") {
+            if (!next(&o->printPdf))
                 return false;
         } else if (a == "--screenshot") {
             if (!next(&o->screenshot))
@@ -116,12 +123,44 @@ int renderMap(const Options &o)
     return 0;
 }
 
+int printPdf(const Options &o)
+{
+    Sequence seq;
+    std::string err;
+    if (o.files.size() != 1 || !loadSequenceFile(o.files[0], &seq, &err)) {
+        std::fprintf(stderr, "openclone: %s\n", err.empty() ? "usage: openclone --print-pdf out.pdf <file>" : err.c_str());
+        return o.files.size() != 1 ? 2 : 1;
+    }
+    Document doc;
+    doc.setSequence(std::move(seq), o.files[0]);
+    applyOptions(doc, o);
+    view::PangoTextMeasurer tm;
+    const std::vector<view::Scene> pages = view::printPages(doc.sequence(), doc.visibleSites(), doc.reads(), tm, {});
+    if (!view::exportPdfPages(pages, o.printPdf, 595, 842, 36, &err)) {
+        std::fprintf(stderr, "openclone: %s\n", err.c_str());
+        return 1;
+    }
+    std::printf("wrote %s (%d pages)\n", o.printPdf.c_str(), int(pages.size()));
+    return 0;
+}
+
 Options g_options;
 int g_exitCode = 0;
 
 void actOpen(GSimpleAction *, GVariant *, gpointer app)
 {
     gtk::showOpenDialog(GTK_APPLICATION(app), gtk_application_get_active_window(GTK_APPLICATION(app)));
+}
+
+void actNew(GSimpleAction *, GVariant *, gpointer app)
+{
+    GtkWindow *parent = gtk_application_get_active_window(GTK_APPLICATION(app));
+    if (!parent) {
+        gtk::Window *w = gtk::Window::create(GTK_APPLICATION(app));
+        w->present();
+        parent = w->gtkWindow();
+    }
+    gtk::showNewSequenceDialog(GTK_APPLICATION(app), parent);
 }
 
 void actQuit(GSimpleAction *, GVariant *, gpointer app)
@@ -134,7 +173,7 @@ void actAbout(GSimpleAction *, GVariant *, gpointer app)
     AdwDialog *about = adw_about_dialog_new();
     adw_about_dialog_set_application_name(ADW_ABOUT_DIALOG(about), "OpenClone");
     adw_about_dialog_set_application_icon(ADW_ABOUT_DIALOG(about), kAppId);
-    adw_about_dialog_set_version(ADW_ABOUT_DIALOG(about), "0.1.0");
+    adw_about_dialog_set_version(ADW_ABOUT_DIALOG(about), OPENCLONE_VERSION);
     adw_about_dialog_set_comments(ADW_ABOUT_DIALOG(about),
                                   "An open-source plasmid viewer. Opens GenBank, FASTA and SnapGene .dna files.");
     adw_about_dialog_set_license_type(ADW_ABOUT_DIALOG(about), GTK_LICENSE_GPL_3_0);
@@ -149,6 +188,7 @@ void actAbout(GSimpleAction *, GVariant *, gpointer app)
 void onStartup(GApplication *app, gpointer)
 {
     static const GActionEntry entries[] = {
+        {"new", actNew, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"open", actOpen, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"quit", actQuit, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"about", actAbout, nullptr, nullptr, nullptr, {0, 0, 0}},
@@ -158,8 +198,18 @@ void onStartup(GApplication *app, gpointer)
     static const Accel accels[] = {
         {"app.open", {"<Control>o", nullptr}},
         {"app.quit", {"<Control>q", nullptr}},
-        {"win.save-genbank", {"<Control><Shift>s", nullptr}},
+        {"app.new", {"<Control>n", nullptr}},
+        {"win.save", {"<Control>s", nullptr}},
+        {"win.save-as", {"<Control><Shift>s", nullptr}},
+        {"win.undo", {"<Control>z", nullptr}},
+        {"win.redo", {"<Control><Shift>z", "<Control>y", nullptr}},
+        {"win.cut", {"<Control>x", nullptr}},
+        {"win.paste", {"<Control>v", nullptr}},
+        {"win.select-all", {"<Control>a", nullptr}},
+        {"win.add-feature", {"<Control>k", nullptr}},
+        {"win.digest", {"<Control>d", nullptr}},
         {"win.export-map", {"<Control>e", nullptr}},
+        {"win.print", {"<Control>p", nullptr}},
         {"win.copy", {"<Control>c", nullptr}},
         {"win.copy-rc", {"<Control><Shift>c", nullptr}},
         {"win.find", {"<Control>f", nullptr}},
@@ -228,6 +278,11 @@ void onOpen(GApplication *app, GFile **files, int n, const char *, gpointer)
 
 int main(int argc, char **argv)
 {
+    for (int i = 1; i < argc; ++i)
+        if (std::string(argv[i]) == "--version") {
+            std::printf("openclone %s\n", OPENCLONE_VERSION);
+            return 0;
+        }
     std::string error;
     if (!parseOptions(argc, argv, &g_options, &error)) {
         std::fprintf(stderr, "openclone: %s\n", error.c_str());
@@ -235,6 +290,8 @@ int main(int argc, char **argv)
     }
     if (!g_options.renderMap.empty())
         return renderMap(g_options);
+    if (!g_options.printPdf.empty())
+        return printPdf(g_options);
 
     GApplicationFlags flags = G_APPLICATION_HANDLES_OPEN;
     if (!g_options.screenshot.empty())

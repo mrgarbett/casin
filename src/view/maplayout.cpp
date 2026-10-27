@@ -53,8 +53,8 @@ std::string formatBp(int n)
 // ---------------------------------------------------------------------------
 
 MapLayout::MapLayout(const oc::Sequence &seq, const std::vector<CutSite> &sites, const Theme &theme,
-                     TextMeasurer &measure, double width, double height)
-    : m_seq(seq), m_sites(sites), m_theme(theme), m_w(width), m_h(height),
+                     TextMeasurer &measure, double width, double height, MapOptions options)
+    : m_seq(seq), m_sites(sites), m_theme(theme), m_options(std::move(options)), m_w(width), m_h(height),
       m_n(seq.length()), m_circular(seq.circular)
 {
     std::map<const Enzyme *, int> counts;
@@ -68,6 +68,11 @@ MapLayout::MapLayout(const oc::Sequence &seq, const std::vector<CutSite> &sites,
         layoutCircular(measure);
     else
         layoutLinear(measure);
+}
+
+bool MapLayout::shows(const Feature &f) const
+{
+    return FeatureStyle::isDrawn(f) && !m_options.hiddenTypes.count(f.type);
 }
 
 Point MapLayout::polar(double angle, double r) const
@@ -164,7 +169,7 @@ void MapLayout::buildLabels(TextMeasurer &tm)
 {
     // One label per distinct cut position.
     std::map<int, std::vector<int>> byPos;
-    for (size_t i = 0; i < m_sites.size(); ++i)
+    for (size_t i = 0; m_options.enzymes && i < m_sites.size(); ++i)
         byPos[m_sites[i].cutTop].push_back(int(i));
     for (auto &kv : byPos) {
         LabelGlyph g;
@@ -199,13 +204,24 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
     double maxLabelW = 0;
     for (const LabelGlyph &g : m_labels)
         maxLabelW = std::max(maxLabelW, g.rect.w);
+    // Without enzyme labels, still leave room for feature and primer callouts.
+    // (With them, a longer callout is pulled inward to stay on the map.)
+    const Font calloutFont{11, false, false};
+    if (m_labels.empty()) {
+        for (const Feature &f : m_seq.features)
+            if (shows(f) && !f.ranges.empty())
+                maxLabelW = std::max(maxLabelW, tm.width(f.name, calloutFont) + 12);
+        for (const Primer &pr : m_seq.primers)
+            if (m_options.primers && pr.binding.length() > 0)
+                maxLabelW = std::max(maxLabelW, tm.width(pr.name, calloutFont) + 12);
+    }
     maxLabelW = std::min(maxLabelW, 160.0);
-    const double colW = m_labels.empty() ? 0 : maxLabelW + 26;
+    const double colW = maxLabelW > 0 ? maxLabelW + 26 : 0;
 
     // Lanes: longest features first so short ones can stack outside them.
     std::vector<int> order;
     for (size_t i = 0; i < m_seq.features.size(); ++i)
-        if (FeatureStyle::isDrawn(m_seq.features[i]) && !m_seq.features[i].ranges.empty())
+        if (shows(m_seq.features[i]) && !m_seq.features[i].ranges.empty())
             order.push_back(int(i));
     std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
         return m_seq.features[size_t(a)].span(m_n, true).length > m_seq.features[size_t(b)].span(m_n, true).length;
@@ -226,7 +242,14 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
     m_featureOuter = m_r + 6 + laneCount * (m_laneH + kLaneGap);
     m_innerR = m_r * 0.62;
 
-    // Ticks, inside the backbone.
+    // Ticks, inside the backbone, with labels kept clear of the name and
+    // length in the centre (see renderCircular).
+    const std::string centreName = m_seq.name.empty() ? "Untitled" : m_seq.name;
+    const double nameSize = clampd(m_innerR / 7, 11, 18);
+    const Font centreFont{nameSize, true, false}, lengthFont{nameSize * 0.72, false, false};
+    const double centreW = std::max(tm.width(centreName, centreFont), tm.width(formatBp(m_n), lengthFont));
+    const Rect centre{m_c.x - centreW / 2 - 4, m_c.y - 2 - tm.height(centreFont) - 2, centreW + 8,
+                      tm.height(centreFont) + nameSize * 0.6 + 10 + tm.height(lengthFont)};
     const int step = niceStep(m_n, int(clampd(m_r / 14, 6, 24)));
     const Font tickFont{std::max(8.0, std::min(10.0, m_r / 14)), false, false};
     for (int p = 0; p < m_n; p += step) {
@@ -247,6 +270,9 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
         // Push the label inward far enough that its box clears the ticks.
         const double extra = std::fabs(std::sin(a)) * tw / 2 + std::fabs(std::cos(a)) * th / 2;
         t.pos = polar(a, m_r - 10 - extra);
+        const Rect box{t.pos.x - tw / 2, t.pos.y - th / 2, tw, th};
+        if (box.intersects(centre))
+            continue;
         t.halign = HAlign::Center;
         t.valign = VAlign::Middle;
         m_tickLabels.push_back(t);
@@ -344,7 +370,6 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
 
     // Callouts for features whose names don't fit on their arrows. They share
     // the label columns with the enzymes and are never dropped.
-    const Font calloutFont{11, false, false};
     for (const FeatureGlyph &fg : m_features) {
         if (!fg.label.empty())
             continue;
@@ -362,11 +387,34 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
         g.rect = {0, 0, tm.width(g.text, g.font) + 12, tm.height(g.font)};
         m_labels.push_back(g);
     }
+    // Primer names, from the primer arrows just outside the lanes.
+    for (size_t i = 0; m_options.primers && i < m_seq.primers.size(); ++i) {
+        const Primer &pr = m_seq.primers[i];
+        if (pr.binding.length() <= 0 || pr.binding.end > m_n || pr.name.empty())
+            continue;
+        LabelGlyph g;
+        g.primer = int(i);
+        g.text = pr.name;
+        g.font = calloutFont;
+        g.color = m_theme.text;
+        g.swatch = m_theme.primer;
+        g.priority = -1;
+        g.angle = angleOfPos((pr.binding.start + pr.binding.end) / 2.0);
+        g.anchorR = m_featureOuter + 6;
+        g.rect = {0, 0, tm.width(g.text, g.font) + 12, tm.height(g.font)};
+        m_labels.push_back(g);
+    }
 
     // Labels in left and right columns, spread so they don't overlap.
-    const double rLabel = m_featureOuter + 18;
+    // With primers on the map, bend the leaders outside the primer band so
+    // the bends don't sit on the primer arrows.
+    bool primerBand = false;
+    for (const Primer &pr : m_seq.primers)
+        primerBand = primerBand || (m_options.primers && pr.binding.length() > 0 && pr.binding.end <= m_n);
+    const double elbowR = m_featureOuter + (primerBand ? 12 : 6);
+    const double rLabel = elbowR + 12;
     for (LabelGlyph &g : m_labels) {
-        if (g.feature < 0) {
+        if (g.feature < 0 && g.primer < 0) {
             g.angle = angleOfPos(m_sites[size_t(g.sites.front())].cutTop);
             g.anchorR = m_r;
         }
@@ -405,9 +453,12 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
             const double dy = y[i] - m_c.y;
             const double rr = rLabel + 4;
             const double dx = std::fabs(dy) < rr ? std::sqrt(rr * rr - dy * dy) : 0;
-            const double x = m_c.x + side * (dx + 6);
+            // Keep the whole label inside the map when the pane is narrow.
+            const double room = m_w - 2 * kMargin;
+            const double x = side > 0 ? std::min(m_c.x + dx + 6, kMargin + std::max(0.0, room - g.rect.w))
+                                      : std::max(m_c.x - dx - 6, m_w - kMargin - std::max(0.0, room - g.rect.w));
             const double a = g.angle;
-            g.leader = {polar(a, g.anchorR), polar(a, m_featureOuter + 6), {x - side * 3, y[i]}};
+            g.leader = {polar(a, g.anchorR), polar(a, elbowR), {x - side * 3, y[i]}};
             g.align = side > 0 ? HAlign::Left : HAlign::Right;
             g.textPos = {x, y[i]};
             g.rect.x = side > 0 ? x : x - g.rect.w;
@@ -485,7 +536,7 @@ void MapLayout::layoutLinear(TextMeasurer &tm)
     // Features in lanes below the ticks.
     std::vector<int> order;
     for (size_t i = 0; i < m_seq.features.size(); ++i)
-        if (FeatureStyle::isDrawn(m_seq.features[i]) && !m_seq.features[i].ranges.empty())
+        if (shows(m_seq.features[i]) && !m_seq.features[i].ranges.empty())
             order.push_back(int(i));
     std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
         return m_seq.features[size_t(a)].span(m_n, false).length > m_seq.features[size_t(b)].span(m_n, false).length;
@@ -596,7 +647,7 @@ void MapLayout::renderLabels(Scene &s, const MapState &st) const
         const bool active = std::find(g.sites.begin(), g.sites.end(), st.activeSite) != g.sites.end();
         PathItem leader;
         leader.points = g.leader;
-        leader.stroke = g.feature >= 0 ? g.swatch.mix(m_theme.text, 0.35)
+        leader.stroke = g.feature >= 0 || g.primer >= 0 ? g.swatch.mix(m_theme.text, 0.35)
                       : active         ? m_theme.cutMarker
                                        : m_theme.leader;
         leader.lineWidth = active ? 1.5 : 0.8;
@@ -649,6 +700,26 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
             s.text(t);
     }
 
+    // Primers: thin arrows just outside the feature lanes, pointing 5' to 3'.
+    for (const Primer &pr : m_seq.primers) {
+        if (!m_options.primers || pr.binding.length() <= 0 || pr.binding.end > m_n)
+            continue;
+        const double r0 = m_featureOuter + 2, r1 = r0 + 4, rm = (r0 + r1) / 2;
+        double a0 = angleOfPos(pr.binding.start), a1 = angleOfPos(pr.binding.end);
+        const double head = std::min(6.0 / rm, (a1 - a0) * 0.5);
+        std::vector<Point> poly;
+        if (pr.strand == Strand::Reverse) {
+            poly.push_back(polar(a0, rm));
+            arcPoints(poly, a0 + head, a1, r1);
+            arcPoints(poly, a1, a0 + head, r0);
+        } else {
+            arcPoints(poly, a0, a1 - head, r1);
+            poly.push_back(polar(a1, rm));
+            arcPoints(poly, a1 - head, a0, r0);
+        }
+        s.polygon(poly, m_theme.primer, m_theme.featureOutline, 0.6);
+    }
+
     // Caret.
     if (st.hasSelection && st.selection.length == 0) {
         const double a = angleOfPos(st.selection.start);
@@ -657,8 +728,8 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
 
     // Labels.
     for (const LabelGlyph &g : m_labels) {
-        if (g.feature >= 0) {
-            const bool activeF = g.feature == st.activeFeature;
+        if (g.feature >= 0 || g.primer >= 0) {
+            const bool activeF = g.feature >= 0 && g.feature == st.activeFeature;
             if (activeF)
                 s.rect(g.rect.adjusted(2), m_theme.accent.withAlpha(0.15));
             const double cy = g.rect.y + g.rect.h / 2;
@@ -674,7 +745,7 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
 
     // Name and length in the center.
     const std::string name = m_seq.name.empty() ? "Untitled" : m_seq.name;
-    const double nameSize = clampd(m_innerR / 7, 11, 18);
+    const double nameSize = clampd(m_innerR / 7, 11, 18);   // as in layoutCircular
     s.label(name, {m_c.x, m_c.y - 2}, {nameSize, true, false}, m_theme.text, HAlign::Center, VAlign::Baseline);
     s.label(formatBp(m_n), {m_c.x, m_c.y + nameSize * 0.6 + 4}, {nameSize * 0.72, false, false},
             m_theme.mutedText, HAlign::Center, VAlign::Top);
@@ -746,7 +817,7 @@ MapHit MapLayout::hitTest(Point p) const
     if (m_n == 0)
         return hit;
     for (const LabelGlyph &g : m_labels)
-        if (g.rect.adjusted(2).contains(p)) {
+        if (g.primer < 0 && g.rect.adjusted(2).contains(p)) {
             hit.kind = g.feature >= 0 ? MapHit::Feature : MapHit::Site;
             hit.index = g.feature >= 0 ? g.feature : g.sites.front();
             return hit;
@@ -792,8 +863,13 @@ std::string MapLayout::siteTooltip(const std::vector<int> &sites) const
 std::string MapLayout::tooltipAt(Point p) const
 {
     for (const LabelGlyph &g : m_labels)
-        if (g.rect.adjusted(2).contains(p))
+        if (g.rect.adjusted(2).contains(p)) {
+            if (g.primer >= 0) {
+                const Primer &pr = m_seq.primers[size_t(g.primer)];
+                return pr.name + " (primer), " + std::to_string(pr.bases.size()) + " nt\n" + pr.bases;
+            }
             return g.feature >= 0 ? featureTooltip(g.feature) : siteTooltip(g.sites);
+        }
     for (auto it = m_features.rbegin(); it != m_features.rend(); ++it)
         for (const auto &poly : it->polys)
             if (pointInPolygon(poly, p))

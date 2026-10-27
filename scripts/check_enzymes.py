@@ -15,7 +15,7 @@ import sys
 
 root = pathlib.Path(__file__).resolve().parent.parent
 src = (root / "src/core/enzymes.cpp").read_text()
-ours = re.findall(r'\{"(\w+)", "([A-Z]+)", (-?\d+), (-?\d+)\}', src)
+ours = re.findall(r'\{"(\w+)", "([A-Z]+)", (-?\d+), (-?\d+)(?:, (-?\d+), (-?\d+), true)?\}', src)
 
 if len(sys.argv) > 1:
     rest = runpy.run_path(sys.argv[1])["rest_dict"]
@@ -23,7 +23,7 @@ else:
     from Bio.Restriction.Restriction_Dictionary import rest_dict as rest
 
 bad = 0
-for name, site, top, bottom in ours:
+for name, site, top, bottom, top2, bottom2 in ours:
     top, bottom = int(top), int(bottom)
     r = rest.get(name)
     if r is None:
@@ -36,7 +36,10 @@ for name, site, top, bottom in ours:
     problems = []
     if rsite != site: problems.append(f"site {site} != {rsite}")
     if (top, bottom) != (exp_top, exp_bottom): problems.append(f"cuts {top},{bottom} != {exp_top},{exp_bottom}")
-    if scd5 is not None: problems.append("enzyme cuts twice (not supported)")
+    if scd5 is None and top2:
+        problems.append("second cut given, but REBASE has one cut")
+    elif scd5 is not None and (not top2 or (int(top2), int(bottom2)) != (scd5, L + scd3)):
+        problems.append(f"second cut {top2},{bottom2} != {scd5},{L + scd3}")
     if problems:
         print(f"{name}: " + "; ".join(problems)); bad += 1
 print(f"checked {len(ours)} enzymes, {bad} problem(s)")

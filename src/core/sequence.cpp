@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "sequence.h"
+
+#include <ctime>
 #include "iupac.h"
 
 #include <algorithm>
@@ -374,6 +376,20 @@ std::string fileExtension(const std::string &path)
     if (dot == std::string::npos || (slash != std::string::npos && dot < slash))
         return {};
     return toLower(path.substr(dot + 1));
+}
+
+void addHistory(Sequence &seq, const std::string &step)
+{
+    const std::time_t now = std::time(nullptr);
+    std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &now);
+#else
+    localtime_r(&now, &tm);
+#endif
+    char date[16];
+    std::strftime(date, sizeof date, "%Y-%m-%d", &tm);
+    seq.history.push_back(std::string(date) + " " + step);
 }
 
 } // namespace oc
