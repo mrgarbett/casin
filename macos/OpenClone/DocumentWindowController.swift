@@ -20,6 +20,9 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     /// Keeps the glass status inside the sequence pane. A constant, updated on
     /// resize, so a longer status can't push the map/sequence divider.
     private var pillMaxWidth: NSLayoutConstraint?
+    /// Map | sequence.
+    private let split = NSSplitView()
+    private var didFirstShow = false
 
     init(document: SequenceDocument) {
         core = document.core
@@ -56,7 +59,6 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             if let scroll = scroll { self?.pillMaxWidth?.constant = max(0, scroll.frame.width - 32) }
         }
 
-        let split = NSSplitView()
         split.isVertical = true
         split.dividerStyle = .thin
         split.addArrangedSubview(mapView)
@@ -127,10 +129,18 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         splitController.addSplitViewItem(sidebarItem)
         splitController.addSplitViewItem(detailItem)
         window.contentViewController = splitController
+    }
 
-        DispatchQueue.main.async {
-            split.setPosition(split.bounds.width * 0.45, ofDividerAt: 0)
-        }
+    /// The first time the window shows: lay it out, then set the map/sequence
+    /// split from the real width and start the sequence at its first line.
+    override func showWindow(_ sender: Any?) {
+        super.showWindow(sender)
+        guard !didFirstShow, let window = window else { return }
+        didFirstShow = true
+        window.layoutIfNeeded()
+        split.setPosition(split.bounds.width * 0.45, ofDividerAt: 0)
+        sequenceView.updateSize()
+        sequenceView.scroll(.zero)
     }
 
     /// The status line inside a glass capsule, or nil before macOS 26.
@@ -170,8 +180,12 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
 
     private func updateTexts() {
         status.stringValue = core.statusText
-        window?.title = core.name.isEmpty ? "Untitled" : core.name
-        window?.subtitle = "\(core.length.formatted()) bp · \(core.isCircular ? "circular" : "linear")"
+        // The title stays the document's file name (NSDocument's, with the
+        // proxy icon); the sequence name can differ, so it goes in the subtitle.
+        var parts = ["\(core.length.formatted()) bp", core.isCircular ? "circular" : "linear"]
+        let fileName = (document as? NSDocument)?.fileURL?.deletingPathExtension().lastPathComponent
+        if !core.name.isEmpty && core.name != fileName { parts.insert(core.name, at: 0) }
+        window?.subtitle = parts.joined(separator: " · ")
     }
 
     // MARK: Toolbar

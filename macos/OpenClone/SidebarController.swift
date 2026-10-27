@@ -214,10 +214,14 @@ final class SidebarController: NSViewController, NSTableViewDataSource, NSTableV
             return check
         case "name":
             let label = NSTextField(labelWithString: e.name)
+            label.lineBreakMode = .byTruncatingTail
+            label.toolTip = e.name
             label.textColor = e.passesFilter ? .labelColor : .tertiaryLabelColor
             return label
         case "site":
             let label = NSTextField(labelWithString: e.site)
+            label.lineBreakMode = .byTruncatingTail
+            label.toolTip = e.site   // long sites truncate in a narrow sidebar
             label.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
             label.textColor = .secondaryLabelColor
             return label

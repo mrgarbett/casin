@@ -74,6 +74,8 @@ jobs:
         run: |
           vtool -show-build build/macos/OpenClone.app/Contents/MacOS/OpenClone | tee vtool.txt
           grep -Eq 'minos 13\.0' vtool.txt
+          # AppKit picks the macOS 26 design from the SDK version in the binary.
+          test "$(awk '$1 == "sdk" { print $2 }' vtool.txt)" = "$(xcrun --show-sdk-version)"
       - name: Headless map render
         run: build/macos/OpenClone.app/Contents/MacOS/OpenClone --render-map demo-map-macos.png samples/pOC-demo.dna
       - uses: actions/upload-artifact@v4

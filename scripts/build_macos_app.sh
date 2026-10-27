@@ -18,7 +18,8 @@ cp "$BIN" "$APP/Contents/MacOS/OpenClone"
 SDK_VERSION="$(xcrun --show-sdk-version 2>/dev/null || true)"
 if [ -n "$SDK_VERSION" ] && command -v vtool >/dev/null 2>&1; then
     vtool -set-build-version macos 13.0 "$SDK_VERSION" -replace \
-        -output "$APP/Contents/MacOS/OpenClone" "$BIN" 2>/dev/null
+        -output "$APP/Contents/MacOS/OpenClone" "$BIN" 2>/dev/null ||
+        echo "warning: vtool could not stamp SDK $SDK_VERSION; the macOS 26 design may not appear" >&2
 fi
 cp packaging/macos/Info.plist "$APP/Contents/Info.plist"
 
