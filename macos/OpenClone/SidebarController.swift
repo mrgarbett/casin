@@ -2,10 +2,13 @@
 import AppKit
 import OpenCloneCore
 
-/// Features and Enzymes tabs.
-final class SidebarController: NSObject, NSTableViewDataSource, NSTableViewDelegate {
-    let view: NSTabView
+/// Features and Enzymes, switched by a segmented control at the top. Shown as
+/// the window's sidebar: vibrant on Ventura, floating glass on macOS 26.
+final class SidebarController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     private let document: CoreDocument
+    private let tabs = NSTabView()
+    private let switcher = NSSegmentedControl(labels: ["Features", "Enzymes"], trackingMode: .selectOne,
+                                              target: nil, action: nil)
     private let featureTable = NSTableView()
     private let enzymeTable = NSTableView()
     private let filter = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -15,10 +18,37 @@ final class SidebarController: NSObject, NSTableViewDataSource, NSTableViewDeleg
 
     init(document: CoreDocument) {
         self.document = document
-        view = NSTabView()
-        super.init()
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func loadView() {
+        tabs.tabViewType = .noTabsNoBorder
+        tabs.drawsBackground = false
         buildFeaturesTab()
         buildEnzymesTab()
+        switcher.selectedSegment = 0
+        switcher.segmentDistribution = .fillEqually
+        switcher.target = self
+        switcher.action = #selector(switchTab(_:))
+
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 600))
+        for v in [switcher, tabs] as [NSView] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(v)
+        }
+        NSLayoutConstraint.activate([
+            switcher.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 8),
+            switcher.leadingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.leadingAnchor, constant: 10),
+            switcher.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor, constant: -10),
+            tabs.topAnchor.constraint(equalTo: switcher.bottomAnchor, constant: 8),
+            tabs.leadingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.leadingAnchor),
+            tabs.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor),
+            tabs.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
+        view = root
+
         document.observe { [weak self] what in
             guard let self = self else { return }
             if what & Change.sequence != 0 { self.reloadFeatures() }
@@ -27,6 +57,10 @@ final class SidebarController: NSObject, NSTableViewDataSource, NSTableViewDeleg
         }
         reloadFeatures()
         reloadEnzymes()
+    }
+
+    @objc private func switchTab(_ sender: NSSegmentedControl) {
+        tabs.selectTabViewItem(at: max(0, sender.selectedSegment))
     }
 
     private func makeTable(_ table: NSTableView, columns: [(String, String, CGFloat)]) -> NSScrollView {
@@ -53,7 +87,7 @@ final class SidebarController: NSObject, NSTableViewDataSource, NSTableViewDeleg
         let item = NSTabViewItem(identifier: "features")
         item.label = "Features"
         item.view = scroll
-        view.addTabViewItem(item)
+        tabs.addTabViewItem(item)
     }
 
     private func buildEnzymesTab() {
@@ -74,7 +108,7 @@ final class SidebarController: NSObject, NSTableViewDataSource, NSTableViewDeleg
         let item = NSTabViewItem(identifier: "enzymes")
         item.label = "Enzymes"
         item.view = stack
-        view.addTabViewItem(item)
+        tabs.addTabViewItem(item)
     }
 
     private func reloadFeatures() {

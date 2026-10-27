@@ -3,8 +3,13 @@ import AppKit
 import OpenCloneCore
 import UniformTypeIdentifiers
 
-/// The window for one document: map | sequence | sidebar, a find field in the
-/// toolbar and a status line at the bottom.
+/// The window for one document: a Features/Enzymes sidebar, then map |
+/// sequence, with find and view controls in a unified toolbar and a status line.
+///
+/// Ventura through Sequoia get the classic layout: a vibrant sidebar and a flat
+/// status line under the content. macOS 26 adds Liquid Glass (see Glass.swift):
+/// the sidebar floats as glass with the map and sequence running underneath it,
+/// and the status line becomes a glass capsule floating over the sequence.
 final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSMenuItemValidation {
     private let core: CoreDocument
     private let mapView: MapView
@@ -21,11 +26,12 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1320, height: 820),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
-        window.minSize = NSSize(width: 820, height: 480)
-        window.setFrameAutosaveName("OpenCloneDocumentWindow")
         super.init(window: window)
         buildContent()
         buildToolbar()
+        window.setContentSize(NSSize(width: 1320, height: 820))
+        window.minSize = NSSize(width: 900, height: 480)
+        window.setFrameAutosaveName("OpenCloneDocumentWindow")
         core.observe { [weak self] _ in self?.updateTexts() }
         updateTexts()
         window.center()
@@ -51,40 +57,93 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         split.dividerStyle = .thin
         split.addArrangedSubview(mapView)
         split.addArrangedSubview(scroll)
-        split.addArrangedSubview(sidebar.view)
         split.setHoldingPriority(.defaultLow, forSubviewAt: 0)
         split.setHoldingPriority(.defaultLow - 1, forSubviewAt: 1)
-        split.setHoldingPriority(.defaultHigh, forSubviewAt: 2)
-        sidebar.view.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
         mapView.widthAnchor.constraint(greaterThanOrEqualToConstant: 300).isActive = true
         scroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 360).isActive = true
 
         status.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         status.textColor = .secondaryLabelColor
         status.lineBreakMode = .byTruncatingTail
+        status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let root = DropView()
-        let stack = NSStackView(views: [split, status])
-        stack.orientation = .vertical
-        stack.spacing = 4
-        stack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 6, right: 0)
-        stack.setHuggingPriority(.defaultLow, for: .vertical)
-        split.setContentHuggingPriority(.defaultLow, for: .vertical)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            split.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            status.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 12),
-        ])
-        window.contentView = root
-        DispatchQueue.main.async {
-            split.setPosition(window.frame.width * 0.40, ofDividerAt: 0)
-            split.setPosition(window.frame.width - 280, ofDividerAt: 1)
+        let detail = NSViewController()
+        let root = DropView(frame: NSRect(x: 0, y: 0, width: 1040, height: 820))
+        detail.view = root
+        if let pill = floatingStatus() {
+            // macOS 26: content fills the pane (mirrored under the sidebar and
+            // toolbar); the status floats over the bottom of the sequence.
+            let content = Glass.extendingBackground(of: split)
+            for v in [content, pill] {
+                v.translatesAutoresizingMaskIntoConstraints = false
+                root.addSubview(v)
+            }
+            scroll.automaticallyAdjustsContentInsets = false
+            scroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 52, right: 0)
+            NSLayoutConstraint.activate([
+                content.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+                content.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+                content.topAnchor.constraint(equalTo: root.topAnchor),
+                content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+                pill.centerXAnchor.constraint(equalTo: scroll.centerXAnchor),
+                pill.bottomAnchor.constraint(equalTo: root.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+                pill.widthAnchor.constraint(lessThanOrEqualTo: scroll.widthAnchor, constant: -32),
+            ])
+        } else {
+            // Ventura to Sequoia: content below the toolbar, flat status line under it.
+            let stack = NSStackView(views: [split, status])
+            stack.orientation = .vertical
+            stack.spacing = 4
+            stack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 6, right: 0)
+            stack.setHuggingPriority(.defaultLow, for: .vertical)
+            split.setContentHuggingPriority(.defaultLow, for: .vertical)
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.leadingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.leadingAnchor),
+                stack.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor),
+                stack.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+                stack.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+                split.widthAnchor.constraint(equalTo: stack.widthAnchor),
+                status.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 12),
+                status.trailingAnchor.constraint(lessThanOrEqualTo: stack.trailingAnchor, constant: -12),
+            ])
         }
+
+        let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebar)
+        sidebarItem.minimumThickness = 240
+        sidebarItem.maximumThickness = 420
+        sidebarItem.canCollapse = true
+        let detailItem = NSSplitViewItem(viewController: detail)
+        Glass.extendUnderSidebar(detailItem)
+
+        let splitController = NSSplitViewController()
+        splitController.splitView.autosaveName = "OpenCloneSidebar"
+        splitController.addSplitViewItem(sidebarItem)
+        splitController.addSplitViewItem(detailItem)
+        window.contentViewController = splitController
+
+        DispatchQueue.main.async {
+            split.setPosition(split.bounds.width * 0.45, ofDividerAt: 0)
+        }
+    }
+
+    /// The status line inside a glass capsule, or nil before macOS 26.
+    private func floatingStatus() -> NSView? {
+        let inner = NSView()
+        status.translatesAutoresizingMaskIntoConstraints = false
+        inner.addSubview(status)
+        NSLayoutConstraint.activate([
+            status.leadingAnchor.constraint(equalTo: inner.leadingAnchor, constant: 14),
+            status.trailingAnchor.constraint(equalTo: inner.trailingAnchor, constant: -14),
+            status.centerYAnchor.constraint(equalTo: inner.centerYAnchor),
+        ])
+        guard let pill = Glass.capsule(around: inner, height: 30) else {
+            status.removeFromSuperview()
+            status.translatesAutoresizingMaskIntoConstraints = true
+            return nil
+        }
+        return pill
     }
 
     private func buildToolbar() {
@@ -108,21 +167,47 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     // MARK: Toolbar
 
     private let searchItem = NSToolbarItem.Identifier("find")
+    private let complementItem = NSToolbarItem.Identifier("complement")
+    private let exportItem = NSToolbarItem.Identifier("exportMap")
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, searchItem]
+        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace, complementItem, exportItem, searchItem]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, searchItem]
+        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace, .space, complementItem, exportItem, searchItem]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        guard id == searchItem else { return nil }
-        let item = NSSearchToolbarItem(itemIdentifier: id)
-        item.searchField = searchField
-        item.preferredWidthForSearchField = 240
+        switch id {
+        case searchItem:
+            let item = NSSearchToolbarItem(itemIdentifier: id)
+            item.searchField = searchField
+            item.preferredWidthForSearchField = 240
+            return item
+        case complementItem:
+            return button(id, label: "Complement", help: "Show or hide the complement strand",
+                          symbol: "arrow.left.arrow.right", action: #selector(toggleComplementStrand(_:)))
+        case exportItem:
+            return button(id, label: "Export Map", help: "Export the map as PNG or PDF",
+                          symbol: "square.and.arrow.up", action: #selector(exportMap(_:)))
+        default:
+            return nil
+        }
+    }
+
+    /// A plain bordered toolbar button. On macOS 26 the system groups these into glass.
+    private func button(_ id: NSToolbarItem.Identifier, label: String, help: String, symbol: String,
+                        action: Selector) -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: id)
+        item.label = label
+        item.paletteLabel = label
+        item.toolTip = help
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        item.isBordered = true
+        item.target = self
+        item.action = action
         return item
     }
 
