@@ -135,6 +135,17 @@ bool deliver(OCDocument *out, const Sequence &product)
 }
 } // namespace
 
+namespace {
+std::vector<view::Scene> pagesFor(const OCDocument *doc, double w, double h, OCMeasureText measure, void *context)
+{
+    CallbackMeasurer tm(measure, context);
+    view::PrintSettings ps;
+    ps.width = w;
+    ps.height = h;
+    return view::printPages(doc->doc.sequence(), doc->doc.visibleSites(), doc->doc.reads(), tm, ps);
+}
+} // namespace
+
 extern "C" {
 
 void oc_string_free(char *s)
@@ -568,16 +579,6 @@ void oc_document_show_enzyme_set(OCDocument *doc, const char *const *enzymes, in
 
 /* ---- printing ---- */
 
-namespace {
-std::vector<view::Scene> pagesFor(const OCDocument *doc, double w, double h, OCMeasureText measure, void *context)
-{
-    CallbackMeasurer tm(measure, context);
-    view::PrintSettings ps;
-    ps.width = w;
-    ps.height = h;
-    return view::printPages(doc->doc.sequence(), doc->doc.visibleSites(), doc->doc.reads(), tm, ps);
-}
-} // namespace
 
 int oc_print_page_count(const OCDocument *doc, double page_width, double page_height, OCMeasureText measure,
                         void *context)
