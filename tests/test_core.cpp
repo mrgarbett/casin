@@ -791,6 +791,13 @@ static void testCloning()
     CHECK(pieceBetween(v, vEco, vBam, true, &bb) && bb.length() == backbone.length());
     CHECK(pieceBetween(ins, iBam, iEco, false, &in) && in.length() == insert.length());
     CHECK(pieceBetween(v, vEco, vEco, true, &bb) && bb.length() == v.length());   // linearized
+    // The whole workflow by enzyme names, with the vector's numbering kept.
+    CHECK(restrictionClone(v, "EcoRI", "BamHI", ins, "EcoRI", "BamHI", false, &product, &err));
+    CHECK_EQ(product.length(), 76 - 41 + 11 + 29 - 3);
+    CHECK_EQ(product.name, std::string("vec-ins"));
+    CHECK(startsWith(product.bases, std::string(10, 'A') + "GAATTC"));
+    CHECK(!restrictionClone(v, "EcoRI", "BamHI", ins, "EcoRI", "BamHI", true, &product, &err));
+    CHECK(!restrictionClone(v, "EcoRI", "NotI", ins, "EcoRI", "BamHI", false, &product, &err));
 }
 
 static void testGoldenGate()

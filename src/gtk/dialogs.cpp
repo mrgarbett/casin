@@ -390,15 +390,6 @@ struct CloneForm {
     bool rebuilding = false;
 };
 
-std::vector<CutSite> sitesNamed(const std::vector<CutSite> &all, const std::string &name)
-{
-    std::vector<CutSite> out;
-    for (const CutSite &c : all)
-        if (c.enzyme && c.enzyme->name == name)
-            out.push_back(c);
-    return out;
-}
-
 // Enzymes cutting `seq` between 1 and `maxCuts` times, sorted by name.
 std::vector<std::string> cutters(const std::vector<CutSite> &sites, int maxCuts)
 {
@@ -435,31 +426,6 @@ std::string endName(const FragmentEnd &e)
     return e.enzyme + (e.overhang > 0 ? " (5′ " : " (3′ ") + e.bases + ")";
 }
 
-// The piece of `seq` cut at `left` and `right`; one enzyme used on both
-// sides takes its two sites (or opens a circle at its one site).
-bool cloneSide(const Sequence &seq, const std::vector<CutSite> &all, const std::string &left, const std::string &right,
-               bool keepLarger, ClonePiece *out, std::string *err)
-{
-    const std::vector<CutSite> a = sitesNamed(all, left), b = sitesNamed(all, right);
-    if (a.empty() || b.empty()) {
-        *err = "pick enzymes that cut";
-        return false;
-    }
-    if (left == right) {
-        if (a.size() == 1)
-            return pieceBetween(seq, a[0], a[0], keepLarger, out, err);
-        if (a.size() == 2)
-            return pieceBetween(seq, a[0], a[1], keepLarger, out, err);
-        *err = left + " cuts " + std::to_string(a.size()) + " times";
-        return false;
-    }
-    if (a.size() != 1 || b.size() != 1) {
-        *err = (a.size() != 1 ? left : right) + " must cut only once";
-        return false;
-    }
-    return pieceBetween(seq, a[0], b[0], keepLarger, out, err);
-}
-
 void updateClone(CloneForm *st)
 {
     if (st->rebuilding)
@@ -470,9 +436,9 @@ void updateClone(CloneForm *st)
     const guint src = adw_combo_row_get_selected(ADW_COMBO_ROW(st->source));
     const Sequence &donor = st->sources[std::min<size_t>(src, st->sources.size() - 1)];
     std::string text;
-    if (!cloneSide(st->vector, st->vectorSites, comboText(st->vLeft), comboText(st->vRight), true, &backbone, &err)) {
+    if (!cutWithEnzymes(st->vector, st->vectorSites, comboText(st->vLeft), comboText(st->vRight), true, &backbone, &err)) {
         text = "Vector: " + err;
-    } else if (!cloneSide(donor, st->insertSites, comboText(st->iLeft), comboText(st->iRight), false, &insert,
+    } else if (!cutWithEnzymes(donor, st->insertSites, comboText(st->iLeft), comboText(st->iRight), false, &insert,
                                  &err)) {
         text = "Insert: " + err;
     } else {
@@ -780,7 +746,7 @@ bool tryGibson(GibsonForm *st, const std::string &left, const std::string &right
     std::vector<Sequence> inputs;
     ClonePiece backbone;
     if (st->vector.circular) {
-        if (!cloneSide(st->vector, st->vectorSites, left, right, true, &backbone, &err)) {
+        if (!cutWithEnzymes(st->vector, st->vectorSites, left, right, true, &backbone, &err)) {
             *text = "Vector: " + err;
             return false;
         }

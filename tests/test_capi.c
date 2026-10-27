@@ -128,6 +128,44 @@ int main(int argc, char **argv)
     OCPrimerInfo pin;
     CHECK(oc_document_primer(doc, primers, &pin) && pin.start == 200 && pin.length == 20 && strlen(pin.bases) == 20);
 
+    /* Milestone 3: digest, gel, primers, enzyme choice and cloning. */
+    const char *eb[] = {"EcoRI", "BamHI"};
+    OCFragmentInfo frags[8];
+    CHECK(oc_digest(doc, eb, 2, frags, 8) == 2);
+    CHECK(frags[0].length + frags[1].length == oc_document_length(doc));
+    CHECK(strcmp(frags[0].right_enzyme, "EcoRI") == 0 || strcmp(frags[0].right_enzyme, "BamHI") == 0);
+    CHECK(oc_ladder_count() >= 3 && strlen(oc_ladder_name(0)) > 0);
+    OCScene *gel = oc_gel_render(doc, eb, 2, 0, 300, 300, false, measure, NULL);
+    CHECK(gel && oc_scene_item_count(gel) > 10);
+    oc_scene_free(gel);
+    OCPrimerCheck pc;
+    char *warn = oc_primer_check("GTAAAACGACGGCCAGTGAG", &pc);
+    CHECK(pc.length == 20 && pc.tm > 50 && strcmp(warn, "") == 0);
+    oc_string_free(warn);
+    oc_document_set_selection(doc, 300, 400);
+    CHECK(oc_document_design_primers(doc, 60, NULL));
+    CHECK(oc_document_primer_count(doc) == primers + 3);
+    OCDocument *pcr = oc_document_new();
+    CHECK(oc_pcr_product(doc, primers + 1, primers + 2, pcr, NULL));
+    CHECK(oc_document_length(pcr) == 400 && !oc_document_is_circular(pcr));
+    oc_document_set_selection(doc, 1012, 60);   /* the MCS */
+    char *chosen = oc_document_choose_enzymes(doc, 1, true, -1, OC_ENDS_ANY);
+    CHECK(strstr(chosen, "EcoRI") != NULL && strstr(chosen, "BamHI") != NULL);
+    oc_string_free(chosen);
+    oc_document_show_only_enzymes(doc, eb, 2, 1);
+    CHECK(oc_document_visible_site_count(doc) == 2);
+    /* Put the PCR product between EcoRI and BamHI: it has no sites, so expect a clear error. */
+    OCDocument *product = oc_document_new();
+    char *cerr = NULL;
+    CHECK(!oc_restriction_clone(doc, "EcoRI", "BamHI", pcr, "EcoRI", "BamHI", false, product, &cerr));
+    CHECK(cerr != NULL);
+    oc_string_free(cerr);
+    /* Re-cloning the vector's own small EcoRI-BamHI piece gives the vector back. */
+    CHECK(oc_restriction_clone(doc, "EcoRI", "BamHI", doc, "EcoRI", "BamHI", false, product, NULL));
+    CHECK(oc_document_length(product) == oc_document_length(doc) && oc_document_is_modified(product));
+    oc_document_free(product);
+    oc_document_free(pcr);
+
     char *status = oc_document_status_text(doc);
     CHECK(strstr(status, "3,188 bp") != NULL);
     oc_string_free(status);

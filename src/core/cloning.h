@@ -43,6 +43,12 @@ ClonePiece flipPiece(const ClonePiece &p);
 bool pieceBetween(const Sequence &seq, const CutSite &a, const CutSite &b, bool keepLarger, ClonePiece *out,
                   std::string *error = nullptr);
 
+// The piece of `seq` cut with enzymes named `left` and `right` (from
+// `sites`, as findSites gives them): each must cut once, or one enzyme used
+// on both sides may cut once (opening a circle) or twice.
+bool cutWithEnzymes(const Sequence &seq, const std::vector<CutSite> &sites, const std::string &left,
+                    const std::string &right, bool keepLarger, ClonePiece *out, std::string *error = nullptr);
+
 // Sticky ends need the same overhang type and bases; blunt joins blunt.
 bool endsLigate(const FragmentEnd &right, const FragmentEnd &left);
 
@@ -80,5 +86,19 @@ struct GibsonJoin {
 
 bool gibsonAssemble(const std::vector<Sequence> &fragments, int minOverlap, Sequence *out,
                     std::vector<GibsonJoin> *joins = nullptr, std::string *error = nullptr);
+
+// Whole workflows as the apps offer them. Products are named after their
+// inputs and keep the vector's numbering when its origin survives the cut.
+
+// The vector (circular) cut with v1 and v2, keeping the larger piece; the
+// insert cut with i1 and i2, keeping the piece between the cuts (the smaller
+// one for a circular donor), placed forward or reversed.
+bool restrictionClone(const Sequence &vector, const std::string &v1, const std::string &v2, const Sequence &insert,
+                      const std::string &i1, const std::string &i2, bool reversed, Sequence *out,
+                      std::string *error = nullptr);
+// Gibson into a vector opened with v1 and v2 (ignored for a linear vector).
+bool gibsonIntoVector(const Sequence &vector, const std::string &v1, const std::string &v2,
+                      const std::vector<Sequence> &fragments, int minOverlap, Sequence *out,
+                      std::vector<GibsonJoin> *joins = nullptr, std::string *error = nullptr);
 
 } // namespace oc

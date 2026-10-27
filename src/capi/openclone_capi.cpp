@@ -1,16 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "include/openclone.h"
 
+#include "core/cloning.h"
+#include "core/digest.h"
+#include "core/edit.h"
+#include "core/primercheck.h"
 #include "core/seqio.h"
 #include "view/document.h"
+#include "view/gellayout.h"
 #include "view/maplayout.h"
 #include "view/seqlayout.h"
 #include "view/style.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <set>
 
 using namespace oc;
 
@@ -22,6 +29,30 @@ char *dupString(const std::string &s)
     if (out)
         std::memcpy(out, s.c_str(), s.size() + 1);
     return out;
+}
+
+std::vector<Enzyme> enzymesNamed(const char *const *names, int count)
+{
+    std::vector<Enzyme> out;
+    for (int i = 0; i < count && names; ++i)
+        if (const Enzyme *e = names[i] ? findEnzyme(names[i]) : nullptr)
+            out.push_back(*e);
+    return out;
+}
+
+std::string joinLines(const std::vector<std::string> &lines)
+{
+    std::string out;
+    for (const std::string &l : lines)
+        out += (out.empty() ? "" : "\n") + l;
+    return out;
+}
+
+bool failWith(char **error, const std::string &err)
+{
+    if (error)
+        *error = dupString(err);
+    return false;
 }
 
 OCColor toC(const view::Color &c)
@@ -358,6 +389,183 @@ int oc_document_find_next(OCDocument *doc, const char *query, int *count)
 }
 
 // ---- layouts --------------------------------------------------------------------
+
+/* ---- digest and gel ---- */
+
+int oc_digest(const OCDocument *doc, const char *const *enzymes, int enzyme_count, OCFragmentInfo *out, int max)
+{
+    const DigestResult r = digest(doc->doc.sequence(), enzymesNamed(enzymes, enzyme_count));
+    for (int i = 0; i < int(r.fragments.size()) && i < max && out; ++i) {
+        const DigestFragment &f = r.fragments[size_t(i)];
+        OCFragmentInfo &o = out[i];
+        o.start = f.start;
+        o.length = f.length;
+        std::snprintf(o.left_enzyme, sizeof o.left_enzyme, "%s", f.leftEnzyme.c_str());
+        std::snprintf(o.right_enzyme, sizeof o.right_enzyme, "%s", f.rightEnzyme.c_str());
+        o.left_overhang = f.leftOverhang;
+        o.right_overhang = f.rightOverhang;
+    }
+    return int(r.fragments.size());
+}
+
+int oc_ladder_count(void) { return int(commonLadders().size()); }
+
+const char *oc_ladder_name(int index)
+{
+    return index >= 0 && index < oc_ladder_count() ? commonLadders()[size_t(index)].name.c_str() : "";
+}
+
+OCScene *oc_gel_render(const OCDocument *doc, const char *const *enzymes, int enzyme_count, int ladder, double width,
+                       double height, bool dark, OCMeasureText measure, void *context)
+{
+    const Sequence &seq = doc->doc.sequence();
+    const Ladder &l = commonLadders()[size_t(std::clamp(ladder, 0, oc_ladder_count() - 1))];
+    const std::vector<Enzyme> use = enzymesNamed(enzymes, enzyme_count);
+    std::vector<view::GelLane> lanes;
+    lanes.push_back({"Ladder", l.bands, l.bright, true, false});
+    lanes.push_back({"Uncut", {seq.length()}, {}, false, seq.circular});
+    view::GelLane cut{"Digest", {}, {}, false, false};
+    if (!use.empty()) {
+        const DigestResult r = digest(seq, use);
+        cut.uncutCircular = r.uncut && seq.circular;
+        for (const DigestFragment &f : r.fragments)
+            cut.bands.push_back(f.length);
+    }
+    lanes.push_back(cut);
+    CallbackMeasurer tm(measure, context);
+    view::GelLayout layout(lanes, dark ? view::Theme::darkTheme() : view::Theme::light(), tm, width, height);
+    return new OCScene{layout.render()};
+}
+
+/* ---- primers ---- */
+
+char *oc_primer_check(const char *bases, OCPrimerCheck *out)
+{
+    const PrimerCheck c = checkPrimer(bases ? bases : "");
+    if (out)
+        *out = {c.length, c.gc, c.tm, c.clampGC, c.longestRun, c.selfDimer, c.selfDimer3, c.hairpinStem};
+    return dupString(joinLines(c.warnings));
+}
+
+char *oc_primer_pair_check(const char *a, const char *b)
+{
+    return dupString(joinLines(checkPrimerPair(a ? a : "", b ? b : "").warnings));
+}
+
+bool oc_document_design_primers(OCDocument *doc, double target_tm, char **error)
+{
+    if (!doc->doc.hasSelection() || doc->doc.selection().length <= 0)
+        return failWith(error, "select the region to amplify");
+    PrimerDesign d;
+    std::string err;
+    if (!designPrimers(doc->doc.sequence(), doc->doc.selection(), target_tm, &d, &err))
+        return failWith(error, err);
+    doc->doc.addPrimers({d.forward, d.reverse}, "Add Primers");
+    return true;
+}
+
+/* ---- choosing enzymes ---- */
+
+char *oc_document_choose_enzymes(const OCDocument *doc, int max_cuts, bool inside_selection, int spare_feature,
+                                 int ends)
+{
+    const Sequence &seq = doc->doc.sequence();
+    EnzymeCriteria c;
+    c.maxCuts = max_cuts;
+    c.ends = EnzymeCriteria::Ends(std::clamp(ends, 0, 3));
+    if (inside_selection && doc->doc.hasSelection() && doc->doc.selection().length > 0) {
+        c.inside = true;
+        c.region = doc->doc.selection();
+    }
+    if (spare_feature >= 0 && spare_feature < int(seq.features.size()))
+        for (const Range &r : seq.features[size_t(spare_feature)].ranges)
+            c.spare.push_back({r.start, r.length()});
+    return dupString(joinLines(chooseEnzymes(seq, doc->doc.enzymes(), doc->doc.allSites(), c)));
+}
+
+void oc_document_show_only_enzymes(OCDocument *doc, const char *const *names, int count, int max_cuts)
+{
+    std::set<std::string> set;
+    for (int i = 0; i < count && names; ++i)
+        if (names[i])
+            set.insert(names[i]);
+    doc->doc.showOnlyEnzymes(set, max_cuts);
+}
+
+/* ---- cloning ---- */
+
+namespace {
+bool deliver(OCDocument *out, const Sequence &product)
+{
+    if (!out)
+        return false;
+    out->doc.setSequence(product);
+    out->doc.markUnsaved();
+    return true;
+}
+} // namespace
+
+bool oc_pcr_product(const OCDocument *templ, int forward_primer, int reverse_primer, OCDocument *out, char **error)
+{
+    const Sequence &t = templ->doc.sequence();
+    const int n = int(t.primers.size());
+    if (forward_primer < 0 || forward_primer >= n || reverse_primer < 0 || reverse_primer >= n)
+        return failWith(error, "pick two primers of this sequence");
+    Sequence p;
+    std::string err;
+    if (!pcrProduct(t, t.primers[size_t(forward_primer)], t.primers[size_t(reverse_primer)], &p, &err))
+        return failWith(error, err);
+    return deliver(out, p);
+}
+
+bool oc_restriction_clone(const OCDocument *vector, const char *vector_enzyme1, const char *vector_enzyme2,
+                          const OCDocument *insert, const char *insert_enzyme1, const char *insert_enzyme2,
+                          bool reversed, OCDocument *out, char **error)
+{
+    Sequence p;
+    std::string err;
+    auto str = [](const char *s) { return std::string(s ? s : ""); };
+    if (!restrictionClone(vector->doc.sequence(), str(vector_enzyme1), str(vector_enzyme2), insert->doc.sequence(),
+                          str(insert_enzyme1), str(insert_enzyme2), reversed, &p, &err))
+        return failWith(error, err);
+    return deliver(out, p);
+}
+
+bool oc_golden_gate(const OCDocument *vector, const OCDocument *const *parts, int part_count, const char *enzyme,
+                    OCDocument *out, char **error)
+{
+    const Enzyme *e = enzyme ? findEnzyme(enzyme) : nullptr;
+    if (!e)
+        return failWith(error, "unknown enzyme");
+    std::vector<Sequence> inputs{vector->doc.sequence()};
+    for (int i = 0; i < part_count && parts; ++i)
+        inputs.push_back(parts[i]->doc.sequence());
+    Sequence p;
+    std::vector<AssemblyStep> steps;
+    std::string err;
+    if (!goldenGate(inputs, *e, &p, &steps, &err))
+        return failWith(error, err);
+    p.name = inputs[0].name;
+    for (const AssemblyStep &s : steps)
+        if (s.input > 0)
+            p.name += "-" + inputs[size_t(s.input)].name;
+    return deliver(out, p);
+}
+
+bool oc_gibson(const OCDocument *vector, const char *vector_enzyme1, const char *vector_enzyme2,
+               const OCDocument *const *fragments, int fragment_count, int min_overlap, OCDocument *out,
+               char **error)
+{
+    std::vector<Sequence> frags;
+    for (int i = 0; i < fragment_count && fragments; ++i)
+        frags.push_back(fragments[i]->doc.sequence());
+    Sequence p;
+    std::string err;
+    if (!gibsonIntoVector(vector->doc.sequence(), vector_enzyme1 ? vector_enzyme1 : "",
+                          vector_enzyme2 ? vector_enzyme2 : "", frags, min_overlap, &p, nullptr, &err))
+        return failWith(error, err);
+    return deliver(out, p);
+}
 
 OCMapLayout *oc_map_layout_new(const OCDocument *doc, double width, double height, bool dark,
                                OCMeasureText measure, void *context)

@@ -187,6 +187,69 @@ double oc_seq_layout_line_top(const OCSeqLayout *layout, int position);
 double oc_seq_layout_line_height(const OCSeqLayout *layout, int position);
 char *oc_seq_layout_tooltip(const OCSeqLayout *layout, double x, double y);
 
+/* ---- digest and gel ------------------------------------------------------ */
+
+typedef struct {
+    int start;              /* top-strand cut that begins the fragment */
+    int length;
+    char left_enzyme[24];   /* "" = the end of a linear sequence */
+    char right_enzyme[24];
+    int left_overhang;      /* > 0 = 5', < 0 = 3', 0 = blunt */
+    int right_overhang;
+} OCFragmentInfo;
+
+/* Cuts with the named enzymes at once. Returns the number of fragments (one
+ * uncut molecule when nothing cuts) and fills up to `max` of them. */
+int oc_digest(const OCDocument *doc, const char *const *enzymes, int enzyme_count, OCFragmentInfo *out, int max);
+int oc_ladder_count(void);
+const char *oc_ladder_name(int index);
+/* A virtual gel with three lanes: ladder, uncut, and the digest. */
+OCScene *oc_gel_render(const OCDocument *doc, const char *const *enzymes, int enzyme_count, int ladder, double width,
+                       double height, bool dark, OCMeasureText measure, void *context);
+
+/* ---- primers -------------------------------------------------------------- */
+
+typedef struct {
+    int length;
+    double gc;            /* 0..1 */
+    double tm;            /* deg C, NaN for ambiguous bases */
+    int clamp_gc;         /* G or C among the last 5 bases */
+    int longest_run;
+    int self_dimer;
+    int self_dimer3;      /* self-dimers that pair the 3' end */
+    int hairpin_stem;
+} OCPrimerCheck;
+
+/* Returns the warnings, one per line ("" when the primer looks fine). */
+char *oc_primer_check(const char *bases, OCPrimerCheck *out);
+char *oc_primer_pair_check(const char *a, const char *b);
+/* Designs a pair that amplifies the selection and adds it as one undo step. */
+bool oc_document_design_primers(OCDocument *doc, double target_tm, char **error);
+
+/* ---- choosing enzymes ----------------------------------------------------- */
+
+enum { OC_ENDS_ANY = 0, OC_ENDS_5PRIME = 1, OC_ENDS_3PRIME = 2, OC_ENDS_BLUNT = 3 };
+
+/* Enzymes cutting 1..max_cuts times, optionally only inside the selection
+ * and never inside feature `spare_feature` (-1 = none); one name per line. */
+char *oc_document_choose_enzymes(const OCDocument *doc, int max_cuts, bool inside_selection, int spare_feature,
+                                 int ends);
+void oc_document_show_only_enzymes(OCDocument *doc, const char *const *names, int count, int max_cuts);
+
+/* ---- cloning ---------------------------------------------------------------
+ * Products go into `out` (from oc_document_new) as a new, unsaved sequence. */
+
+bool oc_pcr_product(const OCDocument *templ, int forward_primer, int reverse_primer, OCDocument *out, char **error);
+bool oc_restriction_clone(const OCDocument *vector, const char *vector_enzyme1, const char *vector_enzyme2,
+                          const OCDocument *insert, const char *insert_enzyme1, const char *insert_enzyme2,
+                          bool reversed, OCDocument *out, char **error);
+bool oc_golden_gate(const OCDocument *vector, const OCDocument *const *parts, int part_count, const char *enzyme,
+                    OCDocument *out, char **error);
+/* The enzymes are ignored for a linear vector. */
+bool oc_gibson(const OCDocument *vector, const char *vector_enzyme1, const char *vector_enzyme2,
+               const OCDocument *const *fragments, int fragment_count, int min_overlap, OCDocument *out,
+               char **error);
+
 /* ---- scenes ---------------------------------------------------------------- */
 
 typedef struct {

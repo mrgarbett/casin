@@ -139,7 +139,7 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   selection, never inside a chosen feature, with the ends you need; show just those.
 - Design Primers for Selection: a primer pair that amplifies exactly the selection, sized
   for a target Tm and checked for dimers and hairpins; adds both primers in one undo step.
-- The C API exposes the editing for the Mac app; digest, PCR, cloning and the assemblies are not in it yet.
+- The C API exposes all of this for the Mac app (editing, digest and gel, primer checks and design, enzyme choice, PCR, restriction cloning, Golden Gate, Gibson); the Mac windows for the milestone 3 tools come next.
 
 ## Next steps
 

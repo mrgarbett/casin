@@ -121,6 +121,33 @@ bool pieceBetween(const Sequence &seq, const CutSite &a, const CutSite &b, bool 
     return true;
 }
 
+bool cutWithEnzymes(const Sequence &seq, const std::vector<CutSite> &all, const std::string &left,
+                    const std::string &right, bool keepLarger, ClonePiece *out, std::string *error)
+{
+    auto fail = [error](const std::string &msg) {
+        if (error)
+            *error = msg;
+        return false;
+    };
+    std::vector<CutSite> a, b;
+    for (const CutSite &c : all) {
+        if (c.enzyme && c.enzyme->name == left)
+            a.push_back(c);
+        if (c.enzyme && c.enzyme->name == right)
+            b.push_back(c);
+    }
+    if (a.empty() || b.empty())
+        return fail(a.empty() ? left + " doesn't cut" : right + " doesn't cut");
+    if (left == right) {
+        if (a.size() <= 2)
+            return pieceBetween(seq, a.front(), a.back(), keepLarger, out, error);
+        return fail(left + " cuts " + std::to_string(a.size()) + " times");
+    }
+    if (a.size() != 1 || b.size() != 1)
+        return fail((a.size() != 1 ? left : right) + " must cut only once");
+    return pieceBetween(seq, a[0], b[0], keepLarger, out, error);
+}
+
 bool endsLigate(const FragmentEnd &right, const FragmentEnd &left)
 {
     return right.overhang == left.overhang && right.bases == left.bases;
@@ -307,6 +334,67 @@ bool gibsonAssemble(const std::vector<Sequence> &fragments, int minOverlap, Sequ
     *out = product;
     if (joins)
         *joins = chain;
+    return true;
+}
+
+bool restrictionClone(const Sequence &vector, const std::string &v1, const std::string &v2, const Sequence &insert,
+                      const std::string &i1, const std::string &i2, bool reversed, Sequence *out, std::string *error)
+{
+    if (!vector.circular) {
+        if (error)
+            *error = "the vector must be circular";
+        return false;
+    }
+    ClonePiece backbone, piece;
+    std::string err;
+    if (!cutWithEnzymes(vector, findSites(vector, commonEnzymes()), v1, v2, true, &backbone, &err)) {
+        if (error)
+            *error = "Vector: " + err;
+        return false;
+    }
+    if (!cutWithEnzymes(insert, findSites(insert, commonEnzymes()), i1, i2, false, &piece, &err)) {
+        if (error)
+            *error = "Insert: " + err;
+        return false;
+    }
+    if (!ligateCircular({backbone, reversed ? flipPiece(piece) : piece}, out, error))
+        return false;
+    out->name = vector.name + "-" + insert.name;
+    if (backbone.originOffset() > 0)
+        rotateOrigin(*out, backbone.originOffset());
+    return true;
+}
+
+bool gibsonIntoVector(const Sequence &vector, const std::string &v1, const std::string &v2,
+                      const std::vector<Sequence> &fragments, int minOverlap, Sequence *out,
+                      std::vector<GibsonJoin> *joins, std::string *error)
+{
+    std::vector<Sequence> inputs;
+    ClonePiece backbone;
+    if (vector.circular) {
+        std::string err;
+        if (!cutWithEnzymes(vector, findSites(vector, commonEnzymes()), v1, v2, true, &backbone, &err)) {
+            if (error)
+                *error = "Vector: " + err;
+            return false;
+        }
+        backbone.top.name = vector.name;
+        inputs.push_back(backbone.top);
+    } else {
+        inputs.push_back(vector);
+    }
+    inputs.insert(inputs.end(), fragments.begin(), fragments.end());
+    std::vector<GibsonJoin> j;
+    if (!gibsonAssemble(inputs, minOverlap, out, &j, error))
+        return false;
+    out->name = vector.name;
+    for (const GibsonJoin &step : j)
+        if (step.input > 0)
+            out->name += "-" + inputs[size_t(step.input)].name;
+    if (vector.circular && backbone.originOffset() > 0)
+        rotateOrigin(*out, backbone.originOffset());
+    if (joins)
+        *joins = j;
     return true;
 }
 
