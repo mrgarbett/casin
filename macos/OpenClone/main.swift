@@ -97,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .separator(),
             item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]),
         ])
+        ToolMenus.install(in: main)
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"))
         windowMenu.addItem(item("Zoom", #selector(NSWindow.performZoom(_:))))
