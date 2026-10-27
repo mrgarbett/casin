@@ -406,7 +406,13 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
     }
 
     // Labels in left and right columns, spread so they don't overlap.
-    const double rLabel = m_featureOuter + 18;
+    // With primers on the map, bend the leaders outside the primer band so
+    // the bends don't sit on the primer arrows.
+    bool primerBand = false;
+    for (const Primer &pr : m_seq.primers)
+        primerBand = primerBand || (m_options.primers && pr.binding.length() > 0 && pr.binding.end <= m_n);
+    const double elbowR = m_featureOuter + (primerBand ? 12 : 6);
+    const double rLabel = elbowR + 12;
     for (LabelGlyph &g : m_labels) {
         if (g.feature < 0 && g.primer < 0) {
             g.angle = angleOfPos(m_sites[size_t(g.sites.front())].cutTop);
@@ -452,7 +458,7 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
             const double x = side > 0 ? std::min(m_c.x + dx + 6, kMargin + std::max(0.0, room - g.rect.w))
                                       : std::max(m_c.x - dx - 6, m_w - kMargin - std::max(0.0, room - g.rect.w));
             const double a = g.angle;
-            g.leader = {polar(a, g.anchorR), polar(a, m_featureOuter + 6), {x - side * 3, y[i]}};
+            g.leader = {polar(a, g.anchorR), polar(a, elbowR), {x - side * 3, y[i]}};
             g.align = side > 0 ? HAlign::Left : HAlign::Right;
             g.textPos = {x, y[i]};
             g.rect.x = side > 0 ? x : x - g.rect.w;
