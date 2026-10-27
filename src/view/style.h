@@ -20,7 +20,7 @@ struct FeatureStyle {
 struct Theme {
     bool dark = false;
     Color background, surface, text, mutedText, backbone, tick, selection, selectionEdge,
-        enzymeLabel, enzymeUnique, enzymeTypeIIS, leader, cutMarker, featureOutline, accent;
+        enzymeLabel, enzymeUnique, enzymeTypeIIS, leader, cutMarker, featureOutline, accent, primer;
 
     static Theme light();
     static Theme darkTheme();

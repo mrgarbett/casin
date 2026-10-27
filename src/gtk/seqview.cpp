@@ -247,6 +247,13 @@ void SequenceView::dragBegin(GtkGestureDrag *g, double x, double y, gpointer p)
         self->m_doc->activateSite(site);
         return;
     }
+    const int primer = self->m_layout->primerAt(content);
+    if (primer >= 0) {
+        const Range b = self->m_doc->sequence().primers[size_t(primer)].binding;
+        self->m_anchor = b.start;
+        self->m_doc->setSelection({b.start, b.length()});
+        return;
+    }
     const int feature = self->m_layout->featureAt(content);
     if (feature >= 0) {
         self->m_doc->activateFeature(feature);

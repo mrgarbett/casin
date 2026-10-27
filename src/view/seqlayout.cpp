@@ -129,6 +129,39 @@ SequenceLayout::SequenceLayout(const oc::Sequence &seq, const std::vector<CutSit
             }
         }
     }
+    // Primer pieces, rows assigned greedily per side within each line.
+    for (size_t pi = 0; pi < m_seq.primers.size(); ++pi) {
+        const Primer &pr = m_seq.primers[pi];
+        const Range r = pr.binding;
+        if (r.length() <= 0 || r.end > m_n)
+            continue;
+        const bool fwd = pr.strand != Strand::Reverse;
+        for (int li = r.start / m_bpl; li < int(m_lines.size()) && m_lines[size_t(li)].start < r.end; ++li) {
+            Line &line = m_lines[size_t(li)];
+            const int a = std::max(r.start, line.start) - line.start;
+            const int b = std::min(r.end, line.start + line.len) - line.start;
+            if (b <= a)
+                continue;
+            const bool head = fwd ? r.end == line.start + b : r.start == line.start + a;
+            line.primers.push_back({int(pi), 0, a, b, head, fwd});
+        }
+    }
+    for (Line &line : m_lines) {
+        std::vector<int> endTop, endBottom;
+        for (PrimerPiece &p : line.primers) {
+            std::vector<int> &ends = p.top ? endTop : endBottom;
+            size_t row = 0;
+            while (row < ends.size() && p.a < ends[row] + 1)
+                ++row;
+            if (row == ends.size())
+                ends.push_back(0);
+            ends[row] = p.b;
+            p.row = int(row);
+        }
+        line.primerRowsTop = int(endTop.size());
+        line.primerRowsBottom = int(endBottom.size());
+    }
+
     y = 0;
     for (size_t li = 0; li < m_lines.size(); ++li) {
         Line &line = m_lines[li];
@@ -166,11 +199,15 @@ SequenceLayout::SequenceLayout(const oc::Sequence &seq, const std::vector<CutSit
 
         line.y = y;
         double off = kLinePadTop + line.enzymeRows * m_labelH + (line.enzymeRows ? 3 : 0);
+        line.yPrimersTop = off;
+        off += line.primerRowsTop * m_primerH;
         line.yTop = off;
         off += m_baseH;
         line.yBottom = off;
         if (m_complement)
             off += m_baseH;
+        line.yPrimersBottom = off;
+        off += line.primerRowsBottom * m_primerH;
         line.yRuler = off;
         off += m_rulerH;
         line.yLanes = off + 2;
@@ -201,6 +238,25 @@ double SequenceLayout::laneY(const Line &l, int lane) const
     for (int i = 0; i < lane; ++i)
         y += m_laneH + 2 + (l.laneHasAA[size_t(i)] ? m_aaH : 0);
     return y;
+}
+
+Rect SequenceLayout::primerRect(const Line &l, const PrimerPiece &p) const
+{
+    const double y = p.top ? l.y + l.yTop - (p.row + 1) * m_primerH : l.y + l.yPrimersBottom + p.row * m_primerH;
+    const double x0 = boundaryX(p.a), x1 = boundaryX(p.b);
+    return {x0, y + 2, x1 - x0, m_primerH - 4};
+}
+
+int SequenceLayout::primerAt(Point p) const
+{
+    const int li = lineIndexAt(p.y);
+    if (li < 0)
+        return -1;
+    const Line &l = m_lines[size_t(li)];
+    for (const PrimerPiece &pc : l.primers)
+        if (primerRect(l, pc).contains(p))
+            return pc.primer;
+    return -1;
 }
 
 int SequenceLayout::lineIndexAt(double y) const
@@ -268,7 +324,7 @@ int SequenceLayout::siteAt(Point p) const
         return -1;
     const Line &l = m_lines[size_t(li)];
     for (const SiteLabel &s : l.labels) {
-        const double yRow = l.y + l.yTop - 3 - (s.row + 1) * m_labelH;
+        const double yRow = l.y + l.yPrimersTop - 3 - (s.row + 1) * m_labelH;
         if (Rect{s.x, yRow, s.w, m_labelH}.contains(p))
             return s.sites.front();
     }
@@ -281,6 +337,11 @@ std::string SequenceLayout::tooltipAt(Point p) const
     if (si >= 0) {
         const CutSite &c = m_sites[size_t(si)];
         return c.enzyme->name + "  " + c.enzyme->site + "  cuts after " + withThousands(c.cutTop);
+    }
+    const int pi = primerAt(p);
+    if (pi >= 0) {
+        const Primer &pr = m_seq.primers[size_t(pi)];
+        return pr.name + " (primer), " + std::to_string(pr.bases.size()) + " nt  " + pr.bases;
     }
     const int fi = featureAt(p);
     if (fi >= 0) {
@@ -360,7 +421,7 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
         // Enzyme labels with a short tick down to the strand.
         for (const SiteLabel &lab : l.labels) {
             const bool isActive = active && std::find(lab.sites.begin(), lab.sites.end(), st.activeSite) != lab.sites.end();
-            const double yRow = top - 3 - (lab.row + 1) * m_labelH;
+            const double yRow = y0 + l.yPrimersTop - 3 - (lab.row + 1) * m_labelH;
             Font f = m_smallFont;
             f.bold = lab.unique;
             const Color c = isActive ? m_theme.cutMarker
@@ -387,6 +448,28 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
                 if (std::fabs(xa - xb) > 0.5)
                     s.line({xa, mid}, {xb, mid}, m_theme.cutMarker, 2);
             }
+        }
+
+        // Primers: thin arrows pointing 5' to 3' on the strand they read.
+        for (const PrimerPiece &pc : l.primers) {
+            const Primer &pr = m_seq.primers[size_t(pc.primer)];
+            Rect r = primerRect(l, pc);
+            r.y -= scrollY;
+            const double x0 = r.x + 0.5, x1 = r.x + r.w - 0.5, ym = r.y + r.h / 2;
+            const double head = pc.head ? std::min(r.h * 0.8, (x1 - x0) * 0.5) : 0;
+            std::vector<Point> poly;
+            if (pc.head && pc.top)
+                poly = {{x0, r.y}, {x1 - head, r.y}, {x1, ym}, {x1 - head, r.y + r.h}, {x0, r.y + r.h}};
+            else if (pc.head)
+                poly = {{x0, ym}, {x0 + head, r.y}, {x1, r.y}, {x1, r.y + r.h}, {x0 + head, r.y + r.h}};
+            else
+                poly = {{x0, r.y}, {x1, r.y}, {x1, r.y + r.h}, {x0, r.y + r.h}};
+            s.polygon(poly, m_theme.primer, m_theme.featureOutline, 0.6);
+            Font nf{9, true, false};
+            ApproxTextMeasurer approx;
+            const double nx = (!pc.top && pc.head) ? x0 + head + 2 : x0 + 2;
+            if (approx.width(pr.name, nf) < x1 - x0 - head - 4)
+                s.label(pr.name, {nx, ym}, nf, FeatureStyle::textOn(m_theme.primer), HAlign::Left, VAlign::Middle);
         }
 
         // Feature lanes and translations.
