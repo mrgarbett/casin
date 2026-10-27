@@ -7,6 +7,11 @@ translations.
 
 *OpenClone is a working name. It isn't affiliated with any commercial product.*
 
+**Status: alpha (0.1.0-alpha).** The tools work and are tested, but file formats,
+menus and the C API may still change. The version is set in `src/core/version.h`
+and shown in About, at the right of the Linux status bar, and by `--version`.
+See [CHANGELOG.md](CHANGELOG.md).
+
 - **Linux:** GTK4 + libadwaita, drawn with cairo/Pango.
 - **macOS:** Swift + AppKit, drawn with CoreGraphics.
 - **Shared:** a plain C++17 core (no GUI toolkit) and a shared layout layer, so the
@@ -120,8 +125,9 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
 
 ## What works in this milestone
 
-- Open GenBank, FASTA and SnapGene `.dna` files (drag and drop, command line, Finder or
-  the file manager). One window per document.
+- Open GenBank, EMBL, FASTA and SnapGene `.dna` files (drag and drop, command line, Finder
+  or the file manager). One window per document; a file with several GenBank or EMBL
+  records opens each record in its own window.
 - Circular map with feature arrows in lanes, names along the arc (or as callouts when
   they don't fit), enzyme labels in spread-out columns with leader lines, a tick ring,
   and a selection wedge. Linear map for linear sequences.
@@ -135,16 +141,80 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
 - Find on both strands (IUPAC codes allowed). Copy and Copy Reverse Complement.
 - Save As GenBank, Export FASTA, Export Map (PNG/SVG/PDF on Linux, PNG/PDF on macOS).
 
+## Editing (milestone 2, Linux app; the Mac app gets it next)
+
+- Type bases, paste, cut, Backspace and Delete in the sequence view. Features grow,
+  shift or shrink with the edits; primers move with them.
+- Undo and redo (typing joins one step). The title shows unsaved changes, and closing
+  asks to save them.
+- Save (Ctrl+S) and Save As by extension: `.dna`, `.gb` or `.fasta`.
+- Reverse complement the whole sequence, set the origin, switch circular/linear, and
+  start a new sequence from pasted text (Ctrl+N).
+- Add, edit and delete features (Ctrl+K adds one from the selection). Add and delete
+  primers; primers are drawn on the sequence and the map.
+- Copy and paste keep the features and primers inside the copied bases.
+- Enzymes that cut on both sides of their site (BaeI, BcgI, BsaXI, CspCI).
+- Digest and Gel (Ctrl+D, a first piece of milestone 3): pick enzymes and see the
+  fragments with their ends and overhangs, next to a virtual gel with a ladder and
+  the uncut plasmid.
+- PCR Product: pick a forward and a reverse primer; the product (with 5′ tails and the
+  features it covers) opens in a new window. The Primers tab flags primer problems
+  (GC, Tm, 3′ clamp, runs, hairpins, dimers).
+- Restriction Cloning: cut the vector with one or two enzymes, take an insert from any
+  open window, check that the ends ligate in the chosen orientation and open the
+  product (vector numbering kept).
+- Golden Gate Assembly: pick a Type IIS enzyme and the parts from open windows; the order
+  and orientation come from the overhangs, and the dropout is replaced.
+- Gibson Assembly (also HiFi and In-Fusion): open the vector with one or two enzymes and
+  join linear fragments from open windows by their end overlaps.
+- Choose Enzymes: find enzymes that cut once (or up to three times), only inside the
+  selection, never inside a chosen feature, with the ends you need; show just those.
+- TA, GC and TOPO Cloning: a PCR product into a linearized vector (this window), either
+  orientation, with the overhang bases filled in; opens the circular product.
+- Overlap Extension PCR: join this window and other linear fragments by their shared
+  ends into one linear product; orientation comes from the overlaps.
+- Insertion by PCR: primers that amplify an insert (its selection, in another window) with
+  tails matching the vector on each side of this window's caret or selection; opens the
+  construct with the primers on it.
+- Mutagenesis: replace, delete or insert bases at the selection; designs back-to-back
+  primers (new bases on the forward primer's 5′ end) and opens the mutant.
+- Cloning History: products of PCR, cloning, assembly and mutagenesis remember each step
+  (with the date); it is kept in GenBank and `.dna` files.
+- Open Sanger traces (`.ab1`): the base calls open as a sequence with the chromatogram
+  below (quality bars, low-quality ends shaded, click a peak to select its base); saving
+  goes to a new file. `samples/demo-trace.ab1` is a simulated read.
+- Align Read: align a read from another window (a trace, FASTA or any linear sequence) to
+  this sequence on either strand, across the origin, and list the differences; click one to
+  select it, add the read as a feature, or show it under the sequence (Show All Reads aligns every open read at once,
+  differences in red; Align and Compare → Hide Aligned Reads clears them).
+- Compare with Another Sequence: the same alignment against any open construct (a parent
+  plasmid, say), with its differences listed and drawn under this sequence.
+- Add Primer: from the selection, or with nothing selected, paste a primer and it is placed where its 3′ part binds (either
+  strand, up to two mismatches, 5′ tails allowed).
+- Design Primers for Selection: a primer pair that amplifies exactly the selection, or one
+  that flanks it within a search window (the default for selections under 18 bp, such as a
+  SNP), sized for a target Tm and checked for dimers and hairpins; adds both primers in one
+  undo step.
+- Find ORFs: open reading frames from ATG to stop on both strands (across the origin too),
+  longest first; add the ones you pick as CDS features with their translation.
+- Protein Properties: translate the selection or a selected CDS (on its own strand, exons
+  joined) and show its weight, isoelectric point and extinction coefficient; copy the protein.
+- Search a Folder: find sequence files by name, description, feature or primer name, or by
+  a DNA sequence on either strand; click a result to open it.
+- Print… (Ctrl+P): the map on the first page, then the sequence in whole lines; the same
+  pages come out of `openclone --print-pdf out.pdf <file>` without a display.
+- Enzyme sets: the Enzymes panel picks a set (Type IIS, enzymes sold by a supplier, or one you
+  saved from the checked enzymes); saved sets are shared by every window.
+- View → Map Display: show or hide enzyme sites, primers and each feature type on the map
+  (exported maps follow the same choices).
+- View → Translate Frames: show the three forward reading frames, or all six, around the
+  strands, with starts and stops highlighted.
+- The C API exposes all of this for the Mac app (editing, digest and gel, primer checks and design, enzyme choice, PCR, restriction cloning, Golden Gate, Gibson, overlap extension, mutagenesis, read alignment); the Mac windows for the milestone 3 tools come next.
+
 ## Next steps
 
-Not in this milestone:
-
-- Sequence editing (insert, delete, and features that follow the edits)
-- Cloning simulation: restriction–ligation, Gibson assembly, Golden Gate
-- Primer design (we already read primers from `.dna` files, but don't draw them yet)
-- Sanger trace viewing (`.ab1`)
-- Writing `.dna` files
-- Enzymes that cut twice per site, methylation sensitivity, a user enzyme set editor
+See [docs/PARITY.md](docs/PARITY.md) for the full checklist. Next up: the Mac editing UI,
+then primers with a search window, and the rest of milestone 4 (several reads at once, drawn under the reference).
 
 ## Credits and ground rules
 

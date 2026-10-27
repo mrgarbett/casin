@@ -75,9 +75,26 @@ private func drawText(_ string: String, _ t: OCTextInfo, in ctx: CGContext) {
     ctx.restoreGState()
 }
 
+/// A map layout that follows the document's Map Display options.
+func newMapLayout(_ document: CoreDocument, size: CGSize, dark: Bool) -> OpaquePointer? {
+    oc_map_layout_new_options(document.handle, size.width, size.height, dark, document.mapShowsEnzymes,
+                              document.mapShowsPrimers, document.mapHiddenTypes.sorted().joined(separator: ","),
+                              measureText, nil)
+}
+
+/// Draws a scene into a bitmap image now, so the scene can be freed.
+func sceneImage(_ scene: OpaquePointer) -> NSImage {
+    let size = NSSize(width: oc_scene_width(scene), height: oc_scene_height(scene))
+    let image = NSImage(size: size)
+    image.lockFocusFlipped(true)
+    if let ctx = NSGraphicsContext.current?.cgContext { drawScene(scene, in: ctx) }
+    image.unlockFocus()
+    return image
+}
+
 /// Writes a map to .png (2x) or .pdf, chosen by the file extension.
 func writeMapImage(document: CoreDocument, to url: URL, size: CGSize) throws {
-    guard let layout = oc_map_layout_new(document.handle, size.width, size.height, false, measureText, nil) else {
+    guard let layout = newMapLayout(document, size: size, dark: false) else {
         throw NSError(domain: "OpenClone", code: 3, userInfo: [NSLocalizedDescriptionKey: "Could not lay out the map"])
     }
     defer { oc_map_layout_free(layout) }

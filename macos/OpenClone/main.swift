@@ -43,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "Melting temperature: SantaLucia (1998) unified nearest-neighbor parameters.")
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "OpenClone",
-            .applicationVersion: "0.1.0",
+            .applicationVersion: String(cString: oc_version()),
             .credits: credits,
         ])
     }
@@ -97,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .separator(),
             item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]),
         ])
+        ToolMenus.install(in: main)
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"))
         windowMenu.addItem(item("Zoom", #selector(NSWindow.performZoom(_:))))

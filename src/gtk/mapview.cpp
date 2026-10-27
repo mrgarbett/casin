@@ -48,6 +48,12 @@ void MapView::setDark(bool dark)
     }
 }
 
+void MapView::setOptions(view::MapOptions options)
+{
+    m_options = std::move(options);
+    invalidate();
+}
+
 void MapView::ensureLayout(int w, int h)
 {
     if (m_layout && w == m_w && h == m_h)
@@ -56,7 +62,7 @@ void MapView::ensureLayout(int w, int h)
     m_h = h;
     m_layout = std::make_unique<view::MapLayout>(m_doc->sequence(), m_doc->visibleSites(),
                                                  m_dark ? view::Theme::darkTheme() : view::Theme::light(),
-                                                 m_measure, w, h);
+                                                 m_measure, w, h, m_options);
 }
 
 void MapView::draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer p)

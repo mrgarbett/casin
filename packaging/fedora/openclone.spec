@@ -1,6 +1,6 @@
 Name:           openclone
 Version:        0.1.0
-Release:        1%{?dist}
+Release:        0.1.alpha%{?dist}
 Summary:        Open-source plasmid map and DNA sequence viewer
 
 License:        GPL-3.0-or-later
@@ -48,5 +48,9 @@ appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/io.github.open
 %{_metainfodir}/io.github.openclone.OpenClone.metainfo.xml
 
 %changelog
+* Tue Oct 27 2026 OpenClone contributors - 0.1.0-0.1.alpha
+- Alpha: editing and saving, cloning simulation, primer design, read alignment
+  and Sanger traces, printing, EMBL, enzyme sets, protein properties
+
 * Tue Oct 27 2026 OpenClone contributors - 0.1.0-1
 - First milestone: viewer for GenBank, FASTA and .dna files

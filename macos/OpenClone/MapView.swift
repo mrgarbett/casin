@@ -48,7 +48,7 @@ final class MapView: NSView {
         let dark = isDarkAppearance
         if layout == nil || layoutSize != bounds.size || layoutDark != dark {
             if let old = layout { oc_map_layout_free(old) }
-            layout = oc_map_layout_new(document.handle, bounds.width, bounds.height, dark, measureText, nil)
+            layout = newMapLayout(document, size: bounds.size, dark: dark)
             layoutSize = bounds.size
             layoutDark = dark
         }

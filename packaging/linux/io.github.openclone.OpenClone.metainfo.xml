@@ -20,6 +20,6 @@
     <binary>openclone</binary>
   </provides>
   <releases>
-    <release version="0.1.0" date="2026-10-27"/>
+    <release version="0.1.0~alpha" date="2026-10-27" type="development"/>
   </releases>
 </component>

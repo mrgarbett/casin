@@ -18,6 +18,8 @@ public:
     GtkWidget *widget() const { return m_area; }
     void invalidate();          // content changed: rebuild the layout
     void setDark(bool dark);
+    const view::MapOptions &options() const { return m_options; }
+    void setOptions(view::MapOptions options);
 
 private:
     static void draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer self);
@@ -33,6 +35,7 @@ private:
     std::unique_ptr<view::MapLayout> m_layout;
     int m_w = 0, m_h = 0;
     bool m_dark = false;
+    view::MapOptions m_options;
     // drag state
     bool m_selecting = false;
     double m_x0 = 0, m_y0 = 0;

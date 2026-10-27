@@ -73,6 +73,8 @@ public:
     bool circular = false;
     std::vector<Feature> features;
     std::vector<Primer> primers;
+    // How this construct was made, oldest step first ("2026-10-27 PCR with ...").
+    std::vector<std::string> history;
 
     int length() const { return int(bases.size()); }
     bool empty() const { return bases.empty(); }
@@ -112,6 +114,9 @@ struct CodonMark {
 std::vector<CodonMark> codonMarks(const Sequence &seq, const Feature &f);
 
 const char *strandName(Strand s);
+
+// Adds a dated step to seq.history.
+void addHistory(Sequence &seq, const std::string &step);
 
 // Small string utilities shared by the readers.
 std::string trim(const std::string &s);

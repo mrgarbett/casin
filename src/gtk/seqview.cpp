@@ -35,14 +35,22 @@ SequenceView::SequenceView(Document *doc) : m_doc(doc)
     g_signal_connect(drag, "drag-end", G_CALLBACK(&SequenceView::dragEnd), this);
     gtk_widget_add_controller(m_area, GTK_EVENT_CONTROLLER(drag));
 
+    gtk_widget_set_focusable(m_area, TRUE);
+    gtk_widget_set_focus_on_click(m_area, TRUE);
+    GtkEventController *keys = gtk_event_controller_key_new();
+    g_signal_connect(keys, "key-pressed", G_CALLBACK(&SequenceView::keyPressed), this);
+    gtk_widget_add_controller(m_area, keys);
+
     gtk_widget_set_has_tooltip(m_area, TRUE);
     g_signal_connect(m_area, "query-tooltip", G_CALLBACK(&SequenceView::queryTooltip), this);
 
     m_doc->onSequenceChanged([this] {
-        gtk_adjustment_set_value(m_adj, 0);
+        if (!m_doc->isEditing())
+            gtk_adjustment_set_value(m_adj, 0);   // a newly loaded sequence starts at the top
         invalidate();
     });
     m_doc->onEnzymesChanged([this] { invalidate(); });
+    m_doc->onReadsChanged([this] { invalidate(); });
     m_doc->onSelectionChanged([this] {
         // Keep in sync with selections made elsewhere (map, lists, find).
         if (!m_dragging && m_doc->hasSelection())
@@ -81,6 +89,14 @@ void SequenceView::setShowComplement(bool show)
     }
 }
 
+void SequenceView::setFrames(int frames)
+{
+    if (frames != m_frames) {
+        m_frames = frames;
+        invalidate();
+    }
+}
+
 double SequenceView::scrollY() const
 {
     return gtk_adjustment_get_value(m_adj);
@@ -92,7 +108,7 @@ void SequenceView::ensureLayout()
         return;
     m_layout = std::make_unique<view::SequenceLayout>(m_doc->sequence(), m_doc->visibleSites(),
                                                       m_dark ? view::Theme::darkTheme() : view::Theme::light(),
-                                                      m_measure, m_w, m_complement);
+                                                      m_measure, m_w, m_complement, m_frames, m_doc->reads());
     updateAdjustment();
 }
 
@@ -167,9 +183,60 @@ void SequenceView::extendSelectionTo(double x, double y)
     m_doc->setSelection({std::min(pos, m_anchor), std::abs(pos - m_anchor)});
 }
 
+gboolean SequenceView::keyPressed(GtkEventControllerKey *, guint keyval, guint, GdkModifierType state, gpointer p)
+{
+    auto *self = static_cast<SequenceView *>(p);
+    Document *doc = self->m_doc;
+    if (!self->m_editable || doc->isEmpty() || (state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK)))
+        return FALSE;
+    const int n = doc->sequence().length();
+    const bool shift = state & GDK_SHIFT_MASK;
+    switch (keyval) {
+    case GDK_KEY_BackSpace: doc->deleteBackward(); return TRUE;
+    case GDK_KEY_Delete:
+    case GDK_KEY_KP_Delete: doc->deleteForward(); return TRUE;
+    case GDK_KEY_Left:
+    case GDK_KEY_Right: {
+        const int step = keyval == GDK_KEY_Left ? -1 : 1;
+        if (!doc->hasSelection()) {
+            doc->setSelection({0, 0});
+            return TRUE;
+        }
+        const Span sel = doc->selection();
+        if (shift) {
+            // Extend from the anchor set when the selection began.
+            const int anchor = self->m_anchor;
+            int head = sel.start == anchor ? sel.end() : sel.start;
+            head = std::clamp(head + step, 0, n);
+            doc->setSelection({std::min(anchor, head), std::abs(head - anchor)});
+        } else {
+            int pos = sel.length > 0 ? (step < 0 ? sel.start : sel.end()) : sel.start + step;
+            pos = std::clamp(pos, 0, n);
+            self->m_anchor = pos;
+            doc->setSelection({pos, 0});
+        }
+        self->scrollToPosition(doc->selection().start);
+        return TRUE;
+    }
+    default: break;
+    }
+    const gunichar c = gdk_keyval_to_unicode(keyval);
+    if (c > 0 && c < 128 && isIupacBase(char(c)) && c != '-') {
+        const char text[2] = {char(c), 0};
+        if (!doc->hasSelection())
+            doc->setSelection({n, 0});
+        doc->typeBases(text);
+        self->m_anchor = doc->selection().start;
+        self->scrollToPosition(doc->selection().start);
+        return TRUE;
+    }
+    return FALSE;
+}
+
 void SequenceView::dragBegin(GtkGestureDrag *g, double x, double y, gpointer p)
 {
     auto *self = static_cast<SequenceView *>(p);
+    gtk_widget_grab_focus(self->m_area);
     if (!self->m_layout || self->m_doc->isEmpty())
         return;
     self->m_x0 = self->m_lastX = x;
@@ -187,6 +254,13 @@ void SequenceView::dragBegin(GtkGestureDrag *g, double x, double y, gpointer p)
     const int site = self->m_layout->siteAt(content);
     if (site >= 0) {
         self->m_doc->activateSite(site);
+        return;
+    }
+    const int primer = self->m_layout->primerAt(content);
+    if (primer >= 0) {
+        const Range b = self->m_doc->sequence().primers[size_t(primer)].binding;
+        self->m_anchor = b.start;
+        self->m_doc->setSelection({b.start, b.length()});
         return;
     }
     const int feature = self->m_layout->featureAt(content);

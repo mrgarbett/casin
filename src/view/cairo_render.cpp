@@ -5,6 +5,8 @@
 #include <cairo-pdf.h>
 #include <cairo-svg.h>
 
+#include <algorithm>
+
 namespace oc::view {
 
 PangoFontDescription *fontDescription(const Font &font)
@@ -180,6 +182,32 @@ bool exportScene(const Scene &scene, const std::string &path, std::string *error
     cairo_surface_finish(surface);
     if (status == CAIRO_STATUS_SUCCESS)
         status = cairo_surface_status(surface);
+    cairo_surface_destroy(surface);
+    if (status != CAIRO_STATUS_SUCCESS) {
+        if (error)
+            *error = std::string("export failed: ") + cairo_status_to_string(status);
+        return false;
+    }
+    return true;
+}
+
+bool exportPdfPages(const std::vector<Scene> &pages, const std::string &path, double paperW, double paperH,
+                    double margin, std::string *error)
+{
+    cairo_surface_t *surface = cairo_pdf_surface_create(path.c_str(), paperW, paperH);
+    cairo_t *cr = cairo_create(surface);
+    for (const Scene &page : pages) {
+        cairo_save(cr);
+        cairo_translate(cr, margin, margin);
+        const double sc = std::min((paperW - 2 * margin) / page.width, (paperH - 2 * margin) / page.height);
+        cairo_scale(cr, sc, sc);
+        drawScene(cr, page);
+        cairo_restore(cr);
+        cairo_show_page(cr);
+    }
+    cairo_destroy(cr);
+    cairo_surface_finish(surface);
+    const cairo_status_t status = cairo_surface_status(surface);
     cairo_surface_destroy(surface);
     if (status != CAIRO_STATUS_SUCCESS) {
         if (error)

@@ -60,7 +60,8 @@ final class SequenceView: NSView {
         let dark = isDarkAppearance
         if layout == nil || layoutWidth != width || layoutDark != dark {
             if let old = layout { oc_seq_layout_free(old) }
-            layout = oc_seq_layout_new(document.handle, width, showComplement, dark, measureText, nil)
+            layout = oc_seq_layout_new_frames(document.handle, width, showComplement, Int32(document.frames), dark,
+                                              measureText, nil)
             layoutWidth = width
             layoutDark = dark
         }
@@ -95,6 +96,58 @@ final class SequenceView: NSView {
         ctx.restoreGState()
     }
 
+    // MARK: Keyboard: typing bases edits the sequence
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        guard !document.isEmpty else { super.keyDown(with: event); return }
+        let flags = event.modifierFlags.intersection([.command, .control, .option])
+        guard flags.isEmpty, let chars = event.charactersIgnoringModifiers, !chars.isEmpty else {
+            super.keyDown(with: event)
+            return
+        }
+        switch chars.unicodeScalars.first?.value ?? 0 {
+        case 0x7F:   // Delete
+            if document.hasSelection && document.selectionLength > 0 {
+                oc_document_delete_selection(document.handle)
+            } else {
+                oc_document_delete_backward(document.handle)
+            }
+        case UInt32(NSDeleteFunctionKey):
+            if document.hasSelection && document.selectionLength > 0 {
+                oc_document_delete_selection(document.handle)
+            } else {
+                oc_document_delete_forward(document.handle)
+            }
+        default:
+            // Letters only; anything that isn't a base beeps.
+            if chars.unicodeScalars.allSatisfy({ CharacterSet.letters.contains($0) }) {
+                if !oc_document_type_bases(document.handle, chars) { NSSound.beep() }
+            } else {
+                super.keyDown(with: event)
+            }
+        }
+    }
+
+    @objc func paste(_ sender: Any?) {
+        guard let text = NSPasteboard.general.string(forType: .string), !document.isEmpty else { return }
+        if !oc_document_type_bases(document.handle, text) { NSSound.beep() }
+    }
+
+    @objc func cut(_ sender: Any?) {
+        let bases = document.selectedBases
+        guard !bases.isEmpty else { NSSound.beep(); return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(bases, forType: .string)
+        oc_document_delete_selection(document.handle)
+    }
+
+    @objc func delete(_ sender: Any?) {
+        guard document.hasSelection && document.selectionLength > 0 else { NSSound.beep(); return }
+        oc_document_delete_selection(document.handle)
+    }
+
     // MARK: Mouse
 
     override func mouseDown(with event: NSEvent) {
@@ -110,6 +163,7 @@ final class SequenceView: NSView {
         if site >= 0 { document.activateSite(site); return }
         let feature = Int(oc_seq_layout_feature_at(layout, p.x, p.y))
         if feature >= 0 { document.activateFeature(feature); return }
+        window?.makeFirstResponder(self)
         dragging = true
         anchor = Int(oc_seq_layout_position_at(layout, p.x, p.y))
         document.select(start: anchor, length: 0)

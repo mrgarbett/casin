@@ -1,15 +1,30 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "include/openclone.h"
 
+#include "core/version.h"
+#include "core/align.h"
+#include "core/cloning.h"
+#include "core/digest.h"
+#include "core/edit.h"
+#include "core/orf.h"
+#include "core/protein.h"
+#include "core/primercheck.h"
+#include "core/search.h"
 #include "core/seqio.h"
 #include "view/document.h"
+#include "view/gellayout.h"
 #include "view/maplayout.h"
+#include "view/printlayout.h"
 #include "view/seqlayout.h"
 #include "view/style.h"
 
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <set>
 
 using namespace oc;
 
@@ -21,6 +36,30 @@ char *dupString(const std::string &s)
     if (out)
         std::memcpy(out, s.c_str(), s.size() + 1);
     return out;
+}
+
+std::vector<Enzyme> enzymesNamed(const char *const *names, int count)
+{
+    std::vector<Enzyme> out;
+    for (int i = 0; i < count && names; ++i)
+        if (const Enzyme *e = names[i] ? findEnzyme(names[i]) : nullptr)
+            out.push_back(*e);
+    return out;
+}
+
+std::string joinLines(const std::vector<std::string> &lines)
+{
+    std::string out;
+    for (const std::string &l : lines)
+        out += (out.empty() ? "" : "\n") + l;
+    return out;
+}
+
+bool failWith(char **error, const std::string &err)
+{
+    if (error)
+        *error = dupString(err);
+    return false;
 }
 
 OCColor toC(const view::Color &c)
@@ -45,6 +84,28 @@ private:
     view::ApproxTextMeasurer m_approx;
 };
 
+Strand strandFromC(int strand)
+{
+    return strand == OC_STRAND_FORWARD ? Strand::Forward : strand == OC_STRAND_REVERSE ? Strand::Reverse : Strand::None;
+}
+
+// A footprint as feature ranges, split at the origin when it wraps.
+std::vector<Range> rangesFor(const Sequence &s, int start, int length)
+{
+    const int n = s.length();
+    if (n == 0 || length <= 0)
+        return {};
+    length = std::min(length, n);
+    start = s.circular ? ((start % n) + n) % n : std::clamp(start, 0, n);
+    if (start + length <= n)
+        return {{start, start + length}};
+    if (!s.circular)
+        return {{start, n}};
+    return {{start, n}, {0, start + length - n}};
+}
+
+
+
 } // namespace
 
 struct OCDocument {
@@ -66,7 +127,31 @@ struct OCScene {
     view::Scene scene;
 };
 
+namespace {
+bool deliver(OCDocument *out, const Sequence &product)
+{
+    if (!out)
+        return false;
+    out->doc.setSequence(product);
+    out->doc.markUnsaved();
+    return true;
+}
+} // namespace
+
+namespace {
+std::vector<view::Scene> pagesFor(const OCDocument *doc, double w, double h, OCMeasureText measure, void *context)
+{
+    CallbackMeasurer tm(measure, context);
+    view::PrintSettings ps;
+    ps.width = w;
+    ps.height = h;
+    return view::printPages(doc->doc.sequence(), doc->doc.visibleSites(), doc->doc.reads(), tm, ps);
+}
+} // namespace
+
 extern "C" {
+
+const char *oc_version(void) { return OPENCLONE_VERSION; }
 
 void oc_string_free(char *s)
 {
@@ -81,6 +166,7 @@ OCDocument *oc_document_new(void)
     d->doc.onSequenceChanged([d] { if (d->cb) d->cb(d->ctx, OC_CHANGED_SEQUENCE); });
     d->doc.onSelectionChanged([d] { if (d->cb) d->cb(d->ctx, OC_CHANGED_SELECTION); });
     d->doc.onEnzymesChanged([d] { if (d->cb) d->cb(d->ctx, OC_CHANGED_ENZYMES); });
+    d->doc.onHistoryChanged([d] { if (d->cb) d->cb(d->ctx, OC_CHANGED_HISTORY); });
     return d;
 }
 
@@ -99,24 +185,48 @@ bool oc_document_load(OCDocument *doc, const char *path, char **error)
 {
     Sequence seq;
     std::string err;
-    if (!loadSequenceFile(path, &seq, &err)) {
+    FileFormat format = FileFormat::Unknown;
+    if (!loadSequenceFile(path, &seq, &err, &format)) {
         if (error)
             *error = dupString(err);
         return false;
     }
-    doc->doc.setSequence(std::move(seq), path);
+    // A trace can't be written back: saving goes to a new file.
+    doc->doc.setSequence(std::move(seq), format == FileFormat::Abif ? std::string() : path);
     return true;
 }
 
-bool oc_document_save(const OCDocument *doc, const char *path, int format, char **error)
+bool oc_document_save(OCDocument *doc, const char *path, int format, char **error)
 {
     std::string err;
-    const FileFormat f = format == OC_FORMAT_FASTA ? FileFormat::Fasta : FileFormat::GenBank;
+    const FileFormat f = format == OC_FORMAT_FASTA    ? FileFormat::Fasta
+                       : format == OC_FORMAT_SNAPGENE ? FileFormat::SnapGene
+                       : format == OC_FORMAT_EMBL     ? FileFormat::Embl
+                                                      : FileFormat::GenBank;
     if (!saveSequenceFile(path, doc->doc.sequence(), f, &err)) {
         if (error)
             *error = dupString(err);
         return false;
     }
+    if (f != FileFormat::Fasta) {
+        doc->doc.setPath(path);
+        doc->doc.markSaved();
+    }
+    return true;
+}
+
+bool oc_document_new_sequence(OCDocument *doc, const char *name, const char *bases, bool circular)
+{
+    Sequence seq;
+    seq.bases = cleanBases(bases ? bases : "");
+    if (seq.bases.empty())
+        return false;
+    seq.name = trim(name ? name : "");
+    if (seq.name.empty())
+        seq.name = "Untitled";
+    seq.circular = circular;
+    doc->doc.setSequence(std::move(seq));
+    doc->doc.markUnsaved();
     return true;
 }
 
@@ -160,6 +270,129 @@ bool oc_document_feature(OCDocument *doc, int index, OCFeatureInfo *out)
     out->color = toC(view::FeatureStyle::fill(f.type, f.color));
     out->drawn = view::FeatureStyle::isDrawn(f);
     return true;
+}
+
+// ---- editing -------------------------------------------------------------------
+
+
+bool oc_document_can_undo(const OCDocument *doc) { return doc->doc.canUndo(); }
+bool oc_document_can_redo(const OCDocument *doc) { return doc->doc.canRedo(); }
+char *oc_document_undo_label(const OCDocument *doc) { return dupString(doc->doc.undoLabel()); }
+char *oc_document_redo_label(const OCDocument *doc) { return dupString(doc->doc.redoLabel()); }
+void oc_document_undo(OCDocument *doc) { doc->doc.undo(); }
+void oc_document_redo(OCDocument *doc) { doc->doc.redo(); }
+bool oc_document_is_modified(const OCDocument *doc) { return doc->doc.isModified(); }
+
+const char *oc_document_path(OCDocument *doc)
+{
+    doc->scratch1 = doc->doc.path();
+    return doc->scratch1.c_str();
+}
+
+bool oc_document_type_bases(OCDocument *doc, const char *text) { return text && doc->doc.typeBases(text); }
+void oc_document_delete_selection(OCDocument *doc) { doc->doc.deleteSelection(); }
+void oc_document_delete_backward(OCDocument *doc) { doc->doc.deleteBackward(); }
+void oc_document_delete_forward(OCDocument *doc) { doc->doc.deleteForward(); }
+void oc_document_reverse_complement(OCDocument *doc) { doc->doc.reverseComplementAll(); }
+void oc_document_set_origin_at_selection(OCDocument *doc) { doc->doc.setOriginAtSelection(); }
+void oc_document_set_circular(OCDocument *doc, bool circular) { doc->doc.setCircular(circular); }
+void oc_document_rename(OCDocument *doc, const char *name) { doc->doc.rename(name ? name : ""); }
+
+int oc_document_add_feature(OCDocument *doc, const char *name, const char *type, int strand, int start, int length)
+{
+    Feature f;
+    f.type = type && *type ? type : "misc_feature";
+    f.strand = strandFromC(strand);
+    f.ranges = rangesFor(doc->doc.sequence(), start, length);
+    f.name = trim(name ? name : "");
+    if (f.name.empty())
+        f.name = defaultFeatureName(f.type, f.qualifiers);
+    else
+        f.qualifiers.push_back({"label", f.name});
+    return doc->doc.addFeature(f);
+}
+
+void oc_document_update_feature(OCDocument *doc, int index, const char *name, const char *type, int strand,
+                                int start, int length)
+{
+    const Sequence &s = doc->doc.sequence();
+    if (index < 0 || index >= int(s.features.size()))
+        return;
+    Feature f = s.features[size_t(index)];
+    if (type && *type)
+        f.type = type;
+    f.strand = strandFromC(strand);
+    const Span old = f.span(s.length(), s.circular);
+    if (old.start != start || old.length != length)
+        f.ranges = rangesFor(s, start, length);
+    const std::string clean = trim(name ? name : "");
+    if (!clean.empty() && clean != f.name) {
+        f.name = clean;
+        auto label = std::find_if(f.qualifiers.begin(), f.qualifiers.end(),
+                                  [](const Qualifier &q) { return q.key == "label"; });
+        if (label != f.qualifiers.end())
+            label->value = clean;
+        else
+            f.qualifiers.insert(f.qualifiers.begin(), {"label", clean});
+    }
+    doc->doc.replaceFeature(index, f);
+}
+
+void oc_document_remove_feature(OCDocument *doc, int index) { doc->doc.removeFeature(index); }
+
+int oc_document_primer_count(const OCDocument *doc) { return int(doc->doc.sequence().primers.size()); }
+
+int oc_document_history_count(const OCDocument *doc) { return int(doc->doc.sequence().history.size()); }
+
+const char *oc_document_history(OCDocument *doc, int index)
+{
+    const std::vector<std::string> &h = doc->doc.sequence().history;
+    doc->scratch1 = index >= 0 && index < int(h.size()) ? h[size_t(index)] : std::string();
+    return doc->scratch1.c_str();
+}
+
+bool oc_document_primer(OCDocument *doc, int index, OCPrimerInfo *out)
+{
+    const Sequence &s = doc->doc.sequence();
+    if (index < 0 || index >= int(s.primers.size()) || !out)
+        return false;
+    const Primer &p = s.primers[size_t(index)];
+    doc->scratch1 = p.name;
+    doc->scratch2 = p.bases;
+    out->name = doc->scratch1.c_str();
+    out->bases = doc->scratch2.c_str();
+    out->start = p.binding.start;
+    out->length = p.binding.length();
+    out->strand = p.strand == Strand::Reverse ? OC_STRAND_REVERSE : OC_STRAND_FORWARD;
+    return true;
+}
+
+int oc_document_add_primer_from_selection(OCDocument *doc, const char *name, int strand)
+{
+    return doc->doc.addPrimerFromSelection(name ? name : "", strand == OC_STRAND_REVERSE ? Strand::Reverse
+                                                                                          : Strand::Forward);
+}
+
+void oc_document_remove_primer(OCDocument *doc, int index) { doc->doc.removePrimer(index); }
+
+int oc_document_add_primer_sequence(OCDocument *doc, const char *name, const char *bases, char **error)
+{
+    std::string b;
+    for (const char *p = bases ? bases : ""; *p; ++p)
+        if (std::isalpha(static_cast<unsigned char>(*p)))
+            b += char(std::toupper(static_cast<unsigned char>(*p)));
+    const std::vector<PrimerSite> sites = findPrimerSites(doc->doc.sequence(), b);
+    if (b.size() < 15 || sites.empty()) {
+        failWith(error, b.size() < 15 ? "a primer needs at least 15 bases" : "the primer doesn't bind this sequence");
+        return -1;
+    }
+    Primer p;
+    p.name = name && *name ? name : "primer";
+    p.bases = b;
+    p.binding = sites.front().binding;
+    p.strand = sites.front().strand;
+    doc->doc.addPrimers({p}, "Add Primer");
+    return int(doc->doc.sequence().primers.size()) - 1;
 }
 
 int oc_document_enzyme_count(const OCDocument *doc) { return int(doc->doc.enzymes().size()); }
@@ -219,6 +452,360 @@ int oc_document_find_next(OCDocument *doc, const char *query, int *count)
 
 // ---- layouts --------------------------------------------------------------------
 
+/* ---- digest and gel ---- */
+
+int oc_digest(const OCDocument *doc, const char *const *enzymes, int enzyme_count, OCFragmentInfo *out, int max)
+{
+    const DigestResult r = digest(doc->doc.sequence(), enzymesNamed(enzymes, enzyme_count));
+    for (int i = 0; i < int(r.fragments.size()) && i < max && out; ++i) {
+        const DigestFragment &f = r.fragments[size_t(i)];
+        OCFragmentInfo &o = out[i];
+        o.start = f.start;
+        o.length = f.length;
+        std::snprintf(o.left_enzyme, sizeof o.left_enzyme, "%s", f.leftEnzyme.c_str());
+        std::snprintf(o.right_enzyme, sizeof o.right_enzyme, "%s", f.rightEnzyme.c_str());
+        o.left_overhang = f.leftOverhang;
+        o.right_overhang = f.rightOverhang;
+    }
+    return int(r.fragments.size());
+}
+
+int oc_ladder_count(void) { return int(commonLadders().size()); }
+
+const char *oc_ladder_name(int index)
+{
+    return index >= 0 && index < oc_ladder_count() ? commonLadders()[size_t(index)].name.c_str() : "";
+}
+
+OCScene *oc_gel_render(const OCDocument *doc, const char *const *enzymes, int enzyme_count, int ladder, double width,
+                       double height, bool dark, OCMeasureText measure, void *context)
+{
+    const Sequence &seq = doc->doc.sequence();
+    const Ladder &l = commonLadders()[size_t(std::clamp(ladder, 0, oc_ladder_count() - 1))];
+    const std::vector<Enzyme> use = enzymesNamed(enzymes, enzyme_count);
+    std::vector<view::GelLane> lanes;
+    lanes.push_back({"Ladder", l.bands, l.bright, true, false});
+    lanes.push_back({"Uncut", {seq.length()}, {}, false, seq.circular});
+    view::GelLane cut{"Digest", {}, {}, false, false};
+    if (!use.empty()) {
+        const DigestResult r = digest(seq, use);
+        cut.uncutCircular = r.uncut && seq.circular;
+        for (const DigestFragment &f : r.fragments)
+            cut.bands.push_back(f.length);
+    }
+    lanes.push_back(cut);
+    CallbackMeasurer tm(measure, context);
+    view::GelLayout layout(lanes, dark ? view::Theme::darkTheme() : view::Theme::light(), tm, width, height);
+    return new OCScene{layout.render()};
+}
+
+/* ---- primers ---- */
+
+char *oc_primer_check(const char *bases, OCPrimerCheck *out)
+{
+    const PrimerCheck c = checkPrimer(bases ? bases : "");
+    if (out)
+        *out = {c.length, c.gc, c.tm, c.clampGC, c.longestRun, c.selfDimer, c.selfDimer3, c.hairpinStem};
+    return dupString(joinLines(c.warnings));
+}
+
+char *oc_primer_pair_check(const char *a, const char *b)
+{
+    return dupString(joinLines(checkPrimerPair(a ? a : "", b ? b : "").warnings));
+}
+
+bool oc_document_design_primers(OCDocument *doc, double target_tm, char **error)
+{
+    if (!doc->doc.hasSelection() || doc->doc.selection().length <= 0)
+        return failWith(error, "select the region to amplify");
+    PrimerDesign d;
+    std::string err;
+    if (!designPrimers(doc->doc.sequence(), doc->doc.selection(), target_tm, &d, &err))
+        return failWith(error, err);
+    doc->doc.addPrimers({d.forward, d.reverse}, "Add Primers");
+    return true;
+}
+
+bool oc_document_design_primers_flank(OCDocument *doc, double target_tm, int flank, char **error)
+{
+    if (!doc->doc.hasSelection() || doc->doc.selection().length <= 0)
+        return failWith(error, "select the region to amplify");
+    PrimerDesign d;
+    std::string err;
+    if (!designPrimers(doc->doc.sequence(), doc->doc.selection(), target_tm, &d, &err, std::max(0, flank)))
+        return failWith(error, err);
+    doc->doc.addPrimers({d.forward, d.reverse}, "Add Primers");
+    return true;
+}
+
+/* ---- ORFs ---- */
+
+char *oc_document_selection_protein(const OCDocument *doc, OCProteinInfo *out)
+{
+    const Span sel = doc->doc.selection();
+    if (sel.length < 3)
+        return nullptr;
+    const Sequence &seq = doc->doc.sequence();
+    std::string bases = doc->doc.selectedBases();
+    const int fi = doc->doc.activeFeature();
+    if (fi >= 0 && size_t(fi) < seq.features.size() && seq.features[size_t(fi)].span(seq.length(), seq.circular) == sel)
+        bases = seq.featureBases(seq.features[size_t(fi)]);
+    std::string protein = translate(bases);
+    const ProteinStats ps = proteinStats(protein);
+    if (out)
+        *out = {ps.length, ps.unknown, ps.truncated, ps.mass, ps.pI, ps.extinctionReduced, ps.extinctionCystines,
+                ps.positive, ps.negative};
+    if (!protein.empty() && protein.back() == '*')
+        protein.pop_back();
+    return dupString(protein);
+}
+
+char *oc_find_orfs(const OCDocument *doc, int min_codons)
+{
+    std::vector<std::string> lines;
+    for (const Orf &o : findOrfs(doc->doc.sequence(), min_codons))
+        lines.push_back(std::to_string(o.start) + "\t" + std::to_string(o.length) + "\t"
+                        + (o.strand == Strand::Reverse ? "-1" : "1") + "\t" + o.protein);
+    return dupString(joinLines(lines));
+}
+
+int oc_document_add_orf(OCDocument *doc, int min_codons, int index, const char *name)
+{
+    const std::vector<Orf> orfs = findOrfs(doc->doc.sequence(), min_codons);
+    if (index < 0 || index >= int(orfs.size()))
+        return -1;
+    return doc->doc.addFeature(orfFeature(doc->doc.sequence(), orfs[size_t(index)], name ? name : "ORF"));
+}
+
+/* ---- enzyme sets ---- */
+
+char *oc_builtin_enzyme_sets(void)
+{
+    std::vector<std::string> lines;
+    for (const EnzymeSet &set : builtinEnzymeSets()) {
+        std::string l = set.name + "\t";
+        for (size_t i = 0; i < set.enzymes.size(); ++i)
+            l += (i ? "," : "") + set.enzymes[i];
+        lines.push_back(l);
+    }
+    return dupString(joinLines(lines));
+}
+
+char *oc_enzyme_suppliers(const char *enzyme) { return dupString(enzymeSuppliers(enzyme ? enzyme : "")); }
+
+void oc_document_show_enzyme_set(OCDocument *doc, const char *const *enzymes, int count)
+{
+    std::set<std::string> names;
+    for (int i = 0; i < count; ++i)
+        if (enzymes[i])
+            names.insert(enzymes[i]);
+    doc->doc.showOnlyEnzymes(names, doc->doc.maxCuts());
+}
+
+/* ---- printing ---- */
+
+
+int oc_print_page_count(const OCDocument *doc, double page_width, double page_height, OCMeasureText measure,
+                        void *context)
+{
+    return int(pagesFor(doc, page_width, page_height, measure, context).size());
+}
+
+OCScene *oc_print_page(const OCDocument *doc, double page_width, double page_height, int page, OCMeasureText measure,
+                       void *context)
+{
+    std::vector<view::Scene> pages = pagesFor(doc, page_width, page_height, measure, context);
+    if (page < 0 || page >= int(pages.size()))
+        return nullptr;
+    return new OCScene{std::move(pages[size_t(page)])};
+}
+
+/* ---- choosing enzymes ---- */
+
+char *oc_document_choose_enzymes(const OCDocument *doc, int max_cuts, bool inside_selection, int spare_feature,
+                                 int ends)
+{
+    const Sequence &seq = doc->doc.sequence();
+    EnzymeCriteria c;
+    c.maxCuts = max_cuts;
+    c.ends = EnzymeCriteria::Ends(std::clamp(ends, 0, 3));
+    if (inside_selection && doc->doc.hasSelection() && doc->doc.selection().length > 0) {
+        c.inside = true;
+        c.region = doc->doc.selection();
+    }
+    if (spare_feature >= 0 && spare_feature < int(seq.features.size()))
+        for (const Range &r : seq.features[size_t(spare_feature)].ranges)
+            c.spare.push_back({r.start, r.length()});
+    return dupString(joinLines(chooseEnzymes(seq, doc->doc.enzymes(), doc->doc.allSites(), c)));
+}
+
+void oc_document_show_only_enzymes(OCDocument *doc, const char *const *names, int count, int max_cuts)
+{
+    std::set<std::string> set;
+    for (int i = 0; i < count && names; ++i)
+        if (names[i])
+            set.insert(names[i]);
+    doc->doc.showOnlyEnzymes(set, max_cuts);
+}
+
+/* ---- cloning ---- */
+
+
+bool oc_pcr_product(const OCDocument *templ, int forward_primer, int reverse_primer, OCDocument *out, char **error)
+{
+    const Sequence &t = templ->doc.sequence();
+    const int n = int(t.primers.size());
+    if (forward_primer < 0 || forward_primer >= n || reverse_primer < 0 || reverse_primer >= n)
+        return failWith(error, "pick two primers of this sequence");
+    Sequence p;
+    std::string err;
+    if (!pcrProduct(t, t.primers[size_t(forward_primer)], t.primers[size_t(reverse_primer)], &p, &err))
+        return failWith(error, err);
+    return deliver(out, p);
+}
+
+bool oc_overhang_clone(const OCDocument *vector, const OCDocument *insert, char overhang, bool reversed,
+                       OCDocument *out, char **error)
+{
+    Sequence p;
+    std::string err;
+    if (!overhangClone(vector->doc.sequence(), insert->doc.sequence(), overhang, reversed, &p, &err))
+        return failWith(error, err);
+    return deliver(out, p);
+}
+
+bool oc_restriction_clone(const OCDocument *vector, const char *vector_enzyme1, const char *vector_enzyme2,
+                          const OCDocument *insert, const char *insert_enzyme1, const char *insert_enzyme2,
+                          bool reversed, OCDocument *out, char **error)
+{
+    Sequence p;
+    std::string err;
+    auto str = [](const char *s) { return std::string(s ? s : ""); };
+    if (!restrictionClone(vector->doc.sequence(), str(vector_enzyme1), str(vector_enzyme2), insert->doc.sequence(),
+                          str(insert_enzyme1), str(insert_enzyme2), reversed, &p, &err))
+        return failWith(error, err);
+    return deliver(out, p);
+}
+
+bool oc_golden_gate(const OCDocument *vector, const OCDocument *const *parts, int part_count, const char *enzyme,
+                    OCDocument *out, char **error)
+{
+    const Enzyme *e = enzyme ? findEnzyme(enzyme) : nullptr;
+    if (!e)
+        return failWith(error, "unknown enzyme");
+    std::vector<Sequence> inputs{vector->doc.sequence()};
+    for (int i = 0; i < part_count && parts; ++i)
+        inputs.push_back(parts[i]->doc.sequence());
+    Sequence p;
+    std::vector<AssemblyStep> steps;
+    std::string err;
+    if (!goldenGate(inputs, *e, &p, &steps, &err))
+        return failWith(error, err);
+    p.name = inputs[0].name;
+    for (const AssemblyStep &s : steps)
+        if (s.input > 0)
+            p.name += "-" + inputs[size_t(s.input)].name;
+    return deliver(out, p);
+}
+
+bool oc_mutagenesis(const OCDocument *doc, const char *bases, double target_tm, OCDocument *out, char **error)
+{
+    if (!doc->doc.hasSelection())
+        return failWith(error, "select the bases to change, or place the caret");
+    MutagenesisDesign d;
+    std::string err;
+    if (!designMutagenesis(doc->doc.sequence(), doc->doc.selection(), bases ? bases : "", target_tm, &d, &err))
+        return failWith(error, err);
+    return deliver(out, d.mutant);
+}
+
+bool oc_gibson(const OCDocument *vector, const char *vector_enzyme1, const char *vector_enzyme2,
+               const OCDocument *const *fragments, int fragment_count, int min_overlap, OCDocument *out,
+               char **error)
+{
+    std::vector<Sequence> frags;
+    for (int i = 0; i < fragment_count && fragments; ++i)
+        frags.push_back(fragments[i]->doc.sequence());
+    Sequence p;
+    std::string err;
+    if (!gibsonIntoVector(vector->doc.sequence(), vector_enzyme1 ? vector_enzyme1 : "",
+                          vector_enzyme2 ? vector_enzyme2 : "", frags, min_overlap, &p, nullptr, &err))
+        return failWith(error, err);
+    return deliver(out, p);
+}
+
+bool oc_overlap_extension(const OCDocument *const *fragments, int fragment_count, int min_overlap, OCDocument *out,
+                          char **error)
+{
+    std::vector<Sequence> frags;
+    for (int i = 0; i < fragment_count && fragments; ++i)
+        frags.push_back(fragments[i]->doc.sequence());
+    Sequence p;
+    std::string err;
+    if (!overlapExtension(frags, min_overlap, &p, nullptr, &err))
+        return failWith(error, err);
+    return deliver(out, p);
+}
+
+bool oc_insertion_by_pcr(const OCDocument *vector, const OCDocument *insert, double target_tm, int overlap,
+                         OCDocument *out, char **primers, char **error)
+{
+    const Sequence &ins = insert->doc.sequence();
+    Span target{0, ins.length()};
+    const Span sel = insert->doc.selection();
+    if (insert->doc.hasSelection() && sel.length >= 18 && !sel.wraps(ins.length()))
+        target = sel;
+    InsertionDesign d;
+    std::string err;
+    if (!designInsertion(vector->doc.sequence(), vector->doc.selection(), ins, target, target_tm, overlap, &d, &err))
+        return failWith(error, err);
+    if (primers)
+        *primers = dupString(d.forward.name + "\t" + d.forward.bases + "\n" + d.reverse.name + "\t" + d.reverse.bases);
+    return deliver(out, d.construct);
+}
+
+char *oc_search_folder(const char *folder, const char *query)
+{
+    std::vector<std::string> lines;
+    for (const FolderHit &h : searchFolder(folder ? folder : "", query ? query : ""))
+        lines.push_back(h.path + "\t" + h.name + "\t" + std::to_string(h.length) + "\t" + (h.circular ? "1" : "0") + "\t"
+                        + h.match);
+    return dupString(joinLines(lines));
+}
+
+char *oc_align_read(const OCDocument *reference, const OCDocument *read, OCAlignmentInfo *out, char **error)
+{
+    ReadAlignment a;
+    std::string err;
+    if (!alignRead(reference->doc.sequence(), read->doc.sequence().bases, &a, &err)) {
+        failWith(error, err);
+        return nullptr;
+    }
+    if (out)
+        *out = {a.reverse, a.refSpan.start, a.refSpan.length, a.matches, a.mismatches, a.gaps, a.identity(),
+                int(a.diffs.size())};
+    std::vector<std::string> lines;
+    for (const AlignmentDiff &d : a.diffs)
+        lines.push_back(std::to_string(d.refPos + 1) + "\t" + d.ref + "\t" + d.read);
+    return dupString(joinLines(lines));
+}
+
+bool oc_document_show_read(OCDocument *reference, const OCDocument *read, char **error)
+{
+    ReadAlignment a;
+    std::string err;
+    const Sequence &ref = reference->doc.sequence();
+    if (!alignRead(ref, read->doc.sequence().bases, &a, &err)) {
+        failWith(error, err);
+        return false;
+    }
+    reference->doc.addRead(readTrack(a, ref.length(), read->doc.sequence().name));
+    return true;
+}
+
+int oc_document_read_count(const OCDocument *doc) { return int(doc->doc.reads().size()); }
+void oc_document_clear_reads(OCDocument *doc) { doc->doc.clearReads(); }
+
 OCMapLayout *oc_map_layout_new(const OCDocument *doc, double width, double height, bool dark,
                                OCMeasureText measure, void *context)
 {
@@ -227,6 +814,32 @@ OCMapLayout *oc_map_layout_new(const OCDocument *doc, double width, double heigh
     l->layout = std::make_unique<view::MapLayout>(doc->doc.sequence(), doc->doc.visibleSites(),
                                                   dark ? view::Theme::darkTheme() : view::Theme::light(), tm,
                                                   width, height);
+    return l;
+}
+
+OCMapLayout *oc_map_layout_new_options(const OCDocument *doc, double width, double height, bool dark,
+                                       bool show_enzymes, bool show_primers, const char *hidden_types,
+                                       OCMeasureText measure, void *context)
+{
+    CallbackMeasurer tm(measure, context);
+    view::MapOptions opt;
+    opt.enzymes = show_enzymes;
+    opt.primers = show_primers;
+    std::string types = hidden_types ? hidden_types : "";
+    size_t from = 0;
+    while (from <= types.size()) {
+        const size_t comma = types.find(',', from);
+        const std::string t = trim(types.substr(from, comma == std::string::npos ? std::string::npos : comma - from));
+        if (!t.empty())
+            opt.hiddenTypes.insert(t);
+        if (comma == std::string::npos)
+            break;
+        from = comma + 1;
+    }
+    auto *l = new OCMapLayout;
+    l->layout = std::make_unique<view::MapLayout>(doc->doc.sequence(), doc->doc.visibleSites(),
+                                                  dark ? view::Theme::darkTheme() : view::Theme::light(), tm, width,
+                                                  height, opt);
     return l;
 }
 
@@ -264,11 +877,17 @@ char *oc_map_layout_tooltip(const OCMapLayout *layout, double x, double y) { ret
 OCSeqLayout *oc_seq_layout_new(const OCDocument *doc, double width, bool show_complement, bool dark,
                                OCMeasureText measure, void *context)
 {
+    return oc_seq_layout_new_frames(doc, width, show_complement, 0, dark, measure, context);
+}
+
+OCSeqLayout *oc_seq_layout_new_frames(const OCDocument *doc, double width, bool show_complement, int frames,
+                                      bool dark, OCMeasureText measure, void *context)
+{
     CallbackMeasurer tm(measure, context);
     auto *l = new OCSeqLayout;
     l->layout = std::make_unique<view::SequenceLayout>(doc->doc.sequence(), doc->doc.visibleSites(),
                                                        dark ? view::Theme::darkTheme() : view::Theme::light(), tm,
-                                                       width, show_complement);
+                                                       width, show_complement, frames, doc->doc.reads());
     return l;
 }
 
@@ -288,6 +907,7 @@ OCScene *oc_seq_layout_render(const OCSeqLayout *layout, const OCDocument *doc, 
 int oc_seq_layout_position_at(const OCSeqLayout *l, double x, double y) { return l->layout->positionAt({x, y}); }
 int oc_seq_layout_feature_at(const OCSeqLayout *l, double x, double y) { return l->layout->featureAt({x, y}); }
 int oc_seq_layout_site_at(const OCSeqLayout *l, double x, double y) { return l->layout->siteAt({x, y}); }
+int oc_seq_layout_primer_at(const OCSeqLayout *l, double x, double y) { return l->layout->primerAt({x, y}); }
 double oc_seq_layout_line_top(const OCSeqLayout *l, int position) { return l->layout->lineTopFor(position); }
 double oc_seq_layout_line_height(const OCSeqLayout *l, int position) { return l->layout->lineHeightFor(position); }
 char *oc_seq_layout_tooltip(const OCSeqLayout *l, double x, double y) { return dupString(l->layout->tooltipAt({x, y})); }

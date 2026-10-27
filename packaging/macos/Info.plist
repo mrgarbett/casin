@@ -19,23 +19,30 @@
     <array>
         <dict>
             <key>CFBundleTypeName</key><string>GenBank Sequence</string>
-            <key>CFBundleTypeRole</key><string>Viewer</string>
+            <key>CFBundleTypeRole</key><string>Editor</string>
             <key>LSHandlerRank</key><string>Alternate</string>
             <key>LSItemContentTypes</key><array><string>io.github.openclone.genbank</string></array>
             <key>NSDocumentClass</key><string>SequenceDocument</string>
         </dict>
         <dict>
             <key>CFBundleTypeName</key><string>SnapGene DNA File</string>
-            <key>CFBundleTypeRole</key><string>Viewer</string>
+            <key>CFBundleTypeRole</key><string>Editor</string>
             <key>LSHandlerRank</key><string>Alternate</string>
             <key>LSItemContentTypes</key><array><string>io.github.openclone.snapgene-dna</string></array>
             <key>NSDocumentClass</key><string>SequenceDocument</string>
         </dict>
         <dict>
             <key>CFBundleTypeName</key><string>FASTA Sequence</string>
-            <key>CFBundleTypeRole</key><string>Viewer</string>
+            <key>CFBundleTypeRole</key><string>Editor</string>
             <key>LSHandlerRank</key><string>Alternate</string>
             <key>LSItemContentTypes</key><array><string>io.github.openclone.fasta</string></array>
+            <key>NSDocumentClass</key><string>SequenceDocument</string>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key><string>EMBL Sequence</string>
+            <key>CFBundleTypeRole</key><string>Editor</string>
+            <key>LSHandlerRank</key><string>Alternate</string>
+            <key>LSItemContentTypes</key><array><string>io.github.openclone.embl</string></array>
             <key>NSDocumentClass</key><string>SequenceDocument</string>
         </dict>
     </array>
@@ -63,6 +70,13 @@
             <key>UTTypeTagSpecification</key>
             <dict><key>public.filename-extension</key>
                 <array><string>fasta</string><string>fa</string><string>fna</string><string>fas</string><string>seq</string></array></dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key><string>io.github.openclone.embl</string>
+            <key>UTTypeDescription</key><string>EMBL Sequence</string>
+            <key>UTTypeConformsTo</key><array><string>public.plain-text</string></array>
+            <key>UTTypeTagSpecification</key>
+            <dict><key>public.filename-extension</key><array><string>embl</string><string>emb</string></array></dict>
         </dict>
     </array>
 </dict>

@@ -22,7 +22,8 @@ bool Enzyme::cutsOutsideSite() const
 // Restriction Enzyme Database, Roberts R.J. et al., Nucleic Acids Res.
 // 51:D629-D630 (2023). Values were cross-checked against REBASE's EMBOSS
 // export (emboss_e, version 404) by scripts/check_enzymes.py.
-// Format: name, site, top cut, bottom cut (see Enzyme).
+// Format: name, site, top cut, bottom cut, then the second pair for enzymes
+// that cut twice (see Enzyme).
 const std::vector<Enzyme> &commonEnzymes()
 {
     static const std::vector<Enzyme> list = {
@@ -121,6 +122,11 @@ const std::vector<Enzyme> &commonEnzymes()
         {"MlyI", "GAGTC", 10, 10},
         {"PaqCI", "CACCTGC", 11, 15},
         {"SapI", "GCTCTTC", 8, 11},
+        // Cut on both sides of the site, excising it
+        {"BaeI", "ACNNNNGTAYC", -10, -15, 23, 18, true},
+        {"BcgI", "CGANNNNNNTGC", -10, -12, 24, 22, true},
+        {"BsaXI", "ACNNNNNCTCC", -9, -12, 21, 18, true},
+        {"CspCI", "CAANNNNNGTGG", -11, -13, 24, 22, true},
     };
     return list;
 }
@@ -187,14 +193,14 @@ std::vector<CutSite> findSites(const Sequence &seq, const std::vector<Enzyme> &e
         const std::vector<uint8_t> rev = palindrome ? fwd : masksOf(reverseComplement(e.site));
         const int lastStart = seq.circular ? n - 1 : n - L;
 
-        auto add = [&](int p, Strand strand) {
+        auto addCut = [&](int p, Strand strand, int cutTop, int cutBottom) {
             int top, bottom;
             if (strand == Strand::Forward) {
-                top = p + e.cutTop;
-                bottom = p + e.cutBottom;
+                top = p + cutTop;
+                bottom = p + cutBottom;
             } else {
-                top = p + L - e.cutBottom;
-                bottom = p + L - e.cutTop;
+                top = p + L - cutBottom;
+                bottom = p + L - cutTop;
             }
             if (seq.circular) {
                 top = mod(top, n);
@@ -203,6 +209,11 @@ std::vector<CutSite> findSites(const Sequence &seq, const std::vector<Enzyme> &e
                 return;
             }
             out.push_back({&e, p, top, bottom, strand});
+        };
+        auto add = [&](int p, Strand strand) {
+            addCut(p, strand, e.cutTop, e.cutBottom);
+            if (e.cutsTwice)
+                addCut(p, strand, e.cutTop2, e.cutBottom2);
         };
 
         for (int p = 0; p <= lastStart; ++p) {
