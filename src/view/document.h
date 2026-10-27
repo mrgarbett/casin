@@ -97,6 +97,8 @@ public:
     void removeFeature(int index);
     // Adds a primer that binds the selection on the given strand.
     int addPrimerFromSelection(const std::string &name, Strand strand);
+    // Adds primers as one undo step, e.g. a designed pair.
+    void addPrimers(const std::vector<Primer> &primers, const std::string &label);
     void removePrimer(int index);
 
     // Text for a status bar: length, topology, selection, GC%, Tm.

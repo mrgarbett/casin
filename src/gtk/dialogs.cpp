@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Editing dialogs: feature, primer, PCR, restriction cloning, Golden Gate, Gibson and new sequence.
+// Editing dialogs: feature, primer, PCR, restriction cloning, Golden Gate, Gibson, primer design and new sequence.
 #include "window.h"
 
 #include "core/cloning.h"
@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <cstdio>
 #include <map>
 
 namespace oc::gtk {
@@ -920,6 +921,100 @@ void Window::gibsonDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<GibsonForm *>(p); });
+    adw_dialog_present(f.dialog, m_window);
+}
+
+namespace {
+struct DesignForm {
+    Window *window;
+    Sequence seq;
+    Span target;
+    GtkWidget *tm, *fwd, *rev, *notes, *okButton;
+    AdwDialog *dialog;
+    PrimerDesign design;
+    bool ok = false;
+};
+
+std::string primerSummary(const Primer &p, const PrimerCheck &c)
+{
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "%d nt · Tm %.1f °C · GC %.0f%%", c.length, c.tm, c.gc * 100);
+    return p.bases + "\n" + buf;
+}
+
+void updateDesign(DesignForm *st)
+{
+    std::string err;
+    st->ok = designPrimers(st->seq, st->target, adw_spin_row_get_value(ADW_SPIN_ROW(st->tm)), &st->design, &err);
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->fwd),
+                                st->ok ? primerSummary(st->design.forward, st->design.forwardCheck).c_str() : "");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->rev),
+                                st->ok ? primerSummary(st->design.reverse, st->design.reverseCheck).c_str() : "");
+    std::string notes;
+    if (!st->ok) {
+        notes = err;
+    } else {
+        const std::pair<const char *, const std::vector<std::string> *> lists[] = {
+            {"Forward: ", &st->design.forwardCheck.warnings},
+            {"Reverse: ", &st->design.reverseCheck.warnings},
+            {"", &st->design.pair.warnings}};
+        for (const auto &[who, list] : lists)
+            for (const std::string &w : *list)
+                notes += (notes.empty() ? "" : "\n") + std::string(who) + w;
+        if (notes.empty())
+            notes = "No problems found";
+    }
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->notes), notes.c_str());
+    gtk_widget_set_sensitive(st->okButton, st->ok);
+}
+} // namespace
+
+void Window::designPrimersDialog()
+{
+    if (!m_doc.hasSelection() || m_doc.selection().length <= 0)
+        return;
+    auto *st = new DesignForm{};
+    st->window = this;
+    st->seq = m_doc.sequence();
+    st->target = m_doc.selection();
+    Form f = makeForm("Design Primers", "Add Primers");
+    st->dialog = f.dialog;
+    st->okButton = f.ok;
+    GtkWidget *g = addGroup(f, "Amplify the selection");
+    adw_preferences_group_set_description(
+        ADW_PREFERENCES_GROUP(g), (view::withThousands(st->target.start + 1) + "–"
+                                   + view::withThousands(st->target.start + st->target.length) + " · "
+                                   + view::formatBp(st->target.length))
+                                      .c_str());
+    st->tm = spinRow(g, "Target Tm (°C)", 60, 72);
+    adw_spin_row_set_range(ADW_SPIN_ROW(st->tm), 50, 72);
+    adw_spin_row_set_value(ADW_SPIN_ROW(st->tm), 60);
+    GtkWidget *gp = addGroup(f, "Primers");
+    st->fwd = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->fwd), "Forward");
+    adw_action_row_set_subtitle_selectable(ADW_ACTION_ROW(st->fwd), TRUE);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(gp), st->fwd);
+    st->rev = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->rev), "Reverse");
+    adw_action_row_set_subtitle_selectable(ADW_ACTION_ROW(st->rev), TRUE);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(gp), st->rev);
+    st->notes = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->notes), "Checks");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(gp), st->notes);
+    g_signal_connect(st->tm, "notify::value", G_CALLBACK((+[](GObject *, GParamSpec *, gpointer p) {
+                         updateDesign(static_cast<DesignForm *>(p));
+                     })),
+                     st);
+    updateDesign(st);
+    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<DesignForm *>(p);
+                         if (!st->ok)
+                             return;
+                         st->window->document().addPrimers({st->design.forward, st->design.reverse}, "Add Primers");
+                         adw_dialog_close(st->dialog);
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<DesignForm *>(p); });
     adw_dialog_present(f.dialog, m_window);
 }
 

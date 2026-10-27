@@ -133,4 +133,75 @@ PairCheck checkPrimerPair(const std::string &rawA, const std::string &rawB)
     return c;
 }
 
+namespace {
+
+struct Candidate {
+    std::string bases;
+    int length;
+    PrimerCheck check;
+    double score;
+};
+
+std::vector<Candidate> candidates(const std::string &region, double targetTm)
+{
+    std::vector<Candidate> out;
+    for (int len = 18; len <= std::min(32, int(region.size())); ++len) {
+        Candidate c{region.substr(0, size_t(len)), len, checkPrimer(region.substr(0, size_t(len))), 0};
+        if (std::isnan(c.check.tm))
+            continue;
+        const char last = c.bases.back();
+        c.score = std::fabs(c.check.tm - targetTm) + (last == 'G' || last == 'C' ? 0 : 2)
+                + 1.5 * double(c.check.warnings.size());
+        out.push_back(c);
+    }
+    return out;
+}
+
+} // namespace
+
+bool designPrimers(const Sequence &seq, Span target, double targetTm, PrimerDesign *out, std::string *error)
+{
+    auto fail = [error](const char *msg) {
+        if (error)
+            *error = msg;
+        return false;
+    };
+    const int n = seq.length();
+    if (target.length < 18)
+        return fail("select at least 18 bases to amplify");
+    if (target.start < 0 || target.start + target.length > n)
+        return fail("the selection can't cross the origin");
+    const std::string region = seq.bases.substr(size_t(target.start), size_t(target.length));
+    const std::vector<Candidate> fwd = candidates(region, targetTm);
+    const std::vector<Candidate> rev = candidates(reverseComplement(region), targetTm);
+    if (fwd.empty() || rev.empty())
+        return fail("no primer can be computed for ambiguous bases");
+    const Candidate *bestF = nullptr, *bestR = nullptr;
+    double best = 0;
+    for (const Candidate &f : fwd)
+        for (const Candidate &r : rev) {
+            if (f.length + r.length > target.length + 32)
+                continue;
+            const PairCheck pc = checkPrimerPair(f.bases, r.bases);
+            const double score = f.score + r.score + std::fabs(f.check.tm - r.check.tm) + 2.0 * double(pc.warnings.size());
+            if (!bestF || score < best) {
+                best = score;
+                bestF = &f;
+                bestR = &r;
+            }
+        }
+    if (!bestF)
+        return fail("the selection is too short for two primers");
+    PrimerDesign d;
+    d.forward = {seq.name.empty() ? "fwd" : seq.name + "-fwd", bestF->bases,
+                 {target.start, target.start + bestF->length}, Strand::Forward};
+    d.reverse = {seq.name.empty() ? "rev" : seq.name + "-rev", bestR->bases,
+                 {target.start + target.length - bestR->length, target.start + target.length}, Strand::Reverse};
+    d.forwardCheck = bestF->check;
+    d.reverseCheck = bestR->check;
+    d.pair = checkPrimerPair(bestF->bases, bestR->bases);
+    *out = d;
+    return true;
+}
+
 } // namespace oc

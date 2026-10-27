@@ -490,6 +490,19 @@ int Document::addPrimerFromSelection(const std::string &name, Strand strand)
     return int(m_seq.primers.size()) - 1;
 }
 
+void Document::addPrimers(const std::vector<Primer> &primers, const std::string &label)
+{
+    if (primers.empty())
+        return;
+    const Span sel = m_selection;
+    edit(label,
+         [&](Sequence &s) {
+             s.primers.insert(s.primers.end(), primers.begin(), primers.end());
+             return true;
+         },
+         [&] { return sel; });
+}
+
 void Document::removePrimer(int index)
 {
     if (index < 0 || index >= int(m_seq.primers.size()))

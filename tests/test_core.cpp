@@ -856,6 +856,28 @@ static void testGibson()
     CHECK(!gibsonAssemble({vec, a, b}, 30, &product, nullptr, &err));   // overlaps too short
 }
 
+static void testPrimerDesign()
+{
+    Sequence s;
+    s.name = "lacZ";
+    s.bases = "TTTTTTTTTT" "ATGACCATGATTACGCCAAGCTTGCATGCCTGCAGGTCGACTCTAGAGGATCCCCGGGTACCGAGCTCGAATTCACTGGCCGTCGTTTTACAACG"
+              "TCGTGACTGGGAAAACCCTGGCGTTACCCAACTTAATCGCCTTGCAGCACATCC" "TTTTTTTTTT";
+    const Span target{10, s.length() - 20};
+    PrimerDesign d;
+    std::string err;
+    CHECK(designPrimers(s, target, 60, &d, &err));
+    CHECK(startsWith(d.forward.bases, "ATGACCATGATTACG"));
+    CHECK_EQ(d.forward.binding.start, 10);
+    CHECK_EQ(d.reverse.binding.end, s.length() - 10);
+    CHECK(startsWith(d.reverse.bases, reverseComplement(s.bases.substr(size_t(s.length() - 25), 15))));
+    CHECK(d.forward.bases.size() >= 18 && d.forward.bases.size() <= 32);
+    CHECK(std::fabs(d.forwardCheck.tm - 60) < 6 && std::fabs(d.reverseCheck.tm - 60) < 6);
+    Sequence p;
+    CHECK(pcrProduct(s, d.forward, d.reverse, &p, &err));
+    CHECK_EQ(p.length(), target.length);
+    CHECK(!designPrimers(s, {0, 10}, 60, &d, &err));
+}
+
 int main(int argc, char **argv)
 {
     testBasics();
@@ -873,6 +895,7 @@ int main(int argc, char **argv)
     testCloning();
     testGoldenGate();
     testGibson();
+    testPrimerDesign();
     if (argc > 1)
         testSamples(argv[1]);
     else

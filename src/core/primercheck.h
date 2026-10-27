@@ -5,6 +5,8 @@
 // conservative stand-in for a full free-energy model.
 #pragma once
 
+#include "sequence.h"
+
 #include <string>
 #include <vector>
 
@@ -32,5 +34,18 @@ struct PairCheck {
 };
 
 PairCheck checkPrimerPair(const std::string &a, const std::string &b);
+
+// Primers that amplify exactly `target`: the forward primer starts at its
+// first base and the reverse primer at its last. Lengths between 18 and 32
+// are tried and the pair closest to `targetTm` with matching Tms, a 3' G or C
+// and the fewest warnings wins. The target must not wrap the origin.
+struct PrimerDesign {
+    Primer forward, reverse;
+    PrimerCheck forwardCheck, reverseCheck;
+    PairCheck pair;
+};
+
+bool designPrimers(const Sequence &seq, Span target, double targetTm, PrimerDesign *out,
+                   std::string *error = nullptr);
 
 } // namespace oc

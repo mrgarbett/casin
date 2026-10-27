@@ -134,6 +134,7 @@ void Window::buildUi(GtkApplication *app)
         {"clone", &Window::actClone, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"golden-gate", &Window::actGoldenGate, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"gibson", &Window::actGibson, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"design-primers", &Window::actDesignPrimers, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-fasta", &Window::actExportFasta, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-map", &Window::actExportMap, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"copy", &Window::actCopy, nullptr, nullptr, nullptr, {0, 0, 0}},
@@ -197,6 +198,7 @@ void Window::buildUi(GtkApplication *app)
     g_menu_append(featureMenu, "Edit Feature…", "win.edit-feature");
     g_menu_append(featureMenu, "Delete Feature", "win.delete-feature");
     g_menu_append(featureMenu, "Add Primer…", "win.add-primer");
+    g_menu_append(featureMenu, "Design Primers for Selection…", "win.design-primers");
     g_menu_append_submenu(seqSection, "Features and Primers", G_MENU_MODEL(featureMenu));
     g_menu_append_section(menu, nullptr, G_MENU_MODEL(seqSection));
     GMenu *viewSection = g_menu_new();
@@ -794,6 +796,7 @@ void Window::updateActions()
     enable("cut", sel);
     enable("add-feature", sel);
     enable("add-primer", sel && !m_doc.selection().wraps(m_doc.sequence().length()));
+    enable("design-primers", sel && !m_doc.selection().wraps(m_doc.sequence().length()));
     enable("edit-feature", m_doc.activeFeature() >= 0);
     enable("delete-feature", m_doc.activeFeature() >= 0);
     enable("set-origin", has && m_doc.sequence().circular && m_doc.hasSelection());
@@ -958,6 +961,11 @@ void Window::actGoldenGate(GSimpleAction *, GVariant *, gpointer p)
 void Window::actGibson(GSimpleAction *, GVariant *, gpointer p)
 {
     static_cast<Window *>(p)->gibsonDialog();
+}
+
+void Window::actDesignPrimers(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->designPrimersDialog();
 }
 
 void Window::actExportFasta(GSimpleAction *, GVariant *, gpointer p)
