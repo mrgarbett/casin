@@ -137,6 +137,9 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         super.showWindow(sender)
         guard !didFirstShow, let window = window else { return }
         didFirstShow = true
+        // init ran before the document was attached, so the subtitle could
+        // not yet tell the sequence name from the file name.
+        updateTexts()
         window.layoutIfNeeded()
         split.setPosition(split.bounds.width * 0.45, ofDividerAt: 0)
         sequenceView.updateSize()
