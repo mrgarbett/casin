@@ -2,6 +2,7 @@
 // Headless tests for openclone_core. Usage: core_tests <samples-dir>
 #include "core/abif.h"
 #include "core/align.h"
+#include "core/orf.h"
 #include "core/cloning.h"
 #include "core/digest.h"
 #include "core/edit.h"
@@ -1019,6 +1020,35 @@ static void testAlign()
     CHECK(!alignRead(ref, "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG", &al, &err));
 }
 
+static void testOrfs()
+{
+    // A 12-codon ORF on the top strand, and one on the bottom strand across the origin.
+    const std::string orfTop = "ATG" + std::string("GCT") + "AAAGCTGCTGCTGCTGCTGCTGCTGCT" + "TAA";   // 11 codons + stop
+    Sequence s;
+    s.circular = true;
+    const std::string bottomOrf = reverseComplement("ATGCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCTAG");   // 12 codons + stop
+    s.bases = bottomOrf.substr(20) + "CCCCC" + orfTop + "CCCCCCCCCC" + bottomOrf.substr(0, 20);
+    const std::vector<Orf> orfs = findOrfs(s, 10);
+    CHECK(orfs.size() >= 2);   // the filler happens to hold a longer bottom-strand ORF too
+    bool top = false, bottom = false;
+    for (const Orf &o : orfs) {
+        const Feature f = orfFeature(s, o, "orf");
+        std::string t = translate(s.featureBases(f));
+        CHECK(!t.empty() && t.back() == '*');
+        if (!t.empty())
+            t.pop_back();
+        CHECK_EQ(t, o.protein);
+        top = top || (o.strand == Strand::Forward && o.protein == "MAKAAAAAAAA");
+        bottom = bottom || (o.strand == Strand::Reverse && f.ranges.size() == 2 && o.protein.size() == 12);
+    }
+    CHECK(top && bottom);
+    CHECK(findOrfs(s, 20).empty());
+    CHECK(findOrfs(s, 12).size() == orfs.size() - 1);   // the 11-codon one drops out
+    s.circular = false;
+    for (const Orf &o : findOrfs(s, 10))
+        CHECK(o.protein != "MPPPPPPPPPPP");   // the one across the origin is gone
+}
+
 int main(int argc, char **argv)
 {
     testBasics();
@@ -1039,6 +1069,7 @@ int main(int argc, char **argv)
     testPrimerDesign();
     testMutagenesis();
     testAlign();
+    testOrfs();
     if (argc > 1)
         testSamples(argv[1]);
     else

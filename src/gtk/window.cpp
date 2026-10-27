@@ -146,6 +146,7 @@ void Window::buildUi(GtkApplication *app)
         {"mutagenesis", &Window::actMutagenesis, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"history", &Window::actHistory, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"align", &Window::actAlign, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"orfs", &Window::actOrfs, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-fasta", &Window::actExportFasta, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-map", &Window::actExportMap, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"copy", &Window::actCopy, nullptr, nullptr, nullptr, {0, 0, 0}},
@@ -212,6 +213,7 @@ void Window::buildUi(GtkApplication *app)
     g_menu_append(featureMenu, "Add Feature…", "win.add-feature");
     g_menu_append(featureMenu, "Edit Feature…", "win.edit-feature");
     g_menu_append(featureMenu, "Delete Feature", "win.delete-feature");
+    g_menu_append(featureMenu, "Find ORFs…", "win.orfs");
     g_menu_append(featureMenu, "Add Primer…", "win.add-primer");
     g_menu_append(featureMenu, "Add Primer by Sequence…", "win.primer-by-sequence");
     g_menu_append(featureMenu, "Design Primers for Selection…", "win.design-primers");
@@ -894,7 +896,7 @@ void Window::updateActions()
     enable("undo", m_doc.canUndo());
     enable("redo", m_doc.canRedo());
     for (const char *name : {"save", "save-as", "export-fasta", "export-map", "paste", "select-all",
-                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "choose-enzymes", "primer-by-sequence", "history", "align"})
+                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "choose-enzymes", "primer-by-sequence", "history", "align", "orfs"})
         enable(name, has);
     enable("cut", sel);
     enable("add-feature", sel);
@@ -1095,6 +1097,11 @@ void Window::actHistory(GSimpleAction *, GVariant *, gpointer p)
 void Window::actAlign(GSimpleAction *, GVariant *, gpointer p)
 {
     static_cast<Window *>(p)->alignDialog();
+}
+
+void Window::actOrfs(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->orfDialog();
 }
 
 void Window::showOnlyEnzymes(const std::set<std::string> &names, int maxCuts)

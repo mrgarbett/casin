@@ -5,6 +5,7 @@
 #include "core/align.h"
 #include "core/cloning.h"
 #include "core/edit.h"
+#include "core/orf.h"
 #include "core/primercheck.h"
 #include "view/maplayout.h"   // formatBp
 #include "view/style.h"
@@ -1338,6 +1339,111 @@ void Window::alignDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<AlignForm *>(p); });
+    adw_dialog_present(f.dialog, m_window);
+}
+
+namespace {
+struct OrfForm {
+    Window *window;
+    Sequence seq;
+    std::vector<Orf> orfs;
+    std::vector<bool> chosen;
+    GtkWidget *minCodons, *list, *summary, *okButton;
+    AdwDialog *dialog;
+};
+
+void updateOrfs(OrfForm *st)
+{
+    st->orfs = findOrfs(st->seq, int(adw_spin_row_get_value(ADW_SPIN_ROW(st->minCodons))));
+    if (st->orfs.size() > 200)
+        st->orfs.resize(200);
+    st->chosen.assign(st->orfs.size(), true);
+    gtk_list_box_remove_all(GTK_LIST_BOX(st->list));
+    const int n = st->seq.length();
+    for (size_t i = 0; i < st->orfs.size(); ++i) {
+        const Orf &o = st->orfs[i];
+        GtkWidget *row = adw_action_row_new();
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row),
+                                      (std::to_string(o.protein.size()) + " aa, "
+                                       + (o.strand == Strand::Reverse ? "reverse" : "forward") + " strand")
+                                          .c_str());
+        int end = o.start + o.length;
+        if (end > n)
+            end -= n;
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(row), (view::withThousands(o.start + 1) + "–"
+                                                          + view::withThousands(end) + " · "
+                                                          + o.protein.substr(0, 24) + (o.protein.size() > 24 ? "…" : ""))
+                                                             .c_str());
+        GtkWidget *check = gtk_check_button_new();
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(check), TRUE);
+        gtk_widget_set_valign(check, GTK_ALIGN_CENTER);
+        g_object_set_data(G_OBJECT(check), "index", GINT_TO_POINTER(int(i)));
+        g_signal_connect(check, "toggled", G_CALLBACK((+[](GtkCheckButton *b, gpointer p) {
+                             auto *st = static_cast<OrfForm *>(p);
+                             st->chosen[size_t(GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "index")))] =
+                                 gtk_check_button_get_active(b);
+                         })),
+                         st);
+        adw_action_row_add_prefix(ADW_ACTION_ROW(row), check);
+        gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), TRUE);
+        g_object_set_data(G_OBJECT(row), "index", GINT_TO_POINTER(int(i)));
+        gtk_list_box_append(GTK_LIST_BOX(st->list), row);
+    }
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->summary),
+                                st->orfs.empty() ? "None this long"
+                                                 : (std::to_string(st->orfs.size()) + " found, longest first; "
+                                                    "click one to select it").c_str());
+    gtk_widget_set_sensitive(st->okButton, !st->orfs.empty());
+}
+} // namespace
+
+void Window::orfDialog()
+{
+    if (m_doc.isEmpty())
+        return;
+    auto *st = new OrfForm{};
+    st->window = this;
+    st->seq = m_doc.sequence();
+    Form f = makeForm("Find ORFs", "Add as Features");
+    adw_dialog_set_content_height(f.dialog, 560);
+    st->dialog = f.dialog;
+    st->okButton = f.ok;
+    GtkWidget *g = addGroup(f);
+    st->minCodons = spinRow(g, "Minimum length (codons)", 100, 3000);
+    adw_spin_row_set_range(ADW_SPIN_ROW(st->minCodons), 10, 3000);
+    adw_spin_row_set_value(ADW_SPIN_ROW(st->minCodons), 100);
+    st->summary = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->summary), "Open reading frames, ATG to stop");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(g), st->summary);
+    GtkWidget *gl = addGroup(f);
+    st->list = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(st->list), GTK_SELECTION_NONE);
+    gtk_widget_add_css_class(st->list, "boxed-list");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(gl), st->list);
+    g_signal_connect(st->list, "row-activated", G_CALLBACK((+[](GtkListBox *, GtkListBoxRow *row, gpointer p) {
+                         auto *st = static_cast<OrfForm *>(p);
+                         const Orf &o = st->orfs[size_t(GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "index")))];
+                         st->window->document().setSelection({o.start, o.length});
+                     })),
+                     st);
+    g_signal_connect(st->minCodons, "notify::value", G_CALLBACK((+[](GObject *, GParamSpec *, gpointer p) {
+                         updateOrfs(static_cast<OrfForm *>(p));
+                     })),
+                     st);
+    updateOrfs(st);
+    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<OrfForm *>(p);
+                         Document &doc = st->window->document();
+                         int k = 0;
+                         for (const Feature &existing : doc.sequence().features)
+                             k += existing.name.rfind("ORF", 0) == 0 ? 1 : 0;
+                         for (size_t i = 0; i < st->orfs.size(); ++i)
+                             if (st->chosen[i])
+                                 doc.addFeature(orfFeature(doc.sequence(), st->orfs[i], "ORF" + std::to_string(++k)));
+                         adw_dialog_close(st->dialog);
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<OrfForm *>(p); });
     adw_dialog_present(f.dialog, m_window);
 }
 

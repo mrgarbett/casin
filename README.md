@@ -151,6 +151,8 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   strand, up to two mismatches, 5′ tails allowed).
 - Design Primers for Selection: a primer pair that amplifies exactly the selection, sized
   for a target Tm and checked for dimers and hairpins; adds both primers in one undo step.
+- Find ORFs: open reading frames from ATG to stop on both strands (across the origin too),
+  longest first; add the ones you pick as CDS features with their translation.
 - The C API exposes all of this for the Mac app (editing, digest and gel, primer checks and design, enzyme choice, PCR, restriction cloning, Golden Gate, Gibson, mutagenesis, read alignment); the Mac windows for the milestone 3 tools come next.
 
 ## Next steps

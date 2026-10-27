@@ -28,7 +28,7 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 | | Double-strand sequence view with translations | done |
 | | Linked selection, find on both strands, GC and Tm | done |
 | E6 | Primers drawn on the sequence and the circular map | done |
-| E7 | ORF finder and six-frame translation | M4 |
+| E7 | ORF finder and six-frame translation | ORF finder done on Linux; six-frame display and Mac UI pending |
 | X1 | Map display options (feature types, labels, colors) | M4 |
 | X8 | Protein sequence files and properties | M5 |
 
