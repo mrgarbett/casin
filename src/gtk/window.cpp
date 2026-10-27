@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 namespace oc::gtk {
 
@@ -154,6 +155,7 @@ void Window::buildUi(GtkApplication *app)
         {"find", &Window::actFind, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"close", &Window::actClose, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"show-complement", nullptr, nullptr, "true", &Window::actComplement, {0, 0, 0}},
+        {"frames", nullptr, "s", "'0'", &Window::actFrames, {0, 0, 0}},
     };
     g_action_map_add_action_entries(G_ACTION_MAP(m_window), entries, G_N_ELEMENTS(entries), this);
     g_signal_connect(m_window, "close-request", G_CALLBACK(&Window::onCloseRequest), this);
@@ -225,6 +227,11 @@ void Window::buildUi(GtkApplication *app)
     g_menu_append_section(menu, nullptr, G_MENU_MODEL(seqSection));
     GMenu *viewSection = g_menu_new();
     g_menu_append(viewSection, "Show Complement Strand", "win.show-complement");
+    GMenu *framesMenu = g_menu_new();
+    g_menu_append(framesMenu, "None", "win.frames::0");
+    g_menu_append(framesMenu, "Forward Frames", "win.frames::3");
+    g_menu_append(framesMenu, "All Six Frames", "win.frames::6");
+    g_menu_append_submenu(viewSection, "Translate Frames", G_MENU_MODEL(framesMenu));
     g_menu_append_section(menu, nullptr, G_MENU_MODEL(viewSection));
     GMenu *appSection = g_menu_new();
     g_menu_append(appSection, "About OpenClone", "app.about");
@@ -797,6 +804,13 @@ void Window::actComplement(GSimpleAction *a, GVariant *state, gpointer p)
     auto *self = static_cast<Window *>(p);
     g_simple_action_set_state(a, state);
     self->m_seq->setShowComplement(g_variant_get_boolean(state));
+}
+
+void Window::actFrames(GSimpleAction *a, GVariant *state, gpointer p)
+{
+    auto *self = static_cast<Window *>(p);
+    g_simple_action_set_state(a, state);
+    self->m_seq->setFrames(std::atoi(g_variant_get_string(state, nullptr)));
 }
 
 void Window::actSave(GSimpleAction *, GVariant *, gpointer p)

@@ -88,6 +88,14 @@ void SequenceView::setShowComplement(bool show)
     }
 }
 
+void SequenceView::setFrames(int frames)
+{
+    if (frames != m_frames) {
+        m_frames = frames;
+        invalidate();
+    }
+}
+
 double SequenceView::scrollY() const
 {
     return gtk_adjustment_get_value(m_adj);
@@ -99,7 +107,7 @@ void SequenceView::ensureLayout()
         return;
     m_layout = std::make_unique<view::SequenceLayout>(m_doc->sequence(), m_doc->visibleSites(),
                                                       m_dark ? view::Theme::darkTheme() : view::Theme::light(),
-                                                      m_measure, m_w, m_complement);
+                                                      m_measure, m_w, m_complement, m_frames);
     updateAdjustment();
 }
 

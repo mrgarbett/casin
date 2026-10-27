@@ -21,11 +21,13 @@ struct SeqViewState {
 // Each line: enzyme label rows, top strand, optional complement, ruler,
 // then feature lanes (CDS lanes get an amino-acid row). Forward primers sit
 // just above the top strand, reverse primers just below the bottom one.
+// With `frames` = 3 or 6, the forward reading frames are translated above the
+// strands and (for 6) the reverse frames below them.
 // Holds references to `seq` and `sites`.
 class SequenceLayout {
 public:
     SequenceLayout(const oc::Sequence &seq, const std::vector<CutSite> &sites, const Theme &theme,
-                   TextMeasurer &measure, double width, bool showComplement);
+                   TextMeasurer &measure, double width, bool showComplement, int frames = 0);
 
     double totalHeight() const { return m_totalHeight; }
     int basesPerLine() const { return m_bpl; }
@@ -72,7 +74,7 @@ private:
         std::vector<PrimerPiece> primers;
         int primerRowsTop = 0, primerRowsBottom = 0;
         // y offsets within the line
-        double yPrimersTop = 0, yTop = 0, yBottom = 0, yPrimersBottom = 0, yRuler = 0, yLanes = 0;
+        double yFramesTop = 0, yFramesBottom = 0, yPrimersTop = 0, yTop = 0, yBottom = 0, yPrimersBottom = 0, yRuler = 0, yLanes = 0;
     };
 
     double colX(int col) const;        // left edge of the base at column col
@@ -86,6 +88,7 @@ private:
     const std::vector<CutSite> &m_sites;
     Theme m_theme;
     bool m_complement;
+    int m_frames = 0;
     int m_n = 0;
     int m_bpl = 10;
     double m_width = 0;

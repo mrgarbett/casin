@@ -14,8 +14,9 @@ const int kMaxEnzymeRows = 6;
 }
 
 SequenceLayout::SequenceLayout(const oc::Sequence &seq, const std::vector<CutSite> &sites, const Theme &theme,
-                               TextMeasurer &tm, double width, bool showComplement)
+                               TextMeasurer &tm, double width, bool showComplement, int frames)
     : m_seq(seq), m_sites(sites), m_theme(theme), m_complement(showComplement),
+      m_frames(frames >= 6 ? 6 : frames >= 3 ? 3 : 0),
       m_n(seq.length()), m_width(width)
 {
     m_charW = tm.width("ACGTACGTAC", m_baseFont) / 10.0;
@@ -199,6 +200,9 @@ SequenceLayout::SequenceLayout(const oc::Sequence &seq, const std::vector<CutSit
 
         line.y = y;
         double off = kLinePadTop + line.enzymeRows * m_labelH + (line.enzymeRows ? 3 : 0);
+        line.yFramesTop = off;
+        if (m_frames)
+            off += 3 * m_aaH + 2;
         line.yPrimersTop = off;
         off += line.primerRowsTop * m_primerH;
         line.yTop = off;
@@ -208,6 +212,9 @@ SequenceLayout::SequenceLayout(const oc::Sequence &seq, const std::vector<CutSit
             off += m_baseH;
         line.yPrimersBottom = off;
         off += line.primerRowsBottom * m_primerH;
+        line.yFramesBottom = off;
+        if (m_frames == 6)
+            off += 2 + 3 * m_aaH;
         line.yRuler = off;
         off += m_rulerH;
         line.yLanes = off + 2;
@@ -324,7 +331,7 @@ int SequenceLayout::siteAt(Point p) const
         return -1;
     const Line &l = m_lines[size_t(li)];
     for (const SiteLabel &s : l.labels) {
-        const double yRow = l.y + l.yPrimersTop - 3 - (s.row + 1) * m_labelH;
+        const double yRow = l.y + l.yFramesTop - 3 - (s.row + 1) * m_labelH;
         if (Rect{s.x, yRow, s.w, m_labelH}.contains(p))
             return s.sites.front();
     }
@@ -418,10 +425,39 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
                     VAlign::Top);
         }
 
+        // Reading-frame translations: +1..+3 count from base 1, -1..-3 from the last base.
+        for (int row = 0; row < m_frames; ++row) {
+            const bool fwd = row < 3;
+            const int k = row % 3;
+            const double fy = fwd ? y0 + l.yFramesTop + k * m_aaH : y0 + l.yFramesBottom + 2 + k * m_aaH;
+            const std::string tag = (fwd ? "+" : "\u2212") + std::to_string(k + 1);
+            s.label(tag, {m_left - 10, fy + (m_aaH - 1) / 2}, m_smallFont, m_theme.mutedText, HAlign::Right,
+                    VAlign::Middle);
+            // First codon whose middle base is on this line.
+            int p = l.start - 1;
+            const int phase = fwd ? k : ((m_n - k) % 3 + 3) % 3;
+            p += ((phase - p) % 3 + 3) % 3;
+            for (; p + 1 < l.start + l.len; p += 3) {
+                if (p < 0 || p + 3 > m_n)
+                    continue;
+                std::string codon = m_seq.bases.substr(size_t(p), 3);
+                if (!fwd)
+                    codon = reverseComplement(codon);
+                const char aa = translateCodon(codon.c_str());
+                const double cx = colX(p + 1 - l.start) + m_charW / 2;
+                if (aa == '*' || aa == 'M')
+                    s.rect({cx - m_charW * 1.5, fy, m_charW * 3, m_aaH - 1},
+                           (aa == '*' ? m_theme.cutMarker : m_theme.accent).withAlpha(0.16));
+                const Color ac = aa == '*' ? m_theme.cutMarker : aa == 'M' ? m_theme.accent : m_theme.mutedText;
+                s.label(std::string(1, aa), {cx, fy + (m_aaH - 1) / 2}, m_baseFont, ac, HAlign::Center,
+                        VAlign::Middle);
+            }
+        }
+
         // Enzyme labels with a short tick down to the strand.
         for (const SiteLabel &lab : l.labels) {
             const bool isActive = active && std::find(lab.sites.begin(), lab.sites.end(), st.activeSite) != lab.sites.end();
-            const double yRow = y0 + l.yPrimersTop - 3 - (lab.row + 1) * m_labelH;
+            const double yRow = y0 + l.yFramesTop - 3 - (lab.row + 1) * m_labelH;
             Font f = m_smallFont;
             f.bold = lab.unique;
             const Color c = isActive ? m_theme.cutMarker

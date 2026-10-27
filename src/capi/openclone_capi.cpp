@@ -652,11 +652,17 @@ char *oc_map_layout_tooltip(const OCMapLayout *layout, double x, double y) { ret
 OCSeqLayout *oc_seq_layout_new(const OCDocument *doc, double width, bool show_complement, bool dark,
                                OCMeasureText measure, void *context)
 {
+    return oc_seq_layout_new_frames(doc, width, show_complement, 0, dark, measure, context);
+}
+
+OCSeqLayout *oc_seq_layout_new_frames(const OCDocument *doc, double width, bool show_complement, int frames,
+                                      bool dark, OCMeasureText measure, void *context)
+{
     CallbackMeasurer tm(measure, context);
     auto *l = new OCSeqLayout;
     l->layout = std::make_unique<view::SequenceLayout>(doc->doc.sequence(), doc->doc.visibleSites(),
                                                        dark ? view::Theme::darkTheme() : view::Theme::light(), tm,
-                                                       width, show_complement);
+                                                       width, show_complement, frames);
     return l;
 }
 

@@ -145,6 +145,21 @@ int main(int argc, char **argv)
     CHECK(sl.positionAt({300, sl.lineTopFor(sl.basesPerLine()) + 5}) > sl.basesPerLine());
     Scene ss = sl.render(0, 600, {});
     CHECK(!ss.items.empty());
+    {
+        // Six-frame translation: +1 reads ATG AAA TAG; -1 starts at the last base.
+        Sequence orf;
+        orf.bases = "ATGAAATAGC";
+        const std::vector<CutSite> none;
+        SequenceLayout plain(orf, none, theme, tm, 900, true), six(orf, none, theme, tm, 900, true, 6);
+        CHECK(six.totalHeight() > plain.totalHeight() + 5 * 10);
+        std::string letters;
+        for (const Item &it : six.render(0, 600, {}).items)
+            if (auto *t = std::get_if<TextItem>(&it))
+                if (t->text.size() == 1 && t->font.mono)
+                    letters += t->text;
+        CHECK(letters.find("MK*") != std::string::npos);
+        CHECK(six.positionAt({0, six.lineTopFor(0) + six.lineHeightFor(0) / 2}) == 0);
+    }
     testUndo(seq);
     {
         GelLayout gel({{"Ladder", {10000, 1000, 100}, {1000}, true, false}, {"Cut", {3000, 500}, {}, false, false}},

@@ -178,6 +178,9 @@ char *oc_map_layout_tooltip(const OCMapLayout *layout, double x, double y);
 
 OCSeqLayout *oc_seq_layout_new(const OCDocument *doc, double width, bool show_complement, bool dark,
                                OCMeasureText measure, void *context);
+// Like oc_seq_layout_new, with 0, 3 (forward) or 6 reading frames translated.
+OCSeqLayout *oc_seq_layout_new_frames(const OCDocument *doc, double width, bool show_complement, int frames,
+                                      bool dark, OCMeasureText measure, void *context);
 void oc_seq_layout_free(OCSeqLayout *layout);
 double oc_seq_layout_total_height(const OCSeqLayout *layout);
 /* Lines visible in [scroll_y, scroll_y + view_height), shifted up by scroll_y. */
