@@ -85,6 +85,7 @@ private:
     static void actOrfs(GSimpleAction *, GVariant *, gpointer self);
     static void actMapOptions(GSimpleAction *, GVariant *, gpointer self);
     static void actPrint(GSimpleAction *, GVariant *, gpointer self);
+    static void actSearchFolder(GSimpleAction *, GVariant *, gpointer self);
     static gboolean onCloseRequest(GtkWindow *, gpointer self);
     static void actExportFasta(GSimpleAction *, GVariant *, gpointer self);
     static void actExportMap(GSimpleAction *, GVariant *, gpointer self);
@@ -121,6 +122,7 @@ private:
     void orfDialog();
     void mapOptionsDialog();
     void print();
+    void searchFolderDialog();
     void pasteText(const std::string &text);
 
     Document m_doc;

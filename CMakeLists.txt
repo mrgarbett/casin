@@ -38,6 +38,7 @@ add_library(openclone_core STATIC
     src/core/enzymes.cpp
     src/core/suppliers.cpp
     src/core/tm.cpp
+    src/core/search.cpp
     src/core/seqio.cpp)
 target_include_directories(openclone_core PUBLIC src)
 

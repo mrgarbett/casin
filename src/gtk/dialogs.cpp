@@ -7,11 +7,13 @@
 #include "core/edit.h"
 #include "core/orf.h"
 #include "core/primercheck.h"
+#include "core/search.h"
 #include "view/maplayout.h"   // formatBp
 #include "view/style.h"
 
 #include <algorithm>
 #include <climits>
+#include <filesystem>
 #include <cstdio>
 #include <map>
 
@@ -1257,6 +1259,100 @@ void Window::mapOptionsDialog()
             addSwitch(tg, kv.first + " (" + std::to_string(kv.second) + ")", kv.first, !opt.hiddenTypes.count(kv.first));
     }
     adw_dialog_present(f.dialog, m_window);
+}
+
+namespace {
+struct SearchForm {
+    Window *window;
+    std::string folder;
+    GtkWidget *folderRow, *query, *list, *summary;
+};
+
+void runSearch(SearchForm *st)
+{
+    gtk_list_box_remove_all(GTK_LIST_BOX(st->list));
+    const std::string q = text(st->query);
+    if (st->folder.empty() || trim(q).empty())
+        return;
+    const std::vector<FolderHit> hits = searchFolder(st->folder, q);
+    adw_preferences_group_set_description(
+        ADW_PREFERENCES_GROUP(st->summary),
+        hits.empty() ? "Nothing found" : (std::to_string(hits.size()) + (hits.size() == 1 ? " file" : " files")
+                                          + "; click one to open it").c_str());
+    for (const FolderHit &h : hits) {
+        GtkWidget *row = adw_action_row_new();
+        adw_preferences_row_set_use_markup(ADW_PREFERENCES_ROW(row), FALSE);
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), h.name.c_str());
+        const std::string sub = view::formatBp(h.length) + (h.circular ? " circular" : " linear") + " · "
+                              + std::filesystem::path(h.path).filename().string() + "\n" + h.match;
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(row), sub.c_str());
+        gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), TRUE);
+        g_object_set_data_full(G_OBJECT(row), "path", g_strdup(h.path.c_str()), g_free);
+        gtk_list_box_append(GTK_LIST_BOX(st->list), row);
+    }
+}
+} // namespace
+
+void Window::searchFolderDialog()
+{
+    auto *st = new SearchForm{};
+    st->window = this;
+    if (!m_doc.path().empty())
+        st->folder = std::filesystem::path(m_doc.path()).parent_path().string();
+    Form f = makeForm("Search a Folder", "Search");
+    adw_dialog_set_content_height(f.dialog, 560);
+    GtkWidget *g = addGroup(f, "Find sequence files");
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(g),
+                                          "Searches names, descriptions, features and primers, or a DNA sequence "
+                                          "on both strands (4 bases or more)");
+    st->folderRow = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->folderRow), "Folder");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->folderRow), st->folder.empty() ? "None chosen" : st->folder.c_str());
+    GtkWidget *choose = gtk_button_new_with_label("Choose…");
+    gtk_widget_set_valign(choose, GTK_ALIGN_CENTER);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(st->folderRow), choose);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(g), st->folderRow);
+    st->query = entryRow(g, "Text or DNA", "");
+    st->summary = addGroup(f, "Results");
+    st->list = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(st->list), GTK_SELECTION_NONE);
+    gtk_widget_add_css_class(st->list, "boxed-list");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(st->summary), st->list);
+    g_signal_connect(choose, "clicked", G_CALLBACK((+[](GtkButton *b, gpointer p) {
+                         GtkFileDialog *fd = gtk_file_dialog_new();
+                         gtk_file_dialog_set_title(fd, "Folder to Search");
+                         GtkWindow *parent = GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(b)));
+                         gtk_file_dialog_select_folder(
+                             fd, parent, nullptr,
+                             +[](GObject *src, GAsyncResult *res, gpointer p) {
+                                 GFile *file = gtk_file_dialog_select_folder_finish(GTK_FILE_DIALOG(src), res, nullptr);
+                                 if (!file)
+                                     return;
+                                 auto *st = static_cast<SearchForm *>(p);
+                                 char *path = g_file_get_path(file);
+                                 if (path) {
+                                     st->folder = path;
+                                     adw_action_row_set_subtitle(ADW_ACTION_ROW(st->folderRow), path);
+                                     g_free(path);
+                                     runSearch(st);
+                                 }
+                                 g_object_unref(file);
+                             },
+                             p);
+                         g_object_unref(fd);
+                     })),
+                     st);
+    g_signal_connect_swapped(f.ok, "clicked", G_CALLBACK(+[](gpointer p) { runSearch(static_cast<SearchForm *>(p)); }),
+                             st);
+    g_signal_connect(st->list, "row-activated", G_CALLBACK((+[](GtkListBox *, GtkListBoxRow *row, gpointer p) {
+                         auto *st = static_cast<SearchForm *>(p);
+                         const char *path = static_cast<const char *>(g_object_get_data(G_OBJECT(row), "path"));
+                         openFiles(gtk_window_get_application(st->window->gtkWindow()), {path});
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<SearchForm *>(p); });
+    adw_dialog_present(f.dialog, m_window);
+    adw_dialog_set_focus(f.dialog, st->query);
 }
 
 namespace {

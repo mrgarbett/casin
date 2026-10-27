@@ -3,6 +3,7 @@
 #include "core/abif.h"
 #include "core/align.h"
 #include "core/embl.h"
+#include "core/search.h"
 #include "core/orf.h"
 #include "core/cloning.h"
 #include "core/digest.h"
@@ -505,6 +506,15 @@ static void testEmbl(const std::string &dir)
         CHECK(back.features[i].ranges.size() == gb.features[i].ranges.size());
     }
     CHECK(detectFormat("x.embl", out) == FileFormat::Embl && detectFormat("x.txt", out) == FileFormat::Embl);
+
+    // Searching the samples folder by DNA and by name.
+    const std::vector<FolderHit> byDna = searchFolder(dir, gb.bases.substr(500, 20));
+    bool found = false;
+    for (const FolderHit &h : byDna)
+        found = found || (h.name == "pOC-demo" && h.match.find("sequence at 501") != std::string::npos);
+    CHECK(found);
+    CHECK(!searchFolder(dir, "demoA").empty());
+    CHECK(searchFolder(dir, "no-such-thing-anywhere").empty());
 
     // Several records in one file.
     const std::string two = writeGenBank(gb) + writeGenBank(back);

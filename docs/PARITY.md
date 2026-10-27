@@ -88,4 +88,4 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 | V3 | Traces aligned to the reference | reads drawn under the sequence with differences marked, on Linux; chromatograms under the reference and Mac UI pending |
 | V4 | Detect common features | M5 |
 | X7 | Multiple sequence alignment | M5 |
-| X10 | Search a folder of sequence files | M5 |
+| X10 | Search a folder of sequence files | done on Linux (by name, description, feature, primer or DNA on both strands); Mac UI pending |

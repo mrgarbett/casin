@@ -156,6 +156,7 @@ void Window::buildUi(GtkApplication *app)
         {"export-fasta", &Window::actExportFasta, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-map", &Window::actExportMap, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"print", &Window::actPrint, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"search-folder", &Window::actSearchFolder, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"copy", &Window::actCopy, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"copy-rc", &Window::actCopyRc, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"find", &Window::actFind, nullptr, nullptr, nullptr, {0, 0, 0}},
@@ -192,6 +193,7 @@ void Window::buildUi(GtkApplication *app)
     GMenu *fileSection = g_menu_new();
     g_menu_append(fileSection, "New Sequence…", "app.new");
     g_menu_append(fileSection, "Open…", "app.open");
+    g_menu_append(fileSection, "Search a Folder…", "win.search-folder");
     g_menu_append(fileSection, "Save", "win.save");
     g_menu_append(fileSection, "Save As…", "win.save-as");
     g_menu_append(fileSection, "Export FASTA…", "win.export-fasta");
@@ -1349,6 +1351,11 @@ void Window::saveDialog(const std::string &title, const std::string &suggested, 
                          },
                          req);
     g_object_unref(dialog);
+}
+
+void Window::actSearchFolder(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->searchFolderDialog();
 }
 
 void Window::actPrint(GSimpleAction *, GVariant *, gpointer p)

@@ -159,6 +159,8 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   undo step.
 - Find ORFs: open reading frames from ATG to stop on both strands (across the origin too),
   longest first; add the ones you pick as CDS features with their translation.
+- Search a Folder: find sequence files by name, description, feature or primer name, or by
+  a DNA sequence on either strand; click a result to open it.
 - Print… (Ctrl+P): the map on the first page, then the sequence in whole lines; the same
   pages come out of `openclone --print-pdf out.pdf <file>` without a display.
 - Enzyme sets: the Enzymes panel picks a set (Type IIS, enzymes sold by a supplier, or one you
