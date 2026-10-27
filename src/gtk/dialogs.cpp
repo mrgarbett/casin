@@ -1316,7 +1316,7 @@ void updateAlign(AlignForm *st)
 }
 } // namespace
 
-void Window::alignDialog()
+void Window::alignDialog(bool compare)
 {
     if (m_doc.isEmpty())
         return;
@@ -1327,17 +1327,18 @@ void Window::alignDialog()
     GtkApplication *app = gtk_window_get_application(gtkWindow());
     for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
         Window *w = Window::fromWidget(GTK_WIDGET(l->data));
-        if (w && w != this && !w->isEmpty() && !w->document().sequence().circular) {
+        if (w && w != this && !w->isEmpty() && (compare || !w->document().sequence().circular)) {
             st->reads.push_back(w->document().sequence());
             names.push_back(st->reads.back().name);
         }
     }
     if (st->reads.empty()) {
-        toast("Open a read (.ab1, FASTA or other linear sequence) in another window first");
+        toast(compare ? "Open the other sequence in another window first"
+                      : "Open a read (.ab1, FASTA or other linear sequence) in another window first");
         delete st;
         return;
     }
-    Form f = makeForm("Align Read", "Show Under Sequence");
+    Form f = makeForm(compare ? "Compare" : "Align Read", "Show Under Sequence");
     adw_dialog_set_content_height(f.dialog, 560);
     st->dialog = f.dialog;
     st->okButton = f.ok;
@@ -1346,7 +1347,7 @@ void Window::alignDialog()
     for (const std::string &s : names)
         v.push_back(s.c_str());
     v.push_back(nullptr);
-    st->read = comboRow(g, "Read", v.data(), 0);
+    st->read = comboRow(g, compare ? "Compare with" : "Read", v.data(), 0);
     st->summary = adw_action_row_new();
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->summary), "Alignment");
     st->featureButton = gtk_button_new_with_label("Add as Feature");

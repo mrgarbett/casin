@@ -148,7 +148,9 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
 - Align Read: align a read from another window (a trace, FASTA or any linear sequence) to
   this sequence on either strand, across the origin, and list the differences; click one to
   select it, add the read as a feature, or show it under the sequence (several reads at once,
-  differences in red; View → Hide Aligned Reads clears them).
+  differences in red; Align and Compare → Hide Aligned Reads clears them).
+- Compare with Another Sequence: the same alignment against any open construct (a parent
+  plasmid, say), with its differences listed and drawn under this sequence.
 - Add Primer by Sequence: paste a primer and it is placed where its 3′ part binds (either
   strand, up to two mismatches, 5′ tails allowed).
 - Design Primers for Selection: a primer pair that amplifies exactly the selection, or one

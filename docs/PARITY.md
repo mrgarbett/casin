@@ -42,7 +42,7 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 | E4 | Reverse complement, set origin, topology, new from pasted text | done on Linux; Mac UI pending |
 | E6 | Add and delete primers | done on Linux; Mac UI pending |
 | X3 | Copy and paste keeps features and primers | done on Linux |
-| X9 | Highlight changes against a parent sequence | M5 |
+| X9 | Highlight changes against a parent sequence | done on Linux (Compare with Another Sequence: differences listed and drawn under the sequence); Mac UI pending |
 
 ## Enzymes
 

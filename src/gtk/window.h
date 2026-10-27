@@ -81,6 +81,7 @@ private:
     static void actMutagenesis(GSimpleAction *, GVariant *, gpointer self);
     static void actHistory(GSimpleAction *, GVariant *, gpointer self);
     static void actAlign(GSimpleAction *, GVariant *, gpointer self);
+    static void actCompare(GSimpleAction *, GVariant *, gpointer self);
     static void actOrfs(GSimpleAction *, GVariant *, gpointer self);
     static void actMapOptions(GSimpleAction *, GVariant *, gpointer self);
     static void actPrint(GSimpleAction *, GVariant *, gpointer self);
@@ -115,7 +116,8 @@ private:
     void primerBySequenceDialog();
     void mutagenesisDialog();
     void historyDialog();
-    void alignDialog();
+    // compare = pick any open sequence (a parent construct), not just linear reads.
+    void alignDialog(bool compare = false);
     void orfDialog();
     void mapOptionsDialog();
     void print();

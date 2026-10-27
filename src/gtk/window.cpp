@@ -150,6 +150,7 @@ void Window::buildUi(GtkApplication *app)
         {"mutagenesis", &Window::actMutagenesis, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"history", &Window::actHistory, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"align", &Window::actAlign, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"compare", &Window::actCompare, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"orfs", &Window::actOrfs, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"map-options", &Window::actMapOptions, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-fasta", &Window::actExportFasta, nullptr, nullptr, nullptr, {0, 0, 0}},
@@ -230,19 +231,22 @@ void Window::buildUi(GtkApplication *app)
     g_menu_append(cloneMenu, "Mutagenesis…", "win.mutagenesis");
     g_menu_append(cloneMenu, "Cloning History…", "win.history");
     g_menu_append_submenu(seqSection, "Cloning", G_MENU_MODEL(cloneMenu));
-    g_menu_append(seqSection, "Align Read…", "win.align");
+    GMenu *verifyMenu = g_menu_new();
+    g_menu_append(verifyMenu, "Align Read…", "win.align");
+    g_menu_append(verifyMenu, "Compare with Another Sequence…", "win.compare");
+    g_menu_append(verifyMenu, "Hide Aligned Reads", "win.clear-reads");
+    g_menu_append_submenu(seqSection, "Align and Compare", G_MENU_MODEL(verifyMenu));
     g_menu_append_section(menu, nullptr, G_MENU_MODEL(seqSection));
-    GMenu *viewSection = g_menu_new();
-    g_menu_append(viewSection, "Map Display…", "win.map-options");
-    g_menu_append(viewSection, "Show Complement Strand", "win.show-complement");
+    GMenu *viewMenu = g_menu_new();
+    g_menu_append(viewMenu, "Map Display…", "win.map-options");
+    g_menu_append(viewMenu, "Show Complement Strand", "win.show-complement");
     GMenu *framesMenu = g_menu_new();
     g_menu_append(framesMenu, "None", "win.frames::0");
     g_menu_append(framesMenu, "Forward Frames", "win.frames::3");
     g_menu_append(framesMenu, "All Six Frames", "win.frames::6");
-    g_menu_append_submenu(viewSection, "Translate Frames", G_MENU_MODEL(framesMenu));
-    g_menu_append(viewSection, "Hide Aligned Reads", "win.clear-reads");
-    g_menu_append_section(menu, nullptr, G_MENU_MODEL(viewSection));
+    g_menu_append_submenu(viewMenu, "Translate Frames", G_MENU_MODEL(framesMenu));
     GMenu *appSection = g_menu_new();
+    g_menu_append_submenu(appSection, "View", G_MENU_MODEL(viewMenu));
     g_menu_append(appSection, "About OpenClone", "app.about");
     g_menu_append_section(menu, nullptr, G_MENU_MODEL(appSection));
     GtkWidget *menuButton = gtk_menu_button_new();
@@ -250,7 +254,8 @@ void Window::buildUi(GtkApplication *app)
     gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menuButton), G_MENU_MODEL(menu));
     gtk_menu_button_set_primary(GTK_MENU_BUTTON(menuButton), TRUE);
     gtk_widget_set_tooltip_text(menuButton, "Main menu");
-    for (GMenu *m : {fileSection, editSection, seqSection, featureMenu, viewSection, appSection, menu})
+    for (GMenu *m : {fileSection, editSection, seqSection, featureMenu, primerMenu, cloneMenu, verifyMenu, viewMenu,
+                     framesMenu, appSection, menu})
         g_object_unref(m);
     adw_header_bar_pack_end(ADW_HEADER_BAR(header), menuButton);
 
@@ -1061,7 +1066,7 @@ void Window::updateActions()
     enable("undo", m_doc.canUndo());
     enable("redo", m_doc.canRedo());
     for (const char *name : {"save", "save-as", "export-fasta", "export-map", "print", "paste", "select-all",
-                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "choose-enzymes", "primer-by-sequence", "history", "align", "orfs", "map-options"})
+                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "choose-enzymes", "primer-by-sequence", "history", "align", "compare", "orfs", "map-options"})
         enable(name, has);
     enable("cut", sel);
     enable("add-feature", sel);
@@ -1263,6 +1268,11 @@ void Window::actHistory(GSimpleAction *, GVariant *, gpointer p)
 void Window::actAlign(GSimpleAction *, GVariant *, gpointer p)
 {
     static_cast<Window *>(p)->alignDialog();
+}
+
+void Window::actCompare(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->alignDialog(true);
 }
 
 void Window::actOrfs(GSimpleAction *, GVariant *, gpointer p)
