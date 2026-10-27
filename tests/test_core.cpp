@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Headless tests for openclone_core. Usage: core_tests <samples-dir>
+#include "core/cloning.h"
 #include "core/digest.h"
 #include "core/edit.h"
 #include "core/primercheck.h"
@@ -709,6 +710,64 @@ static void testDigest()
     CHECK(!commonLadders().empty() && commonLadders()[0].bands.front() > commonLadders()[0].bands.back());
 }
 
+static void testCloning()
+{
+    // Vector: EcoRI at 10, BamHI at 40, circular 70 bp. Insert: EcoRI ... BamHI.
+    Sequence v;
+    v.name = "vec";
+    v.circular = true;
+    v.bases = std::string(10, 'A') + "GAATTC" + std::string(24, 'A') + "GGATCC" + std::string(30, 'A');
+    v.features = {feat("ori", {{50, 60}})};
+    Sequence ins;
+    ins.name = "ins";
+    ins.bases = "TTGAATTC" + std::string(20, 'C') + "GGATCCTT";   // 36 bp
+    ins.features = {feat("gene", {{10, 26}})};
+    std::vector<Enzyme> use{*findEnzyme("EcoRI"), *findEnzyme("BamHI")};
+    auto sitesOf = [&](const Sequence &s) {
+        std::vector<CutSite> all = findSites(s, use);
+        CutSite eco, bam;
+        for (const CutSite &c : all)
+            (c.enzyme->name == "EcoRI" ? eco : bam) = c;
+        return std::make_pair(eco, bam);
+    };
+    auto [vEco, vBam] = sitesOf(v);
+    auto [iEco, iBam] = sitesOf(ins);
+    ClonePiece backbone, insert;
+    std::string err;
+    CHECK(cutPiece(v, vBam, vEco, &backbone, &err));   // across the origin
+    CHECK(cutPiece(ins, iEco, iBam, &insert, &err));
+    CHECK_EQ(backbone.left.bases, std::string("GATC"));
+    CHECK_EQ(backbone.right.bases, std::string("AATT"));
+    CHECK_EQ(insert.left.overhang, 4);
+    Sequence product;
+    CHECK(ligateCircular({backbone, insert}, &product, &err));
+    CHECK(product.circular);
+    CHECK_EQ(product.length(), 76 - 41 + 11 + 29 - 3);   // backbone + insert between the top-strand cuts
+    CHECK((product.bases + product.bases).find("GAATTC" + std::string(20, 'C') + "GGATCC") != std::string::npos);
+    bool hasGene = false, hasOri = false;
+    for (const Feature &f : product.features) {
+        hasGene = hasGene || f.name == "gene";
+        hasOri = hasOri || f.name == "ori";
+    }
+    CHECK(hasGene && hasOri);
+    CHECK(!ligateCircular({backbone, flipPiece(insert)}, &product, &err));
+    CHECK(!err.empty());
+    // A blunt piece closes on itself; a sticky piece with mismatched ends doesn't.
+    Sequence b;
+    b.bases = "AAAAGATATCAAAAAAAAGATATCAAAA";
+    const std::vector<Enzyme> ecoRV{*findEnzyme("EcoRV")};   // sites point into this vector
+    std::vector<CutSite> ev = findSites(b, ecoRV);
+    CHECK_EQ(ev.size(), size_t(2));
+    if (ev.size() == 2) {
+        ClonePiece p;
+        CHECK(cutPiece(b, ev[0], ev[1], &p));
+        CHECK_EQ(p.length(), 14);
+        CHECK(ligateCircular({p}, &product));
+        CHECK(ligateCircular({flipPiece(p)}, &product));
+    }
+    CHECK(!ligateCircular({insert}, &product));
+}
+
 int main(int argc, char **argv)
 {
     testBasics();
@@ -723,6 +782,7 @@ int main(int argc, char **argv)
     testDigest();
     testPrimerChecks();
     testPcr();
+    testCloning();
     if (argc > 1)
         testSamples(argv[1]);
     else

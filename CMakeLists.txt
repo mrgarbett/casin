@@ -25,6 +25,7 @@ add_library(openclone_core STATIC
     src/core/edit.cpp
     src/core/digest.cpp
     src/core/primercheck.cpp
+    src/core/cloning.cpp
     src/core/genbank.cpp
     src/core/fasta.cpp
     src/core/xml.cpp
