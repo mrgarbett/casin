@@ -25,8 +25,8 @@ enum ToolMenus {
     private typealias W = DocumentWindowController
 
     /// Adds the tools to the main menu: editing and saving to File and Edit,
-    /// display options to View, and Sequence, Features, Primers, Cloning and
-    /// Align menus before View.
+    /// display options to View, and Sequence, Cloning and Align menus before
+    /// View.
     static func install(in main: NSMenu) {
         if let file = main.item(withTitle: "File")?.submenu {
             // Real saving replaces the old "Save As GenBank" export.
@@ -56,6 +56,8 @@ enum ToolMenus {
                        .separator()]
             for (i, it) in top.enumerated() { edit.insertItem(it, at: i) }
         }
+        // Lean on purpose: three tool menus, with features and primers as
+        // submenus of Sequence, the same grouping as the Linux app's menu.
         let tools = [
             menu("Sequence", [
                 item("Reverse Complement", #selector(W.reverseComplementSequence(_:))),
@@ -63,26 +65,26 @@ enum ToolMenus {
                 item("Circular", #selector(W.toggleCircular(_:))),
                 item("Rename…", #selector(W.renameSequence(_:))),
                 .separator(),
-                item("Choose Enzymes…", #selector(W.chooseEnzymes(_:))),
-                item("Enzyme Set…", #selector(W.enzymeSet(_:))),
-                item("Digest and Gel…", #selector(W.digestAndGel(_:)), "g", [.command, .shift]),
-            ]),
-            menu("Features", [
-                item("Add Feature…", #selector(W.addFeature(_:))),
-                item("Delete Feature", #selector(W.deleteFeature(_:))),
-                .separator(),
-                item("Find ORFs…", #selector(W.findOrfs(_:))),
-                item("Protein Properties…", #selector(W.proteinProperties(_:))),
-            ]),
-            menu("Primers", [
-                item("Add Primer from Selection…", #selector(W.addPrimerFromSelection(_:))),
-                item("Add Primer by Sequence…", #selector(W.addPrimerBySequence(_:))),
-                item("Delete Primer…", #selector(W.deletePrimer(_:))),
-                .separator(),
-                item("Design Primers…", #selector(W.designPrimers(_:))),
-                item("Check a Primer…", #selector(W.checkPrimer(_:))),
+                menu("Features", [
+                    item("Add Feature…", #selector(W.addFeature(_:)), "k"),
+                    item("Delete Feature", #selector(W.deleteFeature(_:))),
+                    .separator(),
+                    item("Find ORFs…", #selector(W.findOrfs(_:))),
+                    item("Protein Properties…", #selector(W.proteinProperties(_:))),
+                ]),
+                menu("Primers", [
+                    item("Add Primer…", #selector(W.addPrimer(_:))),
+                    item("Delete Primer…", #selector(W.deletePrimer(_:))),
+                    .separator(),
+                    item("Design Primers…", #selector(W.designPrimers(_:))),
+                    item("Check a Primer…", #selector(W.checkPrimer(_:))),
+                ]),
             ]),
             menu("Cloning", [
+                item("Digest and Gel…", #selector(W.digestAndGel(_:)), "g", [.command, .shift]),
+                item("Choose Enzymes…", #selector(W.chooseEnzymes(_:))),
+                item("Enzyme Set…", #selector(W.enzymeSet(_:))),
+                .separator(),
                 item("PCR Product…", #selector(W.pcrProduct(_:))),
                 item("Restriction Cloning…", #selector(W.restrictionCloning(_:))),
                 item("Golden Gate Assembly…", #selector(W.goldenGate(_:))),
@@ -427,8 +429,11 @@ extension DocumentWindowController {
 
     // MARK: Primers
 
-    @objc func addPrimerFromSelection(_ sender: Any?) {
-        guard let d = doc, hasRange else { tell("Add Primer", "Select the bases the primer binds first."); return }
+    /// One entry for both ways in: from the selection when there is one,
+    /// otherwise by pasting the primer's sequence.
+    @objc func addPrimer(_ sender: Any?) {
+        guard let d = doc else { return }
+        guard hasRange else { addPrimerBySequence(); return }
         let form = Form("Add Primer", "Binds \(d.selectionStart + 1)–\(d.selectionStart + d.selectionLength).")
         let name = form.text("Name", "primer")
         let strand = form.popup("Reads", ["Top strand (forward)", "Bottom strand (reverse)"])
@@ -439,15 +444,15 @@ extension DocumentWindowController {
         }
     }
 
-    @objc func addPrimerBySequence(_ sender: Any?) {
+    private func addPrimerBySequence() {
         guard let d = doc, !d.isEmpty else { return }
-        let form = Form("Add Primer by Sequence", "Placed where its 3′ end binds best; a 5′ tail is fine.")
+        let form = Form("Add Primer", "Paste the primer. It is placed where its 3′ end binds best; a 5′ tail is fine. To add one from bases instead, select them first.")
         let name = form.text("Name", "primer")
         let bases = form.text("Sequence", "", placeholder: "5′ → 3′", width: 320)
         form.run(in: window, ok: "Add") { [weak self] in
             var err: UnsafeMutablePointer<CChar>?
             if oc_document_add_primer_sequence(d.handle, name.stringValue, bases.stringValue, &err) < 0 {
-                showError("Add Primer by Sequence", err, in: self?.window)
+                showError("Add Primer", err, in: self?.window)
             }
         }
     }

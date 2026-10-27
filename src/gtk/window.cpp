@@ -228,7 +228,6 @@ void Window::buildUi(GtkApplication *app)
     g_menu_append_submenu(seqSection, "Features", G_MENU_MODEL(featureMenu));
     GMenu *primerMenu = g_menu_new();
     g_menu_append(primerMenu, "Add Primer…", "win.add-primer");
-    g_menu_append(primerMenu, "Add Primer by Sequence…", "win.primer-by-sequence");
     g_menu_append(primerMenu, "Design Primers for Selection…", "win.design-primers");
     g_menu_append_submenu(seqSection, "Primers", G_MENU_MODEL(primerMenu));
     GMenu *cloneMenu = g_menu_new();
@@ -1090,7 +1089,7 @@ void Window::updateActions()
         enable(name, has);
     enable("cut", sel);
     enable("add-feature", sel);
-    enable("add-primer", sel && !m_doc.selection().wraps(m_doc.sequence().length()));
+    enable("add-primer", has);
     enable("mutagenesis", has && m_doc.hasSelection() && !m_doc.selection().wraps(m_doc.sequence().length()));
     enable("design-primers", sel && !m_doc.selection().wraps(m_doc.sequence().length()));
     enable("edit-feature", m_doc.activeFeature() >= 0);
@@ -1230,9 +1229,16 @@ void Window::actDeleteFeature(GSimpleAction *, GVariant *, gpointer p)
     self->toast("Deleted " + name);
 }
 
+// One entry for both ways in: from the selection when there is one,
+// otherwise by pasting the primer's sequence.
 void Window::actAddPrimer(GSimpleAction *, GVariant *, gpointer p)
 {
-    static_cast<Window *>(p)->primerDialog();
+    auto *w = static_cast<Window *>(p);
+    const bool sel = w->m_doc.hasSelection() && w->m_doc.selection().length > 0;
+    if (sel && !w->m_doc.selection().wraps(w->m_doc.sequence().length()))
+        w->primerDialog();
+    else
+        w->primerBySequenceDialog();
 }
 
 void Window::actDigest(GSimpleAction *, GVariant *, gpointer p)

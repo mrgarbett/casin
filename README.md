@@ -163,7 +163,7 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   differences in red; Align and Compare → Hide Aligned Reads clears them).
 - Compare with Another Sequence: the same alignment against any open construct (a parent
   plasmid, say), with its differences listed and drawn under this sequence.
-- Add Primer by Sequence: paste a primer and it is placed where its 3′ part binds (either
+- Add Primer: from the selection, or with nothing selected, paste a primer and it is placed where its 3′ part binds (either
   strand, up to two mismatches, 5′ tails allowed).
 - Design Primers for Selection: a primer pair that amplifies exactly the selection, or one
   that flanks it within a search window (the default for selections under 18 bp, such as a
