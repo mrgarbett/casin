@@ -1,0 +1,91 @@
+# Feature parity checklist
+
+The goal is to cover what people use a commercial plasmid editor for, built
+clean-room. This list names capabilities in our own words, from public product
+descriptions; it copies no text, artwork, colors, feature databases or sample
+files from any commercial product.
+
+IDs match the roadmap. Status: **done**, **partial**, or the milestone that
+plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
+
+## Files and formats
+
+| ID | Capability | Status |
+| --- | --- | --- |
+| | Open GenBank, FASTA and `.dna` | done |
+| E5 | Save `.dna` (features, primers, description) | done on Linux; Mac UI pending |
+| | Save GenBank, export FASTA | done |
+| | Export the map as PNG, SVG, PDF | done |
+| I4 | EMBL and multi-record GenBank | M5 |
+| I3 | Fetch a sequence from NCBI by accession | M5 |
+| I1 | Print the map and sequence | planned |
+
+## Viewing
+
+| ID | Capability | Status |
+| --- | --- | --- |
+| | Circular and linear maps with features and enzyme sites | done |
+| | Double-strand sequence view with translations | done |
+| | Linked selection, find on both strands, GC and Tm | done |
+| E6 | Primers drawn on the sequence | done on Linux (map pending) |
+| E7 | ORF finder and six-frame translation | M4 |
+| X1 | Map display options (feature types, labels, colors) | M4 |
+| X8 | Protein sequence files and properties | M5 |
+
+## Editing
+
+| ID | Capability | Status |
+| --- | --- | --- |
+| E1 | Undo and redo, unsaved-changes prompt | done on Linux; Mac UI pending |
+| E2 | Type, paste, delete bases; features follow the edits | done on Linux; Mac UI pending |
+| E3 | Add, edit and delete features | done on Linux; Mac UI pending |
+| E4 | Reverse complement, set origin, topology, new from pasted text | done on Linux; Mac UI pending |
+| E6 | Add and delete primers | done on Linux; Mac UI pending |
+| X3 | Copy features between sequences | M2 |
+| X9 | Highlight changes against a parent sequence | M5 |
+
+## Enzymes
+
+| ID | Capability | Status |
+| --- | --- | --- |
+| | Common Type II and Type IIS enzymes from REBASE, cutter filters | done |
+| Z1 | Cuts on both strands, offset cuts, two-cut enzymes | partial (two-cut enzymes missing) |
+| Z2 | Dam/Dcm methylation sensitivity | planned |
+| Z3 | Saved enzyme sets, supplier filter | planned |
+| X2 | Choose enzymes by criteria (cuts once in a region, spares the insert) | M3 |
+
+## Cloning simulation
+
+| ID | Capability | Status |
+| --- | --- | --- |
+| C1 | Restriction digest and virtual agarose gel | M3 |
+| C2 | Restriction-ligation cloning | M3 |
+| C3 | PCR product from two primers | M3 |
+| C4 | Gibson, HiFi and In-Fusion assembly | M3 |
+| C5 | Golden Gate assembly | M3 |
+| C6 | Cloning history saved with each construct | M4 |
+| C7 | Gateway BP and LR | M5 |
+| C8 | Site-directed mutagenesis | M4 |
+| X4 | TA, TOPO and GC cloning | M5 |
+| X5 | Overlap-extension PCR, insertion by PCR | M5 |
+| X6 | Site-specific and homologous recombination | M5 |
+
+## Primers
+
+| ID | Capability | Status |
+| --- | --- | --- |
+| | Tm of a selection (SantaLucia 1998) | done |
+| P1 | Hairpins, dimers, 3' stability | M3 |
+| P2 | Automatic primer pair design | M3 |
+| P3 | Find where a primer binds, with mismatches | planned |
+
+## Verification
+
+| ID | Capability | Status |
+| --- | --- | --- |
+| V1 | Sanger `.ab1` traces | M4 |
+| V2 | Align a sequence to the reference | M4 |
+| V3 | Traces aligned to the reference | M4 |
+| V4 | Detect common features | M5 |
+| X7 | Multiple sequence alignment | M5 |
+| X10 | Search a folder of sequence files | M5 |

@@ -109,16 +109,25 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
 - Find on both strands (IUPAC codes allowed). Copy and Copy Reverse Complement.
 - Save As GenBank, Export FASTA, Export Map (PNG/SVG/PDF on Linux, PNG/PDF on macOS).
 
+## Editing (milestone 2, Linux app; the Mac app gets it next)
+
+- Type bases, paste, cut, Backspace and Delete in the sequence view. Features grow,
+  shift or shrink with the edits; primers move with them.
+- Undo and redo (typing joins one step). The title shows unsaved changes, and closing
+  asks to save them.
+- Save (Ctrl+S) and Save As by extension: `.dna`, `.gb` or `.fasta`.
+- Reverse complement the whole sequence, set the origin, switch circular/linear, and
+  start a new sequence from pasted text (Ctrl+N).
+- Add, edit and delete features (Ctrl+K adds one from the selection). Add and delete
+  primers; primers are drawn on the sequence.
+- The C API exposes all of this for the Mac app.
+
 ## Next steps
 
-Not in this milestone:
-
-- Sequence editing (insert, delete, and features that follow the edits)
-- Cloning simulation: restriction–ligation, Gibson assembly, Golden Gate
-- Primer design (we already read primers from `.dna` files, but don't draw them yet)
-- Sanger trace viewing (`.ab1`)
-- Writing `.dna` files
-- Enzymes that cut twice per site, methylation sensitivity, a user enzyme set editor
+See [docs/PARITY.md](docs/PARITY.md) for the full checklist. Next up: primers on the
+map, copying features with the bases, enzymes that cut twice per site, then
+milestone 3 (digest and virtual gel, restriction-ligation, PCR, Gibson, Golden Gate,
+primer design).
 
 ## Credits and ground rules
 
