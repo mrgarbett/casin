@@ -1,0 +1,29 @@
+# Flatpak manifest for the GTK app. Build from the repo root:
+#   flatpak-builder --user --install-deps-from=flathub --force-clean \
+#       --repo=build-flatpak/repo build-flatpak/app packaging/flatpak/io.github.openclone.OpenClone.yml
+# The app ID follows the current packaging names; it moves to
+# io.github.mrgarbett.Restricto with the rename.
+id: io.github.openclone.OpenClone
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
+command: openclone
+finish-args:
+  # Files are opened and saved through the portal (GtkFileDialog, drag and drop),
+  # so no filesystem access is requested.
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+modules:
+  - name: openclone
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - build
+          - build-flatpak
+          - .flatpak-builder

@@ -41,6 +41,29 @@ jobs:
             window.png
             openclone-*.rpm
 
+  flatpak:
+    name: Flatpak (GNOME runtime)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install flatpak-builder and the GNOME SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          # Ubuntu 24.04 blocks the user namespaces that bubblewrap needs.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+      - name: Build the Flatpak bundle
+        run: |
+          flatpak-builder --user --install-deps-from=flathub --force-clean --disable-rofiles-fuse \
+              --repo=build-flatpak/repo build-flatpak/app packaging/flatpak/io.github.openclone.OpenClone.yml
+          flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+              build-flatpak/repo openclone.flatpak io.github.openclone.OpenClone
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-bundle
+          path: openclone.flatpak
+
   macos:
     name: macOS (Swift + AppKit)
     runs-on: macos-14

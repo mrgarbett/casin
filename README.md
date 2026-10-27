@@ -57,8 +57,27 @@ You need GTK ≥ 4.12 and libadwaita ≥ 1.5 (Fedora 40 or newer). Other distrib
 work too. On Debian/Ubuntu 24.04+ install `build-essential cmake ninja-build
 pkg-config libgtk-4-dev libadwaita-1-dev libcairo2-dev` instead.
 
-CI (`.github/workflows/ci.yml`) builds and tests on Fedora, produces the RPM, and
-builds the macOS app on a macOS runner.
+### Flatpak
+
+CI also builds a single-file Flatpak bundle (`openclone.flatpak`, in the
+`flatpak-bundle` artifact). To install it:
+
+```sh
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install --user ./openclone.flatpak
+flatpak run io.github.openclone.OpenClone
+```
+
+To build it yourself from the repo:
+
+```sh
+sudo dnf install flatpak-builder
+flatpak-builder --user --install-deps-from=flathub --force-clean --install \
+    build-flatpak/app packaging/flatpak/io.github.openclone.OpenClone.yml
+```
+
+CI (`.github/workflows/ci.yml`) builds and tests on Fedora, produces the RPM and a
+Flatpak bundle, and builds the macOS app on a macOS runner.
 
 ## Building on macOS
 
