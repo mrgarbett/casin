@@ -67,6 +67,7 @@ private:
     static void actPcr(GSimpleAction *, GVariant *, gpointer self);
     static void actClone(GSimpleAction *, GVariant *, gpointer self);
     static void actGoldenGate(GSimpleAction *, GVariant *, gpointer self);
+    static void actGibson(GSimpleAction *, GVariant *, gpointer self);
     static gboolean onCloseRequest(GtkWindow *, gpointer self);
     static void actExportFasta(GSimpleAction *, GVariant *, gpointer self);
     static void actExportMap(GSimpleAction *, GVariant *, gpointer self);
@@ -90,6 +91,7 @@ private:
     void pcrDialog();
     void cloningDialog();
     void goldenGateDialog();
+    void gibsonDialog();
     void pasteText(const std::string &text);
 
     Document m_doc;

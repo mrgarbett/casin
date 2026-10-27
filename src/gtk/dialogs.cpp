@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Editing dialogs: feature, primer, PCR, restriction cloning, Golden Gate and new sequence.
+// Editing dialogs: feature, primer, PCR, restriction cloning, Golden Gate, Gibson and new sequence.
 #include "window.h"
 
 #include "core/cloning.h"
@@ -755,6 +755,171 @@ void Window::goldenGateDialog()
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st,
                            [](gpointer p) { delete static_cast<GoldenGateForm *>(p); });
+    adw_dialog_present(f.dialog, m_window);
+}
+
+namespace {
+struct GibsonForm {
+    Window *window;
+    Sequence vector;
+    std::vector<CutSite> vectorSites;
+    std::vector<std::string> vectorEnzymes;
+    std::vector<Sequence> parts;
+    std::vector<bool> chosen;
+    GtkWidget *vLeft, *vRight, *overlap, *result, *okButton;
+    AdwDialog *dialog;
+    Sequence product;
+    bool ok = false;
+};
+
+// Tries the assembly with the vector opened by `left` and `right`.
+bool tryGibson(GibsonForm *st, const std::string &left, const std::string &right, int minOverlap, std::string *text)
+{
+    std::string err;
+    std::vector<Sequence> inputs;
+    ClonePiece backbone;
+    if (st->vector.circular) {
+        if (!cloneSide(st->vector, st->vectorSites, left, right, true, &backbone, &err)) {
+            *text = "Vector: " + err;
+            return false;
+        }
+        backbone.top.name = st->vector.name;
+        inputs.push_back(backbone.top);
+    } else {
+        inputs.push_back(st->vector);
+    }
+    for (size_t i = 0; i < st->parts.size(); ++i)
+        if (st->chosen[i])
+            inputs.push_back(st->parts[i]);
+    std::vector<GibsonJoin> joins;
+    if (!gibsonAssemble(inputs, minOverlap, &st->product, &joins, &err)) {
+        *text = err;
+        return false;
+    }
+    st->product.name = st->vector.name;
+    // Keep the vector's numbering when its origin survived the cut.
+    if (st->vector.circular && backbone.originOffset() > 0)
+        rotateOrigin(st->product, backbone.originOffset());
+    *text = view::formatBp(st->product.length()) + " product\n";
+    for (const GibsonJoin &j : joins) {
+        if (j.input > 0)
+            st->product.name += "-" + inputs[size_t(j.input)].name;
+        *text += (j.input == 0 ? "" : " → ") + inputs[size_t(j.input)].name + (j.flipped ? " (reversed)" : "");
+    }
+    int shortest = INT_MAX;
+    for (const GibsonJoin &j : joins)
+        shortest = std::min(shortest, j.overlap);
+    *text += "\nShortest overlap " + std::to_string(shortest) + " bp";
+    return true;
+}
+
+void updateGibson(GibsonForm *st)
+{
+    std::string text;
+    const int minOverlap = int(adw_spin_row_get_value(ADW_SPIN_ROW(st->overlap)));
+    st->ok = tryGibson(st, comboText(st->vLeft), comboText(st->vRight), minOverlap, &text);
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->result), text.c_str());
+    gtk_widget_set_sensitive(st->okButton, st->ok);
+}
+} // namespace
+
+void Window::gibsonDialog()
+{
+    if (m_doc.isEmpty())
+        return;
+    auto *st = new GibsonForm{};
+    st->window = this;
+    st->vector = m_doc.sequence();
+    st->vectorSites = findSites(st->vector, commonEnzymes());
+    st->vectorEnzymes = cutters(st->vectorSites, 1);
+    if (st->vector.circular && st->vectorEnzymes.empty()) {
+        toast("No enzyme cuts this vector once to open it");
+        delete st;
+        return;
+    }
+    GtkApplication *app = gtk_window_get_application(gtkWindow());
+    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
+        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+        if (w && w != this && !w->isEmpty() && !w->document().sequence().circular)
+            st->parts.push_back(w->document().sequence());
+    }
+    if (st->parts.empty()) {
+        toast("Open the linear fragments in other windows first");
+        delete st;
+        return;
+    }
+    st->chosen.assign(st->parts.size(), true);
+
+    Form f = makeForm("Gibson Assembly", "Open Product");
+    st->dialog = f.dialog;
+    st->okButton = f.ok;
+    GtkWidget *gv = addGroup(f, "Vector");
+    adw_preferences_group_set_description(
+        ADW_PREFERENCES_GROUP(gv),
+        (st->vector.name + (st->vector.circular ? ", opened with one or two enzymes" : ", used as it is")).c_str());
+    st->vLeft = comboRow(gv, "First enzyme", nullptr, 0);
+    st->vRight = comboRow(gv, "Second enzyme", nullptr, 0);
+    if (st->vector.circular) {
+        // Start from the first way of opening the vector that assembles.
+        std::string first = st->vectorEnzymes.front(), second = first, text;
+        bool found = false;
+        for (size_t i = 0; i < st->vectorEnzymes.size() && !found; ++i)
+            for (size_t j = i; j < st->vectorEnzymes.size() && !found; ++j)
+                if (tryGibson(st, st->vectorEnzymes[i], st->vectorEnzymes[j], 15, &text)) {
+                    first = st->vectorEnzymes[i];
+                    second = st->vectorEnzymes[j];
+                    found = true;
+                }
+        setComboItems(st->vLeft, st->vectorEnzymes, first, 0);
+        setComboItems(st->vRight, st->vectorEnzymes, second, 0);
+    } else {
+        gtk_widget_set_visible(st->vLeft, FALSE);
+        gtk_widget_set_visible(st->vRight, FALSE);
+    }
+    GtkWidget *gp = addGroup(f, "Fragments");
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(gp),
+                                          "Linear sequences in open windows; order and orientation come from the overlaps");
+    for (size_t i = 0; i < st->parts.size(); ++i) {
+        GtkWidget *row = adw_action_row_new();
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), st->parts[i].name.c_str());
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(row), view::formatBp(st->parts[i].length()).c_str());
+        GtkWidget *check = gtk_check_button_new();
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(check), TRUE);
+        g_object_set_data(G_OBJECT(check), "index", GINT_TO_POINTER(int(i)));
+        g_signal_connect(check, "toggled", G_CALLBACK((+[](GtkCheckButton *b, gpointer p) {
+                             auto *st = static_cast<GibsonForm *>(p);
+                             st->chosen[size_t(GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "index")))] =
+                                 gtk_check_button_get_active(b);
+                             updateGibson(st);
+                         })),
+                         st);
+        adw_action_row_add_prefix(ADW_ACTION_ROW(row), check);
+        adw_action_row_set_activatable_widget(ADW_ACTION_ROW(row), check);
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(gp), row);
+    }
+    GtkWidget *gr = addGroup(f);
+    st->overlap = spinRow(gr, "Minimum overlap (bp)", 15, 200);
+    st->result = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->result), "Result");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(gr), st->result);
+    auto changed = +[](GObject *, GParamSpec *, gpointer p) { updateGibson(static_cast<GibsonForm *>(p)); };
+    g_signal_connect(st->vLeft, "notify::selected", G_CALLBACK(changed), st);
+    g_signal_connect(st->vRight, "notify::selected", G_CALLBACK(changed), st);
+    g_signal_connect(st->overlap, "notify::value", G_CALLBACK(changed), st);
+    updateGibson(st);
+    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<GibsonForm *>(p);
+                         if (!st->ok)
+                             return;
+                         GtkApplication *app = gtk_window_get_application(st->window->gtkWindow());
+                         Window *w = Window::create(app);
+                         w->document().setSequence(st->product);
+                         w->document().markUnsaved();
+                         w->present();
+                         adw_dialog_close(st->dialog);
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<GibsonForm *>(p); });
     adw_dialog_present(f.dialog, m_window);
 }
 

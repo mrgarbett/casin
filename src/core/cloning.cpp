@@ -2,6 +2,8 @@
 #include "cloning.h"
 #include "edit.h"
 
+#include <algorithm>
+
 namespace oc {
 
 namespace {
@@ -237,6 +239,74 @@ bool goldenGate(const std::vector<Sequence> &inputs, const Enzyme &enzyme, Seque
         rotateOrigin(*out, pieces[0].originOffset());
     if (steps)
         *steps = chain;
+    return true;
+}
+
+namespace {
+
+// Longest k in [minK, maxK] with the last k bases of `a` equal to the first k of `b`.
+int endOverlap(const std::string &a, const std::string &b, int minK)
+{
+    const int maxK = std::min({int(a.size()), int(b.size()) - 1, 300});
+    for (int k = maxK; k >= minK; --k)
+        if (a.compare(a.size() - size_t(k), size_t(k), b, 0, size_t(k)) == 0)
+            return k;
+    return 0;
+}
+
+} // namespace
+
+bool gibsonAssemble(const std::vector<Sequence> &fragments, int minOverlap, Sequence *out,
+                    std::vector<GibsonJoin> *joins, std::string *error)
+{
+    auto fail = [error](const std::string &msg) {
+        if (error)
+            *error = msg;
+        return false;
+    };
+    if (fragments.size() < 2)
+        return fail("pick a vector and at least one fragment");
+    for (const Sequence &f : fragments)
+        if (f.circular)
+            return fail(f.name + " is circular; linearize it first");
+    std::vector<Sequence> fwd = fragments, rev = fragments;
+    for (Sequence &r : rev)
+        reverseComplementSequence(r);
+    std::vector<GibsonJoin> chain{{0, false, 0}};
+    std::vector<bool> used(fragments.size(), false);
+    used[0] = true;
+    Sequence product = fwd[0];
+    const Sequence *last = &fwd[0];
+    for (size_t step = 1; step < fragments.size(); ++step) {
+        std::vector<GibsonJoin> fits;
+        for (size_t i = 1; i < fragments.size(); ++i) {
+            if (used[i])
+                continue;
+            if (int k = endOverlap(last->bases, fwd[i].bases, minOverlap))
+                fits.push_back({int(i), false, k});
+            if (int k = endOverlap(last->bases, rev[i].bases, minOverlap))
+                fits.push_back({int(i), true, k});
+        }
+        if (fits.size() != 1)
+            return fail(fits.empty() ? "nothing overlaps the end of " + last->name + " by " + std::to_string(minOverlap)
+                                           + " bases or more"
+                                     : "more than one fragment overlaps the end of " + last->name);
+        const GibsonJoin &j = fits.front();
+        used[size_t(j.input)] = true;
+        last = j.flipped ? &rev[size_t(j.input)] : &fwd[size_t(j.input)];
+        insertFragment(product, {product.length(), 0}, extractFragment(*last, {j.overlap, last->length() - j.overlap}));
+        chain.push_back(j);
+    }
+    const int close = endOverlap(last->bases, fwd[0].bases, minOverlap);
+    if (close == 0)
+        return fail("the end of " + last->name + " doesn't overlap the start of " + fwd[0].name);
+    chain[0].overlap = close;
+    // The closing overlap is in the product twice: drop the copy at the end.
+    deleteBases(product, {product.length() - close, close});
+    product.circular = true;
+    *out = product;
+    if (joins)
+        *joins = chain;
     return true;
 }
 

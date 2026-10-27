@@ -818,6 +818,44 @@ static void testGoldenGate()
     CHECK(!err.empty());
 }
 
+static void testGibson()
+{
+    const std::string h1 = "ACGTTGCATGCCTAGGATCCGTAAC";   // 25 bp junctions
+    const std::string h2 = "TTGACCGGTACCATGCAAGCTTGCA";
+    const std::string h3 = "GGCATCAAGTCGACTTCAGCGTAGC";
+    Sequence vec, a, b;
+    vec.name = "vec";
+    vec.bases = h3 + std::string(60, 'A') + h1;
+    vec.features = {feat("bb", {{30, 70}})};
+    a.name = "a";
+    a.bases = h1 + std::string(40, 'C') + h2;
+    a.features = {feat("geneA", {{25, 65}})};
+    b.name = "b";
+    b.bases = h2 + std::string(30, 'G') + h3;
+    Sequence bRc = b;
+    reverseComplementSequence(bRc);
+    Sequence product;
+    std::vector<GibsonJoin> joins;
+    std::string err;
+    CHECK(gibsonAssemble({vec, bRc, a}, 15, &product, &joins, &err));
+    const int expect = 25 + 60 + 25 + 40 + 25 + 30;   // each junction once
+    CHECK_EQ(product.length(), expect);
+    CHECK(product.circular);
+    CHECK(startsWith(product.bases, h3 + std::string(60, 'A') + h1 + std::string(40, 'C') + h2 + std::string(30, 'G')));
+    CHECK_EQ(joins.size(), size_t(3));
+    if (joins.size() == 3) {
+        CHECK(joins[1].input == 2 && !joins[1].flipped && joins[1].overlap == 25);
+        CHECK(joins[2].input == 1 && joins[2].flipped);
+        CHECK_EQ(joins[0].overlap, 25);
+    }
+    bool hasA = false;
+    for (const Feature &f : product.features)
+        hasA = hasA || (f.name == "geneA" && sameRanges(f.ranges, {{110, 150}}));
+    CHECK(hasA);
+    CHECK(!gibsonAssemble({vec, a}, 15, &product, nullptr, &err));   // b missing: no closing overlap
+    CHECK(!gibsonAssemble({vec, a, b}, 30, &product, nullptr, &err));   // overlaps too short
+}
+
 int main(int argc, char **argv)
 {
     testBasics();
@@ -834,6 +872,7 @@ int main(int argc, char **argv)
     testPcr();
     testCloning();
     testGoldenGate();
+    testGibson();
     if (argc > 1)
         testSamples(argv[1]);
     else

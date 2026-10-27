@@ -67,4 +67,18 @@ bool goldenGatePiece(const Sequence &seq, const Enzyme &enzyme, ClonePiece *out,
 bool goldenGate(const std::vector<Sequence> &inputs, const Enzyme &enzyme, Sequence *out,
                 std::vector<AssemblyStep> *steps = nullptr, std::string *error = nullptr);
 
+// Gibson / HiFi / In-Fusion: linear fragments joined by identical sequence
+// at their ends. The first fragment (usually the linearized vector) keeps
+// its orientation; each next one is the unused fragment, either way round,
+// whose start repeats the end of the chain over `minOverlap` bases or more.
+// The last fragment must overlap the first to close the circle.
+struct GibsonJoin {
+    int input = 0;
+    bool flipped = false;
+    int overlap = 0;      // bases shared with the fragment before it (the first: with the last)
+};
+
+bool gibsonAssemble(const std::vector<Sequence> &fragments, int minOverlap, Sequence *out,
+                    std::vector<GibsonJoin> *joins = nullptr, std::string *error = nullptr);
+
 } // namespace oc

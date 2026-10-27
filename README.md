@@ -133,12 +133,14 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   product (vector numbering kept).
 - Golden Gate Assembly: pick a Type IIS enzyme and the parts from open windows; the order
   and orientation come from the overhangs, and the dropout is replaced.
-- The C API exposes the editing for the Mac app; digest, PCR, cloning and Golden Gate are not in it yet.
+- Gibson Assembly (also HiFi and In-Fusion): open the vector with one or two enzymes and
+  join linear fragments from open windows by their end overlaps.
+- The C API exposes the editing for the Mac app; digest, PCR, cloning and the assemblies are not in it yet.
 
 ## Next steps
 
 See [docs/PARITY.md](docs/PARITY.md) for the full checklist. Next up: the Mac editing UI,
-then the rest of milestone 3 (Gibson and HiFi, primer design).
+then the rest of milestone 3 (automatic primer design, enzyme choice by criteria).
 
 ## Credits and ground rules
 
