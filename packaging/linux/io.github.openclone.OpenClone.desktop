@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=OpenClone
+GenericName=Plasmid Viewer
+Comment=View plasmid maps and DNA sequences (GenBank, FASTA, SnapGene .dna)
+Exec=openclone %F
+Icon=io.github.openclone.OpenClone
+Terminal=false
+Categories=Science;Biology;Education;GTK;
+Keywords=plasmid;DNA;sequence;GenBank;FASTA;cloning;restriction;
+MimeType=chemical/seq-na-genbank;application/x-snapgene-dna;chemical/seq-na-fasta;
+StartupNotify=true

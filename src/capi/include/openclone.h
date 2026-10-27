@@ -1,0 +1,173 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * Plain C interface over the OpenClone core and layout code, for frontends
+ * written in other languages (the Swift/AppKit app on macOS).
+ *
+ * Ownership: *_new returns an object you free with the matching *_free.
+ * Strings returned as `char *` are malloc'd: free them with oc_string_free.
+ * `const char *` results stay valid until the next call on the same object.
+ *
+ * Layouts keep pointers into their document. Rebuild them (free + new)
+ * after the document reports OC_CHANGED_SEQUENCE or OC_CHANGED_ENZYMES.
+ */
+#ifndef OPENCLONE_H
+#define OPENCLONE_H
+
+#include <stdbool.h>
+#include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct OCDocument OCDocument;
+typedef struct OCMapLayout OCMapLayout;
+typedef struct OCSeqLayout OCSeqLayout;
+typedef struct OCScene OCScene;
+
+typedef struct { double r, g, b, a; } OCColor;
+typedef struct { double x, y; } OCPoint;
+
+enum { OC_CHANGED_SEQUENCE = 1, OC_CHANGED_SELECTION = 2, OC_CHANGED_ENZYMES = 4 };
+enum { OC_FORMAT_GENBANK = 1, OC_FORMAT_FASTA = 2 };
+enum { OC_STRAND_NONE = 0, OC_STRAND_FORWARD = 1, OC_STRAND_REVERSE = 2 };
+enum { OC_HIT_NONE = 0, OC_HIT_FEATURE = 1, OC_HIT_SITE = 2, OC_HIT_SEQUENCE = 3 };
+enum { OC_ITEM_PATH = 0, OC_ITEM_TEXT = 1 };
+enum { OC_HALIGN_LEFT = 0, OC_HALIGN_CENTER = 1, OC_HALIGN_RIGHT = 2 };
+enum { OC_VALIGN_BASELINE = 0, OC_VALIGN_MIDDLE = 1, OC_VALIGN_TOP = 2 };
+
+void oc_string_free(char *s);
+
+/* ---- document ---------------------------------------------------------- */
+
+typedef void (*OCChangeCallback)(void *context, int what);
+
+OCDocument *oc_document_new(void);
+void oc_document_free(OCDocument *doc);
+void oc_document_set_callback(OCDocument *doc, OCChangeCallback cb, void *context);
+
+bool oc_document_load(OCDocument *doc, const char *path, char **error);
+bool oc_document_save(const OCDocument *doc, const char *path, int format, char **error);
+
+bool oc_document_is_empty(const OCDocument *doc);
+const char *oc_document_name(OCDocument *doc);
+const char *oc_document_description(OCDocument *doc);
+int oc_document_length(const OCDocument *doc);
+bool oc_document_is_circular(const OCDocument *doc);
+char *oc_document_status_text(const OCDocument *doc);
+
+typedef struct {
+    const char *name;
+    const char *type;
+    int start;          /* 0-based footprint start (may wrap) */
+    int length;
+    int part_count;     /* number of ranges */
+    int strand;         /* OC_STRAND_* */
+    OCColor color;      /* display color */
+    bool drawn;         /* false for "source" features */
+} OCFeatureInfo;
+
+int oc_document_feature_count(const OCDocument *doc);
+bool oc_document_feature(OCDocument *doc, int index, OCFeatureInfo *out);
+
+typedef struct {
+    const char *name;
+    const char *site;
+    int cuts;
+    bool hidden;
+    bool passes_filter;
+} OCEnzymeInfo;
+
+int oc_document_enzyme_count(const OCDocument *doc);           /* every known enzyme */
+bool oc_document_enzyme(OCDocument *doc, int index, OCEnzymeInfo *out);
+void oc_document_set_enzyme_hidden(OCDocument *doc, const char *name, bool hidden);
+int oc_document_max_cuts(const OCDocument *doc);
+void oc_document_set_max_cuts(OCDocument *doc, int max_cuts);  /* 1, 2, 3 or 0 = all */
+int oc_document_visible_site_count(const OCDocument *doc);
+const char *oc_document_visible_site_enzyme(const OCDocument *doc, int index);
+
+bool oc_document_has_selection(const OCDocument *doc);
+int oc_document_selection_start(const OCDocument *doc);
+int oc_document_selection_length(const OCDocument *doc);
+void oc_document_set_selection(OCDocument *doc, int start, int length);
+void oc_document_clear_selection(OCDocument *doc);
+char *oc_document_selected_bases(const OCDocument *doc);
+char *oc_document_selected_reverse_complement(const OCDocument *doc);
+int oc_document_active_feature(const OCDocument *doc);
+int oc_document_active_site(const OCDocument *doc);
+void oc_document_activate_feature(OCDocument *doc, int index);
+void oc_document_activate_site(OCDocument *doc, int visible_index);
+
+/* Searches both strands from just after the current selection start and
+ * selects the next match. Returns the 1-based match number, 0 when there is
+ * no match, or -1 when the query isn't DNA. *count gets the total. */
+int oc_document_find_next(OCDocument *doc, const char *query, int *count);
+
+/* ---- text metrics supplied by the frontend ------------------------------ */
+
+typedef double (*OCMeasureText)(void *context, const char *text, double size, bool bold, bool mono);
+
+/* ---- layouts ------------------------------------------------------------- */
+
+OCMapLayout *oc_map_layout_new(const OCDocument *doc, double width, double height, bool dark,
+                               OCMeasureText measure, void *context);
+void oc_map_layout_free(OCMapLayout *layout);
+OCScene *oc_map_layout_render(const OCMapLayout *layout, const OCDocument *doc);
+/* kind = OC_HIT_*; index = feature or visible-site index; position = base boundary. */
+void oc_map_layout_hit(const OCMapLayout *layout, double x, double y, int *kind, int *index, int *position);
+bool oc_map_layout_is_circular(const OCMapLayout *layout);
+double oc_map_layout_angle_at(const OCMapLayout *layout, double x, double y);
+int oc_map_layout_position_at(const OCMapLayout *layout, double x, double y);
+char *oc_map_layout_tooltip(const OCMapLayout *layout, double x, double y);
+
+OCSeqLayout *oc_seq_layout_new(const OCDocument *doc, double width, bool show_complement, bool dark,
+                               OCMeasureText measure, void *context);
+void oc_seq_layout_free(OCSeqLayout *layout);
+double oc_seq_layout_total_height(const OCSeqLayout *layout);
+/* Lines visible in [scroll_y, scroll_y + view_height), shifted up by scroll_y. */
+OCScene *oc_seq_layout_render(const OCSeqLayout *layout, const OCDocument *doc, double scroll_y, double view_height);
+/* Hit tests take content coordinates. */
+int oc_seq_layout_position_at(const OCSeqLayout *layout, double x, double y);
+int oc_seq_layout_feature_at(const OCSeqLayout *layout, double x, double y);
+int oc_seq_layout_site_at(const OCSeqLayout *layout, double x, double y);
+double oc_seq_layout_line_top(const OCSeqLayout *layout, int position);
+double oc_seq_layout_line_height(const OCSeqLayout *layout, int position);
+char *oc_seq_layout_tooltip(const OCSeqLayout *layout, double x, double y);
+
+/* ---- scenes ---------------------------------------------------------------- */
+
+typedef struct {
+    const OCPoint *points;
+    int point_count;
+    bool closed;
+    OCColor fill;      /* a == 0: no fill */
+    OCColor stroke;    /* a == 0: no stroke */
+    double line_width;
+    bool dashed;
+} OCPathInfo;
+
+typedef struct {
+    const char *text;  /* UTF-8 */
+    double x, y;
+    double size;
+    bool bold, mono;
+    OCColor color;
+    int halign;        /* OC_HALIGN_* */
+    int valign;        /* OC_VALIGN_* */
+    double angle;      /* radians, clockwise, around (x, y) */
+} OCTextInfo;
+
+void oc_scene_free(OCScene *scene);
+double oc_scene_width(const OCScene *scene);
+double oc_scene_height(const OCScene *scene);
+OCColor oc_scene_background(const OCScene *scene);
+int oc_scene_item_count(const OCScene *scene);
+int oc_scene_item_kind(const OCScene *scene, int index);
+bool oc_scene_path(const OCScene *scene, int index, OCPathInfo *out);
+bool oc_scene_text(const OCScene *scene, int index, OCTextInfo *out);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* OPENCLONE_H */

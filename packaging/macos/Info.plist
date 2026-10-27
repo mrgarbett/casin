@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>OpenClone</string>
+    <key>CFBundleDisplayName</key><string>OpenClone</string>
+    <key>CFBundleIdentifier</key><string>io.github.openclone.OpenClone</string>
+    <key>CFBundleExecutable</key><string>OpenClone</string>
+    <key>CFBundleIconFile</key><string>OpenClone</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>LSMinimumSystemVersion</key><string>13.0</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.education</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+    <key>NSHumanReadableCopyright</key><string>OpenClone contributors. GPL-3.0-or-later.</string>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key><string>GenBank Sequence</string>
+            <key>CFBundleTypeRole</key><string>Viewer</string>
+            <key>LSHandlerRank</key><string>Alternate</string>
+            <key>LSItemContentTypes</key><array><string>io.github.openclone.genbank</string></array>
+            <key>NSDocumentClass</key><string>SequenceDocument</string>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key><string>SnapGene DNA File</string>
+            <key>CFBundleTypeRole</key><string>Viewer</string>
+            <key>LSHandlerRank</key><string>Alternate</string>
+            <key>LSItemContentTypes</key><array><string>io.github.openclone.snapgene-dna</string></array>
+            <key>NSDocumentClass</key><string>SequenceDocument</string>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key><string>FASTA Sequence</string>
+            <key>CFBundleTypeRole</key><string>Viewer</string>
+            <key>LSHandlerRank</key><string>Alternate</string>
+            <key>LSItemContentTypes</key><array><string>io.github.openclone.fasta</string></array>
+            <key>NSDocumentClass</key><string>SequenceDocument</string>
+        </dict>
+    </array>
+    <key>UTImportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key><string>io.github.openclone.genbank</string>
+            <key>UTTypeDescription</key><string>GenBank Sequence</string>
+            <key>UTTypeConformsTo</key><array><string>public.plain-text</string></array>
+            <key>UTTypeTagSpecification</key>
+            <dict><key>public.filename-extension</key>
+                <array><string>gb</string><string>gbk</string><string>genbank</string><string>gbff</string><string>ape</string></array></dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key><string>io.github.openclone.snapgene-dna</string>
+            <key>UTTypeDescription</key><string>SnapGene DNA File</string>
+            <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+            <key>UTTypeTagSpecification</key>
+            <dict><key>public.filename-extension</key><array><string>dna</string></array></dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key><string>io.github.openclone.fasta</string>
+            <key>UTTypeDescription</key><string>FASTA Sequence</string>
+            <key>UTTypeConformsTo</key><array><string>public.plain-text</string></array>
+            <key>UTTypeTagSpecification</key>
+            <dict><key>public.filename-extension</key>
+                <array><string>fasta</string><string>fa</string><string>fna</string><string>fas</string><string>seq</string></array></dict>
+        </dict>
+    </array>
+</dict>
+</plist>

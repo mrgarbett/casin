@@ -1,0 +1,4 @@
+module OpenCloneCore {
+    header "openclone.h"
+    export *
+}

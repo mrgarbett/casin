@@ -1,0 +1,352 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include "include/openclone.h"
+
+#include "core/seqio.h"
+#include "view/document.h"
+#include "view/maplayout.h"
+#include "view/seqlayout.h"
+#include "view/style.h"
+
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+
+using namespace oc;
+
+namespace {
+
+char *dupString(const std::string &s)
+{
+    char *out = static_cast<char *>(std::malloc(s.size() + 1));
+    if (out)
+        std::memcpy(out, s.c_str(), s.size() + 1);
+    return out;
+}
+
+OCColor toC(const view::Color &c)
+{
+    return {c.r, c.g, c.b, c.a};
+}
+
+// Calls back into the frontend for text widths.
+class CallbackMeasurer : public view::TextMeasurer {
+public:
+    CallbackMeasurer(OCMeasureText fn, void *ctx) : m_fn(fn), m_ctx(ctx) {}
+    double width(const std::string &text, const view::Font &font) override
+    {
+        if (!m_fn)
+            return m_approx.width(text, font);
+        return m_fn(m_ctx, text.c_str(), font.size, font.bold, font.mono);
+    }
+
+private:
+    OCMeasureText m_fn;
+    void *m_ctx;
+    view::ApproxTextMeasurer m_approx;
+};
+
+} // namespace
+
+struct OCDocument {
+    Document doc;
+    OCChangeCallback cb = nullptr;
+    void *ctx = nullptr;
+    std::string scratch1, scratch2;   // backing for const char * results
+};
+
+struct OCMapLayout {
+    std::unique_ptr<view::MapLayout> layout;
+};
+
+struct OCSeqLayout {
+    std::unique_ptr<view::SequenceLayout> layout;
+};
+
+struct OCScene {
+    view::Scene scene;
+};
+
+extern "C" {
+
+void oc_string_free(char *s)
+{
+    std::free(s);
+}
+
+// ---- document --------------------------------------------------------------
+
+OCDocument *oc_document_new(void)
+{
+    auto *d = new OCDocument;
+    d->doc.onSequenceChanged([d] { if (d->cb) d->cb(d->ctx, OC_CHANGED_SEQUENCE); });
+    d->doc.onSelectionChanged([d] { if (d->cb) d->cb(d->ctx, OC_CHANGED_SELECTION); });
+    d->doc.onEnzymesChanged([d] { if (d->cb) d->cb(d->ctx, OC_CHANGED_ENZYMES); });
+    return d;
+}
+
+void oc_document_free(OCDocument *doc)
+{
+    delete doc;
+}
+
+void oc_document_set_callback(OCDocument *doc, OCChangeCallback cb, void *context)
+{
+    doc->cb = cb;
+    doc->ctx = context;
+}
+
+bool oc_document_load(OCDocument *doc, const char *path, char **error)
+{
+    Sequence seq;
+    std::string err;
+    if (!loadSequenceFile(path, &seq, &err)) {
+        if (error)
+            *error = dupString(err);
+        return false;
+    }
+    doc->doc.setSequence(std::move(seq), path);
+    return true;
+}
+
+bool oc_document_save(const OCDocument *doc, const char *path, int format, char **error)
+{
+    std::string err;
+    const FileFormat f = format == OC_FORMAT_FASTA ? FileFormat::Fasta : FileFormat::GenBank;
+    if (!saveSequenceFile(path, doc->doc.sequence(), f, &err)) {
+        if (error)
+            *error = dupString(err);
+        return false;
+    }
+    return true;
+}
+
+bool oc_document_is_empty(const OCDocument *doc) { return doc->doc.isEmpty(); }
+
+const char *oc_document_name(OCDocument *doc)
+{
+    doc->scratch1 = doc->doc.sequence().name;
+    return doc->scratch1.c_str();
+}
+
+const char *oc_document_description(OCDocument *doc)
+{
+    doc->scratch1 = doc->doc.sequence().description;
+    return doc->scratch1.c_str();
+}
+
+int oc_document_length(const OCDocument *doc) { return doc->doc.sequence().length(); }
+bool oc_document_is_circular(const OCDocument *doc) { return doc->doc.sequence().circular; }
+char *oc_document_status_text(const OCDocument *doc) { return dupString(doc->doc.statusText()); }
+
+int oc_document_feature_count(const OCDocument *doc) { return int(doc->doc.sequence().features.size()); }
+
+bool oc_document_feature(OCDocument *doc, int index, OCFeatureInfo *out)
+{
+    const Sequence &s = doc->doc.sequence();
+    if (index < 0 || index >= int(s.features.size()) || !out)
+        return false;
+    const Feature &f = s.features[size_t(index)];
+    doc->scratch1 = f.name;
+    doc->scratch2 = f.type;
+    const Span sp = f.span(s.length(), s.circular);
+    out->name = doc->scratch1.c_str();
+    out->type = doc->scratch2.c_str();
+    out->start = sp.start;
+    out->length = sp.length;
+    out->part_count = int(f.ranges.size());
+    out->strand = f.strand == Strand::Forward ? OC_STRAND_FORWARD
+                : f.strand == Strand::Reverse ? OC_STRAND_REVERSE
+                                              : OC_STRAND_NONE;
+    out->color = toC(view::FeatureStyle::fill(f.type, f.color));
+    out->drawn = view::FeatureStyle::isDrawn(f);
+    return true;
+}
+
+int oc_document_enzyme_count(const OCDocument *doc) { return int(doc->doc.enzymes().size()); }
+
+bool oc_document_enzyme(OCDocument *doc, int index, OCEnzymeInfo *out)
+{
+    const auto &list = doc->doc.enzymes();
+    if (index < 0 || index >= int(list.size()) || !out)
+        return false;
+    const Enzyme &e = list[size_t(index)];
+    out->name = e.name.c_str();   // stable: owned by the document's enzyme list
+    out->site = e.site.c_str();
+    out->cuts = doc->doc.cutCount(e.name);
+    out->hidden = doc->doc.isEnzymeHidden(e.name);
+    out->passes_filter = doc->doc.enzymePassesFilter(e.name);
+    return true;
+}
+
+void oc_document_set_enzyme_hidden(OCDocument *doc, const char *name, bool hidden)
+{
+    doc->doc.setEnzymeHidden(name, hidden);
+}
+
+int oc_document_max_cuts(const OCDocument *doc) { return doc->doc.maxCuts(); }
+void oc_document_set_max_cuts(OCDocument *doc, int max_cuts) { doc->doc.setMaxCuts(max_cuts); }
+int oc_document_visible_site_count(const OCDocument *doc) { return int(doc->doc.visibleSites().size()); }
+
+const char *oc_document_visible_site_enzyme(const OCDocument *doc, int index)
+{
+    const auto &v = doc->doc.visibleSites();
+    if (index < 0 || index >= int(v.size()))
+        return nullptr;
+    return v[size_t(index)].enzyme->name.c_str();
+}
+
+bool oc_document_has_selection(const OCDocument *doc) { return doc->doc.hasSelection(); }
+int oc_document_selection_start(const OCDocument *doc) { return doc->doc.selection().start; }
+int oc_document_selection_length(const OCDocument *doc) { return doc->doc.selection().length; }
+void oc_document_set_selection(OCDocument *doc, int start, int length) { doc->doc.setSelection({start, length}); }
+void oc_document_clear_selection(OCDocument *doc) { doc->doc.clearSelection(); }
+char *oc_document_selected_bases(const OCDocument *doc) { return dupString(doc->doc.selectedBases()); }
+
+char *oc_document_selected_reverse_complement(const OCDocument *doc)
+{
+    return dupString(reverseComplement(doc->doc.selectedBases()));
+}
+
+int oc_document_active_feature(const OCDocument *doc) { return doc->doc.activeFeature(); }
+int oc_document_active_site(const OCDocument *doc) { return doc->doc.activeSite(); }
+void oc_document_activate_feature(OCDocument *doc, int index) { doc->doc.activateFeature(index); }
+void oc_document_activate_site(OCDocument *doc, int visible_index) { doc->doc.activateSite(visible_index); }
+
+int oc_document_find_next(OCDocument *doc, const char *query, int *count)
+{
+    return doc->doc.findNext(query ? query : "", count);
+}
+
+// ---- layouts --------------------------------------------------------------------
+
+OCMapLayout *oc_map_layout_new(const OCDocument *doc, double width, double height, bool dark,
+                               OCMeasureText measure, void *context)
+{
+    CallbackMeasurer tm(measure, context);
+    auto *l = new OCMapLayout;
+    l->layout = std::make_unique<view::MapLayout>(doc->doc.sequence(), doc->doc.visibleSites(),
+                                                  dark ? view::Theme::darkTheme() : view::Theme::light(), tm,
+                                                  width, height);
+    return l;
+}
+
+void oc_map_layout_free(OCMapLayout *layout) { delete layout; }
+
+OCScene *oc_map_layout_render(const OCMapLayout *layout, const OCDocument *doc)
+{
+    view::MapState st;
+    st.hasSelection = doc->doc.hasSelection();
+    st.selection = doc->doc.selection();
+    st.activeFeature = doc->doc.activeFeature();
+    st.activeSite = doc->doc.activeSite();
+    return new OCScene{layout->layout->render(st)};
+}
+
+void oc_map_layout_hit(const OCMapLayout *layout, double x, double y, int *kind, int *index, int *position)
+{
+    const view::MapHit h = layout->layout->hitTest({x, y});
+    if (kind)
+        *kind = h.kind == view::MapHit::Feature ? OC_HIT_FEATURE
+              : h.kind == view::MapHit::Site    ? OC_HIT_SITE
+              : h.kind == view::MapHit::Sequence ? OC_HIT_SEQUENCE
+                                                 : OC_HIT_NONE;
+    if (index)
+        *index = h.index;
+    if (position)
+        *position = h.position;
+}
+
+bool oc_map_layout_is_circular(const OCMapLayout *layout) { return layout->layout->isCircular(); }
+double oc_map_layout_angle_at(const OCMapLayout *layout, double x, double y) { return layout->layout->angleAt({x, y}); }
+int oc_map_layout_position_at(const OCMapLayout *layout, double x, double y) { return layout->layout->positionAt({x, y}); }
+char *oc_map_layout_tooltip(const OCMapLayout *layout, double x, double y) { return dupString(layout->layout->tooltipAt({x, y})); }
+
+OCSeqLayout *oc_seq_layout_new(const OCDocument *doc, double width, bool show_complement, bool dark,
+                               OCMeasureText measure, void *context)
+{
+    CallbackMeasurer tm(measure, context);
+    auto *l = new OCSeqLayout;
+    l->layout = std::make_unique<view::SequenceLayout>(doc->doc.sequence(), doc->doc.visibleSites(),
+                                                       dark ? view::Theme::darkTheme() : view::Theme::light(), tm,
+                                                       width, show_complement);
+    return l;
+}
+
+void oc_seq_layout_free(OCSeqLayout *layout) { delete layout; }
+double oc_seq_layout_total_height(const OCSeqLayout *layout) { return layout->layout->totalHeight(); }
+
+OCScene *oc_seq_layout_render(const OCSeqLayout *layout, const OCDocument *doc, double scroll_y, double view_height)
+{
+    view::SeqViewState st;
+    st.hasSelection = doc->doc.hasSelection();
+    st.selection = doc->doc.selection();
+    st.activeFeature = doc->doc.activeFeature();
+    st.activeSite = doc->doc.activeSite();
+    return new OCScene{layout->layout->render(scroll_y, view_height, st)};
+}
+
+int oc_seq_layout_position_at(const OCSeqLayout *l, double x, double y) { return l->layout->positionAt({x, y}); }
+int oc_seq_layout_feature_at(const OCSeqLayout *l, double x, double y) { return l->layout->featureAt({x, y}); }
+int oc_seq_layout_site_at(const OCSeqLayout *l, double x, double y) { return l->layout->siteAt({x, y}); }
+double oc_seq_layout_line_top(const OCSeqLayout *l, int position) { return l->layout->lineTopFor(position); }
+double oc_seq_layout_line_height(const OCSeqLayout *l, int position) { return l->layout->lineHeightFor(position); }
+char *oc_seq_layout_tooltip(const OCSeqLayout *l, double x, double y) { return dupString(l->layout->tooltipAt({x, y})); }
+
+// ---- scenes ---------------------------------------------------------------------
+
+void oc_scene_free(OCScene *scene) { delete scene; }
+double oc_scene_width(const OCScene *scene) { return scene->scene.width; }
+double oc_scene_height(const OCScene *scene) { return scene->scene.height; }
+OCColor oc_scene_background(const OCScene *scene) { return toC(scene->scene.background); }
+int oc_scene_item_count(const OCScene *scene) { return int(scene->scene.items.size()); }
+
+int oc_scene_item_kind(const OCScene *scene, int index)
+{
+    if (index < 0 || index >= int(scene->scene.items.size()))
+        return -1;
+    return std::holds_alternative<view::PathItem>(scene->scene.items[size_t(index)]) ? OC_ITEM_PATH : OC_ITEM_TEXT;
+}
+
+bool oc_scene_path(const OCScene *scene, int index, OCPathInfo *out)
+{
+    if (index < 0 || index >= int(scene->scene.items.size()) || !out)
+        return false;
+    const auto *p = std::get_if<view::PathItem>(&scene->scene.items[size_t(index)]);
+    if (!p)
+        return false;
+    static_assert(sizeof(OCPoint) == sizeof(view::Point), "OCPoint must mirror view::Point");
+    out->points = reinterpret_cast<const OCPoint *>(p->points.data());
+    out->point_count = int(p->points.size());
+    out->closed = p->closed;
+    out->fill = toC(p->fill);
+    out->stroke = toC(p->stroke);
+    out->line_width = p->lineWidth;
+    out->dashed = p->dashed;
+    return true;
+}
+
+bool oc_scene_text(const OCScene *scene, int index, OCTextInfo *out)
+{
+    if (index < 0 || index >= int(scene->scene.items.size()) || !out)
+        return false;
+    const auto *t = std::get_if<view::TextItem>(&scene->scene.items[size_t(index)]);
+    if (!t)
+        return false;
+    out->text = t->text.c_str();
+    out->x = t->pos.x;
+    out->y = t->pos.y;
+    out->size = t->font.size;
+    out->bold = t->font.bold;
+    out->mono = t->font.mono;
+    out->color = toC(t->color);
+    out->halign = t->halign == view::HAlign::Center ? OC_HALIGN_CENTER
+                : t->halign == view::HAlign::Right  ? OC_HALIGN_RIGHT
+                                                    : OC_HALIGN_LEFT;
+    out->valign = t->valign == view::VAlign::Middle ? OC_VALIGN_MIDDLE
+                : t->valign == view::VAlign::Top    ? OC_VALIGN_TOP
+                                                    : OC_VALIGN_BASELINE;
+    out->angle = t->angle;
+    return true;
+}
+
+} // extern "C"

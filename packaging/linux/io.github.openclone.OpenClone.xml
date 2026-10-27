@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="chemical/seq-na-genbank">
+    <comment>GenBank sequence</comment>
+    <glob pattern="*.gb"/>
+    <glob pattern="*.gbk"/>
+    <glob pattern="*.genbank"/>
+    <magic priority="50"><match type="string" value="LOCUS" offset="0"/></magic>
+  </mime-type>
+  <mime-type type="application/x-snapgene-dna">
+    <comment>SnapGene DNA file</comment>
+    <glob pattern="*.dna"/>
+    <magic priority="60"><match type="string" value="SnapGene" offset="5"/></magic>
+  </mime-type>
+  <mime-type type="chemical/seq-na-fasta">
+    <comment>FASTA sequence</comment>
+    <glob pattern="*.fasta"/>
+    <glob pattern="*.fa"/>
+    <glob pattern="*.fna"/>
+  </mime-type>
+</mime-info>

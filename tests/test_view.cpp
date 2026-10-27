@@ -1,0 +1,86 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Layout tests for openclone_view, using approximate text metrics.
+// Usage: view_tests <samples-dir>
+#include "core/enzymes.h"
+#include "core/seqio.h"
+#include "view/maplayout.h"
+#include "view/seqlayout.h"
+
+#include <cstdio>
+
+using namespace oc;
+using namespace oc::view;
+
+static int g_failures = 0;
+static int g_checks = 0;
+#define CHECK(cond)                                                                 \
+    do {                                                                            \
+        ++g_checks;                                                                 \
+        if (!(cond)) {                                                              \
+            ++g_failures;                                                           \
+            std::fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__, __LINE__, #cond); \
+        }                                                                           \
+    } while (0)
+
+int main(int argc, char **argv)
+{
+    if (argc < 2) {
+        std::fprintf(stderr, "usage: view_tests <samples-dir>\n");
+        return 2;
+    }
+    Sequence seq;
+    std::string err;
+    if (!loadSequenceFile(std::string(argv[1]) + "/pOC-demo.gb", &seq, &err)) {
+        std::fprintf(stderr, "%s\n", err.c_str());
+        return 1;
+    }
+    ApproxTextMeasurer tm;
+    const Theme theme = Theme::light();
+
+    // All cutters: many labels. None may overlap and all stay inside the view.
+    const std::vector<CutSite> sites = findSites(seq, commonEnzymes());
+    for (auto size : {std::pair<double, double>{900, 700}, {600, 500}, {1400, 900}}) {
+        MapLayout map(seq, sites, theme, tm, size.first, size.second);
+        MapState st;
+        Scene sc = map.render(st);
+        CHECK(!sc.items.empty());
+        std::vector<Rect> labels;
+        for (const Item &it : sc.items)
+            if (auto *t = std::get_if<TextItem>(&it))
+                if (t->valign == VAlign::Middle && t->angle == 0 && (t->halign == HAlign::Left || t->halign == HAlign::Right)) {
+                    const double w = tm.width(t->text, t->font), h = tm.height(t->font);
+                    labels.push_back({t->halign == HAlign::Right ? t->pos.x - w : t->pos.x, t->pos.y - h / 2, w, h});
+                }
+        CHECK(labels.size() > 10);
+        for (size_t i = 0; i < labels.size(); ++i) {
+            CHECK(labels[i].y >= 0 && labels[i].y + labels[i].h <= size.second);
+            for (size_t j = i + 1; j < labels.size(); ++j)
+                CHECK(!labels[i].intersects(labels[j]));
+        }
+        // Clicking the middle of the map's right edge region hits the sequence.
+        MapHit h = map.hitTest({size.first / 2, size.second / 2});
+        CHECK(h.kind == MapHit::Sequence);
+    }
+
+    // Linear layout of the same sequence.
+    Sequence lin = seq;
+    lin.circular = false;
+    const std::vector<CutSite> linSites = findSites(lin, commonEnzymes());
+    MapLayout lmap(lin, linSites, theme, tm, 1000, 500);
+    CHECK(!lmap.render({}).items.empty());
+    CHECK(lmap.positionAt({0, 250}) == 0);
+
+    // Sequence view: lines are multiples of 10 bp and positions round-trip.
+    SequenceLayout sl(seq, sites, theme, tm, 900, true);
+    CHECK(sl.basesPerLine() % 10 == 0);
+    CHECK(sl.totalHeight() > 0);
+    // A click on the first line's first base gives position 0; further right, later.
+    const double y0 = sl.lineTopFor(0) + sl.lineHeightFor(0) / 2;
+    CHECK(sl.positionAt({0, y0}) == 0);
+    CHECK(sl.positionAt({300, y0}) > 0);
+    CHECK(sl.positionAt({300, sl.lineTopFor(sl.basesPerLine()) + 5}) > sl.basesPerLine());
+    Scene ss = sl.render(0, 600, {});
+    CHECK(!ss.items.empty());
+    std::printf("%d checks, %d failures\n", g_checks, g_failures);
+    return g_failures ? 1 : 0;
+}
