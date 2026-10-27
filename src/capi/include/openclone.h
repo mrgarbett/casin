@@ -249,6 +249,20 @@ char *oc_find_orfs(const OCDocument *doc, int min_codons);
  * CDS feature named `name`; returns the feature index or -1. */
 int oc_document_add_orf(OCDocument *doc, int min_codons, int index, const char *name);
 
+typedef struct {
+    int length;              /* residues up to the first stop */
+    int unknown;             /* residues left out of the mass */
+    bool truncated;          /* an internal stop ended the protein early */
+    double mass;             /* average, daltons */
+    double pI;
+    int extinction_reduced;  /* 280 nm, M^-1 cm^-1 */
+    int extinction_cystines;
+    int positive, negative;  /* K + R, D + E */
+} OCProteinInfo;
+/* Translates the selection (or the selected feature, on its own strand) and
+ * returns the protein without its stop; NULL when fewer than 3 bases are selected. */
+char *oc_document_selection_protein(const OCDocument *doc, OCProteinInfo *out);
+
 /* ---- enzyme sets ------------------------------------------------------------ */
 
 /* Built-in sets (Type IIS, then one per supplier), one per line:

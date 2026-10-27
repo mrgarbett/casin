@@ -7,6 +7,7 @@
 #include "core/edit.h"
 #include "core/orf.h"
 #include "core/primercheck.h"
+#include "core/protein.h"
 #include "core/search.h"
 #include "view/maplayout.h"   // formatBp
 #include "view/style.h"
@@ -1486,6 +1487,112 @@ void Window::overlapExtensionDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<SoeForm *>(p); });
+    adw_dialog_present(f.dialog, m_window);
+}
+
+namespace {
+GtkWidget *valueRow(GtkWidget *group, const char *title, const std::string &value)
+{
+    GtkWidget *row = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), title);
+    GtkWidget *v = gtk_label_new(value.c_str());
+    gtk_label_set_selectable(GTK_LABEL(v), TRUE);
+    gtk_widget_add_css_class(v, "dim-label");
+    adw_action_row_add_suffix(ADW_ACTION_ROW(row), v);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group), row);
+    return row;
+}
+
+// "39,990": formatBp without its unit.
+std::string grouped(int n)
+{
+    std::string s = view::formatBp(n);
+    return s.substr(0, s.find(' '));
+}
+
+std::string fixed(double v, int decimals)
+{
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "%.*f", decimals, v);
+    return buf;
+}
+} // namespace
+
+void Window::proteinDialog()
+{
+    const Span sel = m_doc.selection();
+    if (sel.length < 3) {
+        toast("Select the coding bases, or a CDS feature, first");
+        return;
+    }
+    // A selected feature is read on its own strand, with its exons joined.
+    const Sequence &seq = m_doc.sequence();
+    std::string bases = m_doc.selectedBases();
+    std::string from = "Selection, forward strand";
+    const int fi = m_doc.activeFeature();
+    if (fi >= 0 && size_t(fi) < seq.features.size()) {
+        const Feature &f = seq.features[size_t(fi)];
+        if (f.span(seq.length(), seq.circular) == sel) {
+            bases = seq.featureBases(f);
+            from = f.name + (f.strand == Strand::Reverse ? ", reverse strand" : "");
+        }
+    }
+    const std::string protein = translate(bases);
+    const ProteinStats ps = proteinStats(protein);
+    std::string shown = protein;
+    if (!shown.empty() && shown.back() == '*')
+        shown.pop_back();
+
+    Form f = makeForm("Protein Properties", "Copy Protein");
+    adw_dialog_set_content_height(f.dialog, 600);
+    GtkWidget *gp = addGroup(f, "Translation");
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(gp),
+                                          (from + " · " + view::formatBp(int(bases.size()))).c_str());
+    GtkWidget *text = gtk_label_new(shown.c_str());
+    gtk_label_set_wrap(GTK_LABEL(text), TRUE);
+    gtk_label_set_wrap_mode(GTK_LABEL(text), PANGO_WRAP_CHAR);
+    PangoAttrList *attrs = pango_attr_list_new();
+    pango_attr_list_insert(attrs, pango_attr_insert_hyphens_new(FALSE));
+    gtk_label_set_attributes(GTK_LABEL(text), attrs);
+    pango_attr_list_unref(attrs);
+    gtk_label_set_selectable(GTK_LABEL(text), TRUE);
+    gtk_label_set_xalign(GTK_LABEL(text), 0);
+    gtk_widget_add_css_class(text, "monospace");
+    gtk_widget_add_css_class(text, "card");
+    gtk_widget_set_margin_bottom(text, 4);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(gp), text);
+    // Leave room around the text inside the card.
+    GtkCssProvider *css = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(css, "label.card { padding: 10px 12px; }");
+    gtk_style_context_add_provider_for_display(gtk_widget_get_display(text), GTK_STYLE_PROVIDER(css),
+                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(css);
+
+    GtkWidget *gs = addGroup(f, "Properties");
+    if (ps.truncated)
+        adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(gs),
+                                              "A stop codon ends the protein early; figures are up to it");
+    valueRow(gs, "Length", std::to_string(ps.length) + " aa");
+    valueRow(gs, "Molecular weight", fixed(ps.mass / 1000, 2) + " kDa");
+    valueRow(gs, "Isoelectric point", fixed(ps.pI, 2));
+    valueRow(gs, "Charged residues", std::to_string(ps.positive) + " + (K, R), " + std::to_string(ps.negative) + " − (D, E)");
+    valueRow(gs, "Extinction at 280 nm", grouped(ps.extinctionReduced) + " M⁻¹cm⁻¹ (Cys reduced)");
+    if (ps.extinctionCystines != ps.extinctionReduced)
+        valueRow(gs, "With cystines", grouped(ps.extinctionCystines) + " M⁻¹cm⁻¹");
+    if (ps.unknown > 0)
+        valueRow(gs, "Unknown residues", std::to_string(ps.unknown) + " (left out of the weight)");
+    GtkWidget *note = addGroup(f);
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(note),
+                                          "Average masses; pI from EMBOSS pKa values; extinction after Pace et al. (1995)");
+    g_object_set_data_full(G_OBJECT(f.dialog), "protein", g_strdup(shown.c_str()), g_free);
+    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *b, gpointer d) {
+                         AdwDialog *dialog = ADW_DIALOG(d);
+                         const char *p = static_cast<const char *>(g_object_get_data(G_OBJECT(dialog), "protein"));
+                         gdk_clipboard_set_text(gtk_widget_get_clipboard(GTK_WIDGET(b)), p);
+                         adw_dialog_close(dialog);
+                     })),
+                     f.dialog);
+    gtk_widget_set_sensitive(f.ok, !shown.empty());
     adw_dialog_present(f.dialog, m_window);
 }
 

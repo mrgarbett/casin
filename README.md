@@ -163,6 +163,8 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   undo step.
 - Find ORFs: open reading frames from ATG to stop on both strands (across the origin too),
   longest first; add the ones you pick as CDS features with their translation.
+- Protein Properties: translate the selection or a selected CDS (on its own strand, exons
+  joined) and show its weight, isoelectric point and extinction coefficient; copy the protein.
 - Search a Folder: find sequence files by name, description, feature or primer name, or by
   a DNA sequence on either strand; click a result to open it.
 - Print… (Ctrl+P): the map on the first page, then the sequence in whole lines; the same

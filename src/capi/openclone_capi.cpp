@@ -6,6 +6,7 @@
 #include "core/digest.h"
 #include "core/edit.h"
 #include "core/orf.h"
+#include "core/protein.h"
 #include "core/primercheck.h"
 #include "core/seqio.h"
 #include "view/document.h"
@@ -502,6 +503,26 @@ bool oc_document_design_primers_flank(OCDocument *doc, double target_tm, int fla
 }
 
 /* ---- ORFs ---- */
+
+char *oc_document_selection_protein(const OCDocument *doc, OCProteinInfo *out)
+{
+    const Span sel = doc->doc.selection();
+    if (sel.length < 3)
+        return nullptr;
+    const Sequence &seq = doc->doc.sequence();
+    std::string bases = doc->doc.selectedBases();
+    const int fi = doc->doc.activeFeature();
+    if (fi >= 0 && size_t(fi) < seq.features.size() && seq.features[size_t(fi)].span(seq.length(), seq.circular) == sel)
+        bases = seq.featureBases(seq.features[size_t(fi)]);
+    std::string protein = translate(bases);
+    const ProteinStats ps = proteinStats(protein);
+    if (out)
+        *out = {ps.length, ps.unknown, ps.truncated, ps.mass, ps.pI, ps.extinctionReduced, ps.extinctionCystines,
+                ps.positive, ps.negative};
+    if (!protein.empty() && protein.back() == '*')
+        protein.pop_back();
+    return dupString(protein);
+}
 
 char *oc_find_orfs(const OCDocument *doc, int min_codons)
 {

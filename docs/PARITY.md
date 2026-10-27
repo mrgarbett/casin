@@ -30,7 +30,7 @@ plans it (M2 Edit and save, M3 Clone, M4 Verify, M5 Parity breadth).
 | E6 | Primers drawn on the sequence and the circular map | done |
 | E7 | ORF finder and six-frame translation | done on Linux; Mac UI pending (C API has `oc_seq_layout_new_frames`) |
 | X1 | Map display options (feature types, labels, colors) | show/hide enzymes, primers and feature types done on Linux; label and color options and Mac UI pending |
-| X8 | Protein sequence files and properties | M5 |
+| X8 | Protein sequence files and properties | properties of a translated selection or CDS (weight, pI, extinction) done on Linux; protein files and Mac UI pending |
 
 ## Editing
 

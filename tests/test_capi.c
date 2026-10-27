@@ -81,6 +81,13 @@ int main(int argc, char **argv)
         char *orfs = oc_find_orfs(doc, 100);
         CHECK(orfs && strchr(orfs, '\t') != NULL);
         oc_string_free(orfs);
+        oc_document_activate_feature(doc, 6);   /* demoR, on the reverse strand */
+        OCProteinInfo pinfo;
+        char *protein = oc_document_selection_protein(doc, &pinfo);
+        CHECK(protein && strncmp(protein, "MARCVG", 6) == 0 && pinfo.length == 180 && pinfo.pI > 11);
+        oc_string_free(protein);
+        oc_document_clear_selection(doc);
+        CHECK(oc_document_selection_protein(doc, NULL) == NULL);
         char *sets = oc_builtin_enzyme_sets();
         CHECK(sets && strstr(sets, "BsaI") != NULL);
         oc_string_free(sets);

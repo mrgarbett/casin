@@ -9,6 +9,7 @@
 #include "core/digest.h"
 #include "core/edit.h"
 #include "core/primercheck.h"
+#include "core/protein.h"
 #include "core/enzymes.h"
 #include "core/fasta.h"
 #include "core/genbank.h"
@@ -1045,6 +1046,27 @@ static void testGibson()
     CHECK(!overlapExtension({a}, 15, &soe, nullptr, &err));
 }
 
+static void testProtein()
+{
+    // Ubiquitin: 8564.8 Da (average), one Tyr, no Trp.
+    const ProteinStats u =
+        proteinStats("MQIFVKTLTGKTITLEVEPSDTIENVKAKIQDKEGIPPDQQRLIFAGKQLEDGRTLSDYNIQKESTLHLVLRLRGG*");
+    CHECK_EQ(u.length, 76);
+    CHECK(std::fabs(u.mass - 8564.8) < 0.5);
+    CHECK_EQ(u.extinctionReduced, 1490);
+    CHECK(!u.truncated && u.unknown == 0);
+    CHECK(u.pI > 6 && u.pI < 8);
+    CHECK(std::fabs(proteinCharge("MQIFVK", u.pI)) < 5);
+    const ProteinStats g = proteinStats("GAV");
+    CHECK(std::fabs(g.mass - 245.28) < 0.01);
+    CHECK(g.pI > 5.9 && g.pI < 6.3);
+    const ProteinStats w = proteinStats("wycc");
+    CHECK(w.extinctionReduced == 6990 && w.extinctionCystines == 7115);
+    const ProteinStats t = proteinStats("MKX*AA");
+    CHECK(t.truncated && t.length == 3 && t.unknown == 1 && t.positive == 1);
+    CHECK_EQ(proteinStats("").length, 0);
+}
+
 static void testPrimerDesign()
 {
     Sequence s;
@@ -1196,6 +1218,7 @@ int main(int argc, char **argv)
     testCloning();
     testGoldenGate();
     testGibson();
+    testProtein();
     testPrimerDesign();
     testMutagenesis();
     testAlign();

@@ -152,6 +152,7 @@ void Window::buildUi(GtkApplication *app)
         {"align", &Window::actAlign, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"compare", &Window::actCompare, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"orfs", &Window::actOrfs, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"protein", &Window::actProtein, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"map-options", &Window::actMapOptions, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-fasta", &Window::actExportFasta, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-map", &Window::actExportMap, nullptr, nullptr, nullptr, {0, 0, 0}},
@@ -221,6 +222,7 @@ void Window::buildUi(GtkApplication *app)
     g_menu_append(featureMenu, "Edit Feature…", "win.edit-feature");
     g_menu_append(featureMenu, "Delete Feature", "win.delete-feature");
     g_menu_append(featureMenu, "Find ORFs…", "win.orfs");
+    g_menu_append(featureMenu, "Protein Properties…", "win.protein");
     g_menu_append_submenu(seqSection, "Features", G_MENU_MODEL(featureMenu));
     GMenu *primerMenu = g_menu_new();
     g_menu_append(primerMenu, "Add Primer…", "win.add-primer");
@@ -1072,7 +1074,7 @@ void Window::updateActions()
     enable("undo", m_doc.canUndo());
     enable("redo", m_doc.canRedo());
     for (const char *name : {"save", "save-as", "export-fasta", "export-map", "print", "paste", "select-all",
-                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "ta-cloning", "overlap-extension", "choose-enzymes", "primer-by-sequence", "history", "align", "compare", "orfs", "map-options"})
+                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "ta-cloning", "overlap-extension", "choose-enzymes", "primer-by-sequence", "history", "align", "compare", "orfs", "protein", "map-options"})
         enable(name, has);
     enable("cut", sel);
     enable("add-feature", sel);
@@ -1365,6 +1367,11 @@ void Window::actTaCloning(GSimpleAction *, GVariant *, gpointer p)
 void Window::actOverlapExtension(GSimpleAction *, GVariant *, gpointer p)
 {
     static_cast<Window *>(p)->overlapExtensionDialog();
+}
+
+void Window::actProtein(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->proteinDialog();
 }
 
 void Window::actSearchFolder(GSimpleAction *, GVariant *, gpointer p)
