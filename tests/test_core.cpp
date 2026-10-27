@@ -901,6 +901,18 @@ static void testPrimerDesign()
     CHECK(pcrProduct(s, d.forward, d.reverse, &p, &err));
     CHECK_EQ(p.length(), target.length);
     CHECK(!designPrimers(s, {0, 10}, 60, &d, &err));
+
+    // Binding sites: the designed primers bind where they were made, a tailed
+    // primer binds with its 3' part, and one mismatch is tolerated.
+    std::vector<PrimerSite> fs = findPrimerSites(s, d.forward.bases);
+    CHECK(!fs.empty() && fs[0].binding == d.forward.binding && fs[0].strand == Strand::Forward && fs[0].mismatches == 0);
+    std::vector<PrimerSite> rs = findPrimerSites(s, "GGATCC" + d.reverse.bases);
+    CHECK(!rs.empty() && rs[0].binding == d.reverse.binding && rs[0].strand == Strand::Reverse);
+    std::string mutated = d.forward.bases;
+    mutated[3] = mutated[3] == 'A' ? 'C' : 'A';
+    std::vector<PrimerSite> ms = findPrimerSites(s, mutated);
+    CHECK(!ms.empty() && ms[0].mismatches == 1 && ms[0].binding == d.forward.binding);
+    CHECK(findPrimerSites(s, "GGGGGGGGGGGGGGGGGGGG").empty());
 }
 
 int main(int argc, char **argv)

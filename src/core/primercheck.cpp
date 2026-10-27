@@ -204,4 +204,52 @@ bool designPrimers(const Sequence &seq, Span target, double targetTm, PrimerDesi
     return true;
 }
 
+std::vector<PrimerSite> findPrimerSites(const Sequence &seq, const std::string &raw, int maxMismatches, int minBinding)
+{
+    std::vector<PrimerSite> out;
+    const std::string p = cleanBases(raw);
+    const int n = seq.length(), lp = int(p.size());
+    if (lp < minBinding || n < minBinding)
+        return out;
+    const std::string &top = seq.bases;
+    const std::string bottom = reverseComplement(top);   // read 5'->3' on the bottom strand
+    for (int pass = 0; pass < 2; ++pass) {
+        const std::string &t = pass == 0 ? top : bottom;
+        // The primer's 3' end sits on base e of t; walk back towards its 5' end.
+        for (int e = minBinding - 1; e < n; ++e) {
+            if (t[size_t(e)] != p.back() || t[size_t(e - 1)] != p[size_t(lp - 2)] || t[size_t(e - 2)] != p[size_t(lp - 3)])
+                continue;
+            // Extend towards the 5' end; a mismatch costs three matches, so a
+            // tail that happens to match a little doesn't pull the site out.
+            int mism = 0, bestLen = 0, bestMism = 0, bestScore = 0;
+            for (int k = 0; k < lp && e - k >= 0; ++k) {
+                if (t[size_t(e - k)] != p[size_t(lp - 1 - k)] && ++mism > maxMismatches)
+                    break;
+                const int score = (k + 1 - mism) - 3 * mism;
+                if (t[size_t(e - k)] == p[size_t(lp - 1 - k)] && score >= bestScore) {
+                    bestLen = k + 1;
+                    bestMism = mism;
+                    bestScore = score;
+                }
+            }
+            if (bestLen < minBinding)
+                continue;
+            PrimerSite s;
+            s.strand = pass == 0 ? Strand::Forward : Strand::Reverse;
+            s.mismatches = bestMism;
+            const int start = e - bestLen + 1;   // in t
+            s.binding = pass == 0 ? Range{start, e + 1} : Range{n - 1 - e, n - start};
+            out.push_back(s);
+        }
+    }
+    std::sort(out.begin(), out.end(), [](const PrimerSite &a, const PrimerSite &b) {
+        if (a.mismatches != b.mismatches)
+            return a.mismatches < b.mismatches;
+        if (a.binding.length() != b.binding.length())
+            return a.binding.length() > b.binding.length();
+        return a.binding.start < b.binding.start;
+    });
+    return out;
+}
+
 } // namespace oc

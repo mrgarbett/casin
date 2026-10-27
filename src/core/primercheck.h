@@ -48,4 +48,17 @@ struct PrimerDesign {
 bool designPrimers(const Sequence &seq, Span target, double targetTm, PrimerDesign *out,
                    std::string *error = nullptr);
 
+// Where a primer can anneal: its 3' part matches the sequence, allowing a 5'
+// tail that doesn't. Each hit is the 3' stretch (at least `minBinding`
+// bases, at most `maxMismatches` mismatches, the last three bases exact)
+// that scores best, counting a mismatch against three matches. Both strands are searched; hits are sorted by quality.
+struct PrimerSite {
+    Range binding;            // on the top strand
+    Strand strand = Strand::Forward;
+    int mismatches = 0;
+};
+
+std::vector<PrimerSite> findPrimerSites(const Sequence &seq, const std::string &primer, int maxMismatches = 2,
+                                        int minBinding = 15);
+
 } // namespace oc

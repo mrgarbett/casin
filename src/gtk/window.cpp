@@ -136,6 +136,7 @@ void Window::buildUi(GtkApplication *app)
         {"gibson", &Window::actGibson, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"design-primers", &Window::actDesignPrimers, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"choose-enzymes", &Window::actChooseEnzymes, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"primer-by-sequence", &Window::actPrimerBySequence, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-fasta", &Window::actExportFasta, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"export-map", &Window::actExportMap, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"copy", &Window::actCopy, nullptr, nullptr, nullptr, {0, 0, 0}},
@@ -200,6 +201,7 @@ void Window::buildUi(GtkApplication *app)
     g_menu_append(featureMenu, "Edit Feature…", "win.edit-feature");
     g_menu_append(featureMenu, "Delete Feature", "win.delete-feature");
     g_menu_append(featureMenu, "Add Primer…", "win.add-primer");
+    g_menu_append(featureMenu, "Add Primer by Sequence…", "win.primer-by-sequence");
     g_menu_append(featureMenu, "Design Primers for Selection…", "win.design-primers");
     g_menu_append_submenu(seqSection, "Features and Primers", G_MENU_MODEL(featureMenu));
     g_menu_append_section(menu, nullptr, G_MENU_MODEL(seqSection));
@@ -793,7 +795,7 @@ void Window::updateActions()
     enable("undo", m_doc.canUndo());
     enable("redo", m_doc.canRedo());
     for (const char *name : {"save", "save-as", "export-fasta", "export-map", "paste", "select-all",
-                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "choose-enzymes"})
+                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "choose-enzymes", "primer-by-sequence"})
         enable(name, has);
     enable("cut", sel);
     enable("add-feature", sel);
@@ -973,6 +975,11 @@ void Window::actDesignPrimers(GSimpleAction *, GVariant *, gpointer p)
 void Window::actChooseEnzymes(GSimpleAction *, GVariant *, gpointer p)
 {
     static_cast<Window *>(p)->chooseEnzymesDialog();
+}
+
+void Window::actPrimerBySequence(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->primerBySequenceDialog();
 }
 
 void Window::showOnlyEnzymes(const std::set<std::string> &names, int maxCuts)

@@ -985,6 +985,86 @@ void Window::designPrimersDialog()
 }
 
 namespace {
+struct PrimerSeqForm {
+    Window *window;
+    Sequence seq;
+    GtkWidget *name, *bases, *result, *okButton;
+    AdwDialog *dialog;
+    Primer primer;
+};
+
+void updatePrimerSeq(PrimerSeqForm *st)
+{
+    const std::string bases = cleanBases(text(st->bases));
+    st->primer = {trim(text(st->name)), bases, {0, 0}, Strand::Forward};
+    std::string msg;
+    if (bases.size() < 15) {
+        msg = "Enter at least 15 bases";
+    } else {
+        const std::vector<PrimerSite> sites = findPrimerSites(st->seq, bases);
+        if (sites.empty()) {
+            msg = "Doesn't bind this sequence (up to 2 mismatches); it is added without a site";
+        } else {
+            const PrimerSite &best = sites.front();
+            st->primer.binding = best.binding;
+            st->primer.strand = best.strand;
+            msg = std::string(best.strand == Strand::Reverse ? "Binds the bottom strand at " : "Binds the top strand at ")
+                + view::withThousands(best.binding.start + 1) + "–" + view::withThousands(best.binding.end) + " ("
+                + std::to_string(best.binding.length()) + " nt"
+                + (best.mismatches ? ", " + std::to_string(best.mismatches) + " mismatched" : "") + ")";
+            if (int(bases.size()) > best.binding.length())
+                msg += "\n" + std::to_string(int(bases.size()) - best.binding.length()) + " nt 5′ tail";
+            if (sites.size() > 1)
+                msg += "\nAlso binds " + std::to_string(sites.size() - 1) + " other place"
+                     + (sites.size() == 2 ? "" : "s");
+        }
+        const PrimerCheck c = checkPrimer(bases);
+        for (const std::string &w : c.warnings)
+            msg += "\n" + w;
+    }
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->result), msg.c_str());
+    gtk_widget_set_sensitive(st->okButton, bases.size() >= 15);
+}
+} // namespace
+
+void Window::primerBySequenceDialog()
+{
+    if (m_doc.isEmpty())
+        return;
+    auto *st = new PrimerSeqForm{};
+    st->window = this;
+    st->seq = m_doc.sequence();
+    Form f = makeForm("Add Primer by Sequence", "Add");
+    adw_dialog_set_content_height(f.dialog, 430);
+    st->dialog = f.dialog;
+    st->okButton = f.ok;
+    GtkWidget *g = addGroup(f);
+    st->name = entryRow(g, "Name", "Primer " + std::to_string(st->seq.primers.size() + 1));
+    st->bases = entryRow(g, "Bases, 5′ to 3′", "");
+    GtkWidget *gr = addGroup(f);
+    st->result = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->result), "Binding site");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(gr), st->result);
+    auto changed = +[](GtkEditable *, gpointer p) { updatePrimerSeq(static_cast<PrimerSeqForm *>(p)); };
+    g_signal_connect(st->bases, "changed", G_CALLBACK(changed), st);
+    g_signal_connect(st->name, "changed", G_CALLBACK(changed), st);
+    updatePrimerSeq(st);
+    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<PrimerSeqForm *>(p);
+                         if (st->primer.bases.size() < 15)
+                             return;
+                         if (st->primer.name.empty())
+                             st->primer.name = "Primer";
+                         st->window->document().addPrimers({st->primer}, "Add Primer");
+                         adw_dialog_close(st->dialog);
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<PrimerSeqForm *>(p); });
+    adw_dialog_present(f.dialog, m_window);
+    gtk_widget_grab_focus(st->bases);
+}
+
+namespace {
 struct NewForm {
     GtkApplication *app;
     GtkWidget *name, *circular, *bases;
