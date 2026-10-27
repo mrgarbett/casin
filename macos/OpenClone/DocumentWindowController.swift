@@ -56,7 +56,14 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: scroll.contentView,
                                                queue: .main) { [weak self, weak scroll] _ in
             self?.sequenceView.updateSize()
-            if let scroll = scroll { self?.pillMaxWidth?.constant = max(0, scroll.frame.width - 32) }
+            // This runs inside the window's layout pass; changing a constraint
+            // here marks layout dirty again and can loop until AppKit aborts.
+            // Apply the new width after the pass, and only when it changed.
+            DispatchQueue.main.async {
+                guard let scroll = scroll, let limit = self?.pillMaxWidth else { return }
+                let width = max(0, scroll.frame.width - 32)
+                if abs(limit.constant - width) >= 1 { limit.constant = width }
+            }
         }
 
         split.isVertical = true
