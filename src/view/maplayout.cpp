@@ -649,6 +649,26 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
             s.text(t);
     }
 
+    // Primers: thin arrows just outside the feature lanes, pointing 5' to 3'.
+    for (const Primer &pr : m_seq.primers) {
+        if (pr.binding.length() <= 0 || pr.binding.end > m_n)
+            continue;
+        const double r0 = m_featureOuter + 2, r1 = r0 + 4, rm = (r0 + r1) / 2;
+        double a0 = angleOfPos(pr.binding.start), a1 = angleOfPos(pr.binding.end);
+        const double head = std::min(6.0 / rm, (a1 - a0) * 0.5);
+        std::vector<Point> poly;
+        if (pr.strand == Strand::Reverse) {
+            poly.push_back(polar(a0, rm));
+            arcPoints(poly, a0 + head, a1, r1);
+            arcPoints(poly, a1, a0 + head, r0);
+        } else {
+            arcPoints(poly, a0, a1 - head, r1);
+            poly.push_back(polar(a1, rm));
+            arcPoints(poly, a1 - head, a0, r0);
+        }
+        s.polygon(poly, m_theme.primer, m_theme.featureOutline, 0.6);
+    }
+
     // Caret.
     if (st.hasSelection && st.selection.length == 0) {
         const double a = angleOfPos(st.selection.start);
