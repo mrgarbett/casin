@@ -70,6 +70,7 @@ private:
         double angle = 0;      // anchor angle (circular)
         double anchorR = 0;    // leader starts at this radius
         int feature = -1;      // >= 0: a callout for a feature whose name didn't fit
+        int primer = -1;       // >= 0: a primer's name
         Color swatch;
     };
 

@@ -367,11 +367,28 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
         g.rect = {0, 0, tm.width(g.text, g.font) + 12, tm.height(g.font)};
         m_labels.push_back(g);
     }
+    // Primer names, from the primer arrows just outside the lanes.
+    for (size_t i = 0; m_options.primers && i < m_seq.primers.size(); ++i) {
+        const Primer &pr = m_seq.primers[i];
+        if (pr.binding.length() <= 0 || pr.binding.end > m_n || pr.name.empty())
+            continue;
+        LabelGlyph g;
+        g.primer = int(i);
+        g.text = pr.name;
+        g.font = calloutFont;
+        g.color = m_theme.text;
+        g.swatch = m_theme.primer;
+        g.priority = -1;
+        g.angle = angleOfPos((pr.binding.start + pr.binding.end) / 2.0);
+        g.anchorR = m_featureOuter + 6;
+        g.rect = {0, 0, tm.width(g.text, g.font) + 12, tm.height(g.font)};
+        m_labels.push_back(g);
+    }
 
     // Labels in left and right columns, spread so they don't overlap.
     const double rLabel = m_featureOuter + 18;
     for (LabelGlyph &g : m_labels) {
-        if (g.feature < 0) {
+        if (g.feature < 0 && g.primer < 0) {
             g.angle = angleOfPos(m_sites[size_t(g.sites.front())].cutTop);
             g.anchorR = m_r;
         }
@@ -601,7 +618,7 @@ void MapLayout::renderLabels(Scene &s, const MapState &st) const
         const bool active = std::find(g.sites.begin(), g.sites.end(), st.activeSite) != g.sites.end();
         PathItem leader;
         leader.points = g.leader;
-        leader.stroke = g.feature >= 0 ? g.swatch.mix(m_theme.text, 0.35)
+        leader.stroke = g.feature >= 0 || g.primer >= 0 ? g.swatch.mix(m_theme.text, 0.35)
                       : active         ? m_theme.cutMarker
                                        : m_theme.leader;
         leader.lineWidth = active ? 1.5 : 0.8;
@@ -682,8 +699,8 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
 
     // Labels.
     for (const LabelGlyph &g : m_labels) {
-        if (g.feature >= 0) {
-            const bool activeF = g.feature == st.activeFeature;
+        if (g.feature >= 0 || g.primer >= 0) {
+            const bool activeF = g.feature >= 0 && g.feature == st.activeFeature;
             if (activeF)
                 s.rect(g.rect.adjusted(2), m_theme.accent.withAlpha(0.15));
             const double cy = g.rect.y + g.rect.h / 2;
@@ -771,7 +788,7 @@ MapHit MapLayout::hitTest(Point p) const
     if (m_n == 0)
         return hit;
     for (const LabelGlyph &g : m_labels)
-        if (g.rect.adjusted(2).contains(p)) {
+        if (g.primer < 0 && g.rect.adjusted(2).contains(p)) {
             hit.kind = g.feature >= 0 ? MapHit::Feature : MapHit::Site;
             hit.index = g.feature >= 0 ? g.feature : g.sites.front();
             return hit;
@@ -817,8 +834,13 @@ std::string MapLayout::siteTooltip(const std::vector<int> &sites) const
 std::string MapLayout::tooltipAt(Point p) const
 {
     for (const LabelGlyph &g : m_labels)
-        if (g.rect.adjusted(2).contains(p))
+        if (g.rect.adjusted(2).contains(p)) {
+            if (g.primer >= 0) {
+                const Primer &pr = m_seq.primers[size_t(g.primer)];
+                return pr.name + " (primer), " + std::to_string(pr.bases.size()) + " nt\n" + pr.bases;
+            }
             return g.feature >= 0 ? featureTooltip(g.feature) : siteTooltip(g.sites);
+        }
     for (auto it = m_features.rbegin(); it != m_features.rend(); ++it)
         for (const auto &poly : it->polys)
             if (pointInPolygon(poly, p))
