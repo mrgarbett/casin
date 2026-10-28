@@ -158,18 +158,36 @@ int main(int argc, char **argv)
     Scene ss = sl.render(0, 600, {});
     CHECK(!ss.items.empty());
     {
-        // Six-frame translation: +1 reads ATG AAA TAG; -1 starts at the last base.
+        // Six-frame translation shows only ORFs: +1 reads ATG AAA TAG; no other
+        // frame has one, so the line gets a single frame row.
         Sequence orf;
         orf.bases = "ATGAAATAGC";
         const std::vector<CutSite> none;
-        SequenceLayout plain(orf, none, theme, tm, 900, true), six(orf, none, theme, tm, 900, true, 6);
-        CHECK(six.totalHeight() > plain.totalHeight() + 5 * 10);
+        SeqOptions sixOpt;
+        sixOpt.frames = 6;
+        sixOpt.minOrfCodons = 2;
+        SequenceLayout plain(orf, none, theme, tm, 900, true), six(orf, none, theme, tm, 900, true, sixOpt);
+        CHECK(six.totalHeight() > plain.totalHeight() + 10);
+        CHECK(six.totalHeight() < plain.totalHeight() + 2 * 20);
         std::string letters;
+        bool ends = false;
         for (const Item &it : six.render(0, 600, {}).items)
-            if (auto *t = std::get_if<TextItem>(&it))
+            if (auto *t = std::get_if<TextItem>(&it)) {
                 if (t->text.size() == 1 && t->font.mono)
                     letters += t->text;
+                ends = ends || t->text == "5\u2032";
+            }
         CHECK(letters.find("MK*") != std::string::npos);
+        CHECK(ends);
+        // Too short for the default minimum: no frame rows at all.
+        CHECK(SequenceLayout(orf, none, theme, tm, 900, true, 6).totalHeight() == plain.totalHeight());
+        // Grouping in tens widens a line; hiding enzymes drops their label rows.
+        SeqOptions grouped;
+        grouped.groupTens = true;
+        CHECK(SequenceLayout(seq, sites, theme, tm, 900, true, grouped).basesPerLine() <= sl.basesPerLine());
+        SeqOptions bare;
+        bare.enzymes = bare.features = bare.primers = false;
+        CHECK(SequenceLayout(seq, sites, theme, tm, 900, true, bare).totalHeight() < sl.totalHeight());
         CHECK(six.positionAt({0, six.lineTopFor(0) + six.lineHeightFor(0) / 2}) == 0);
         // An aligned read adds a row; its mismatch is drawn and the row has a tooltip.
         ReadTrack r;

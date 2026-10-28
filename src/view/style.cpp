@@ -82,7 +82,9 @@ Theme Theme::light()
     t.cutMarker = Color::rgb(0xc0, 0x1c, 0x28);
     t.featureOutline = Color::rgb(0x24, 0x1f, 0x31, 0.35);
     t.accent = Color::rgb(0x35, 0x84, 0xe4);
-    t.primer = Color::rgb(0xff, 0xa3, 0x48);
+    t.primer = Color::rgb(0xe6, 0x61, 0x00);
+    t.orfForward = Color::rgb(0x26, 0xa2, 0x69);
+    t.orfReverse = Color::rgb(0xc0, 0x1c, 0x28);
     return t;
 }
 
@@ -105,7 +107,9 @@ Theme Theme::darkTheme()
     t.cutMarker = Color::rgb(0xf6, 0x61, 0x51);
     t.featureOutline = Color::rgb(0, 0, 0, 0.5);
     t.accent = Color::rgb(0x62, 0xa0, 0xea);
-    t.primer = Color::rgb(0xe6, 0x61, 0x00);
+    t.primer = Color::rgb(0xff, 0xa3, 0x48);
+    t.orfForward = Color::rgb(0x57, 0xe3, 0x89);
+    t.orfReverse = Color::rgb(0xff, 0x7b, 0x63);
     return t;
 }
 

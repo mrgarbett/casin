@@ -2,23 +2,40 @@
 import AppKit
 import RestrictoCore
 
-/// The window's right-hand panel: Enzymes, Features or Primers, picked from a
-/// vertical pill along its right edge. Vibrant on Ventura, glass on macOS 26.
+/// The window's right-hand panel: the sequence (when the map sits beside it),
+/// Enzymes, Features or Primers, picked from a vertical pill along its right
+/// edge. Vibrant on Ventura, glass on macOS 26.
 final class InspectorController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
+    enum Pane: String, CaseIterable {
+        case sequence, enzymes, features, primers
+    }
+
     private let document: CoreDocument
     private let tabs = NSTabView()
-    /// The pill's buttons, in tab order.
+    /// The pill's buttons, one per pane in Pane order.
     private var pillButtons: [NSButton] = []
+    /// Holds the window's sequence view while the panel shows it.
+    private let sequenceHolder = NSView()
     private let featureTable = NSTableView()
     private let enzymeTable = NSTableView()
     private let primerTable = NSTableView()
     private let filter = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let enzymeSearch = NSSearchField()
+    private let onMapOnly = NSButton(checkboxWithTitle: "Only enzymes on the map", target: nil, action: nil)
     private var features: [FeatureInfo] = []
+    /// Every enzyme that cuts, and the ones the search and toggle leave in the list.
+    private var cutters: [EnzymeInfo] = []
     private var enzymes: [EnzymeInfo] = []
     private var primers: [PrimerInfo] = []
     private var syncing = false
-    /// The tab new windows open on.
-    private static let tabKey = "InspectorTab"
+    /// The table pane new windows open on, and whether the list keeps only enzymes on the map.
+    private static let paneKey = "InspectorPane"
+    private static let onMapOnlyKey = "EnzymesOnMapOnly"
+    private(set) var pane: Pane = .enzymes
+    /// The pane last picked other than the sequence.
+    private var tablePane: Pane = Pane(rawValue: UserDefaults.standard.string(forKey: InspectorController.paneKey) ?? "")
+        ?? .enzymes
+    var hostsSequence: Bool { !sequenceHolder.subviews.isEmpty }
 
     init(document: CoreDocument) {
         self.document = document
@@ -30,6 +47,10 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     override func loadView() {
         tabs.tabViewType = .noTabsNoBorder
         tabs.drawsBackground = false
+        let sequenceItem = NSTabViewItem(identifier: Pane.sequence.rawValue)
+        sequenceItem.label = "Sequence"
+        sequenceItem.view = sequenceHolder
+        tabs.addTabViewItem(sequenceItem)
         buildEnzymesTab()
         buildFeaturesTab()
         buildPrimersTab()
@@ -59,8 +80,35 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         reloadFeatures()
         reloadEnzymes()
         reloadPrimers()
-        let saved = UserDefaults.standard.integer(forKey: Self.tabKey)
-        select(tab: saved >= 0 && saved < tabs.numberOfTabViewItems ? saved : 0)
+        select(hostsSequence ? .sequence : tablePane)
+    }
+
+    /// Shows `view` (the window's sequence) as the panel's first pane, or
+    /// gives it back (nil). The pill offers Sequence only while it is here.
+    func hostSequence(_ view: NSView?) {
+        sequenceHolder.subviews.forEach { $0.removeFromSuperview() }
+        if let view = view {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            sequenceHolder.addSubview(view)
+            NSLayoutConstraint.activate([
+                view.leadingAnchor.constraint(equalTo: sequenceHolder.leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: sequenceHolder.trailingAnchor),
+                view.topAnchor.constraint(equalTo: sequenceHolder.topAnchor),
+                view.bottomAnchor.constraint(equalTo: sequenceHolder.bottomAnchor),
+            ])
+        }
+        guard isViewLoaded else { return }
+        pillButtons.first?.isHidden = view == nil
+        select(view != nil ? .sequence : tablePane)
+    }
+
+    func select(_ pane: Pane) {
+        let pane = pane == .sequence && !hostsSequence ? tablePane : pane
+        self.pane = pane
+        tabs.selectTabViewItem(withIdentifier: pane.rawValue)
+        for (button, p) in zip(pillButtons, Pane.allCases) {
+            button.contentTintColor = p == pane ? .controlAccentColor : .secondaryLabelColor
+        }
     }
 
     override func viewDidLayout() {
@@ -73,7 +121,8 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
 
     /// The vertical pill: one icon button per tab, the current one tinted.
     private func buildPill() -> NSView {
-        let entries = [("Enzymes", "scissors"), ("Features", "tag"), ("Primers", "arrow.right")]
+        let entries = [("Sequence", "text.alignleft"), ("Enzymes", "scissors"), ("Features", "tag"),
+                       ("Primers", "arrow.right")]
         pillButtons = entries.enumerated().map { (i, entry) -> NSButton in
             let image = NSImage(systemSymbolName: entry.1, accessibilityDescription: entry.0)
                 ?? NSImage(size: NSSize(width: 16, height: 16))
@@ -88,6 +137,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
             button.heightAnchor.constraint(equalToConstant: 28).isActive = true
             return button
         }
+        pillButtons.first?.isHidden = !hostsSequence
         let stack = NSStackView(views: pillButtons)
         stack.orientation = .vertical
         stack.spacing = 4
@@ -96,15 +146,12 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     }
 
     @objc private func pillClicked(_ sender: NSButton) {
-        select(tab: sender.tag)
-        UserDefaults.standard.set(sender.tag, forKey: Self.tabKey)
-    }
-
-    private func select(tab: Int) {
-        tabs.selectTabViewItem(at: tab)
-        for (i, button) in pillButtons.enumerated() {
-            button.contentTintColor = i == tab ? .controlAccentColor : .secondaryLabelColor
+        let pane = Pane.allCases[sender.tag]
+        if pane != .sequence {
+            tablePane = pane
+            UserDefaults.standard.set(pane.rawValue, forKey: Self.paneKey)
         }
+        select(pane)
     }
 
     private func makeTable(_ table: NSTableView, columns: [(String, String, CGFloat)]) -> NSScrollView {
@@ -122,6 +169,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         table.style = .sourceList
         table.usesAlternatingRowBackgroundColors = false
         table.allowsMultipleSelection = false
+        table.rowHeight = 24
         table.dataSource = self
         table.delegate = self
         let scroll = NSScrollView()
@@ -132,8 +180,9 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     }
 
     private func buildPrimersTab() {
-        let scroll = makeTable(primerTable, columns: [("name", "Primer", 120), ("location", "Binds", 110)])
-        let item = NSTabViewItem(identifier: "primers")
+        let scroll = makeTable(primerTable, columns: [("name", "Primer", 120), ("tm", "Tm", 56),
+                                                      ("location", "Binds", 96)])
+        let item = NSTabViewItem(identifier: Pane.primers.rawValue)
         item.label = "Primers"
         item.view = scroll
         tabs.addTabViewItem(item)
@@ -141,7 +190,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
 
     private func buildFeaturesTab() {
         let scroll = makeTable(featureTable, columns: [("name", "Feature", 150), ("location", "Location", 110)])
-        let item = NSTabViewItem(identifier: "features")
+        let item = NSTabViewItem(identifier: Pane.features.rawValue)
         item.label = "Features"
         item.view = scroll
         tabs.addTabViewItem(item)
@@ -151,12 +200,22 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         filter.addItems(withTitles: ["Unique cutters", "Up to 2 cuts", "Up to 3 cuts", "All cutters"])
         filter.target = self
         filter.action = #selector(filterChanged(_:))
+        enzymeSearch.placeholderString = "Find enzyme"
+        enzymeSearch.controlSize = .small
+        enzymeSearch.target = self
+        enzymeSearch.action = #selector(enzymeSearchChanged(_:))
+        onMapOnly.controlSize = .small
+        onMapOnly.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        onMapOnly.toolTip = "Hide enzymes the cut filter leaves out or that are unticked"
+        onMapOnly.target = self
+        onMapOnly.action = #selector(onMapOnlyChanged(_:))
+        onMapOnly.state = UserDefaults.standard.bool(forKey: Self.onMapOnlyKey) ? .on : .off
         let scroll = makeTable(enzymeTable, columns: [("show", "", 24), ("name", "Enzyme", 80),
                                                        ("site", "Site", 100), ("cuts", "Cuts", 40)])
         let credit = NSTextField(labelWithString: "Enzyme data: REBASE, rebase.neb.com")
         credit.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         credit.textColor = .secondaryLabelColor
-        let stack = NSStackView(views: [filter, scroll, credit])
+        let stack = NSStackView(views: [enzymeSearch, filter, onMapOnly, scroll, credit])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.distribution = .fill
@@ -165,6 +224,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         scroll.setContentHuggingPriority(.defaultLow - 1, for: .vertical)
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16).isActive = true
+        enzymeSearch.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16).isActive = true
         // NSTabView shrinks a stack view item to its fitting size, so give the
         // tab a plain container and pin the stack inside it.
         let container = NSView()
@@ -176,7 +236,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
             stack.topAnchor.constraint(equalTo: container.topAnchor),
             stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
-        let item = NSTabViewItem(identifier: "enzymes")
+        let item = NSTabViewItem(identifier: Pane.enzymes.rawValue)
         item.label = "Enzymes"
         item.view = container
         tabs.addTabViewItem(item)
@@ -193,11 +253,32 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     }
 
     private func reloadEnzymes() {
-        enzymes = document.enzymes.filter { $0.cuts > 0 }
+        cutters = document.enzymes.filter { $0.cuts > 0 }
             .sorted { $0.name.lowercased() < $1.name.lowercased() }
         let index = [1: 0, 2: 1, 3: 2, 0: 3][document.maxCuts] ?? 0
         filter.selectItem(at: index)
+        applyEnzymeSearch()
+    }
+
+    /// The cutters whose name contains the search text, and with "Only enzymes
+    /// on the map", only those the map shows.
+    private func applyEnzymeSearch() {
+        let query = enzymeSearch.stringValue.trimmingCharacters(in: .whitespaces)
+        let mapOnly = onMapOnly.state == .on
+        enzymes = cutters.filter { e in
+            (query.isEmpty || e.name.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil)
+                && (!mapOnly || (e.passesFilter && !e.hidden))
+        }
         enzymeTable.reloadData()
+    }
+
+    @objc private func enzymeSearchChanged(_ sender: NSSearchField) {
+        applyEnzymeSearch()
+    }
+
+    @objc private func onMapOnlyChanged(_ sender: NSButton) {
+        UserDefaults.standard.set(sender.state == .on, forKey: Self.onMapOnlyKey)
+        applyEnzymeSearch()
     }
 
     private func syncSelection() {
@@ -237,20 +318,73 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         return "\(start + 1)–\(end)\(arrow)"
     }
 
+    /// `content` in a cell, centred vertically in the row and filling its width.
+    private func cell(_ content: NSView, centered: Bool = false) -> NSTableCellView {
+        let cell = NSTableCellView()
+        content.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(content)
+        var constraints = [content.centerYAnchor.constraint(equalTo: cell.centerYAnchor)]
+        if centered {
+            constraints.append(content.centerXAnchor.constraint(equalTo: cell.centerXAnchor))
+        } else {
+            // Labels fill the cell so their alignment and truncation apply.
+            let trailing = content is NSTextField
+                ? content.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -2)
+                : content.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -2)
+            constraints += [content.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2), trailing]
+        }
+        NSLayoutConstraint.activate(constraints)
+        if let label = content as? NSTextField {
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            cell.textField = label
+        }
+        return cell
+    }
+
+    /// Melting temperature of the bases that bind (the 3′ part), or of the whole primer.
+    private func tm(of p: PrimerInfo) -> Double {
+        let binding = p.length > 0 && p.length < p.bases.count ? String(p.bases.suffix(p.length)) : p.bases
+        var check = OCPrimerCheck()
+        _ = takeString(oc_primer_check(binding, &check))
+        return check.tm
+    }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let id = tableColumn?.identifier.rawValue ?? ""
+        return cell(content(tableView, id: id, row: row), centered: tableView === enzymeTable && id == "show")
+    }
+
+    private func content(_ tableView: NSTableView, id: String, row: Int) -> NSView {
         if tableView === primerTable {
             let p = primers[row]
-            if id == "name" {
+            switch id {
+            case "name":
+                // A small arrow for the strand it reads: → forward, ← reverse.
+                let reverse = p.strand == Int32(OC_STRAND_REVERSE)
+                let arrow = NSImageView(image: NSImage(systemSymbolName: reverse ? "arrow.left" : "arrow.right",
+                                                       accessibilityDescription: reverse ? "Reverse" : "Forward")
+                                        ?? NSImage(size: NSSize(width: 12, height: 12)))
+                arrow.contentTintColor = .systemOrange
+                arrow.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+                arrow.isHidden = p.length == 0
                 let label = NSTextField(labelWithString: p.name)
                 label.lineBreakMode = .byTruncatingTail
                 label.toolTip = "\(p.name): 5′-\(p.bases)-3′"
+                let stack = NSStackView(views: [arrow, label])
+                stack.spacing = 5
+                return stack
+            case "tm":
+                let t = tm(of: p)
+                let label = NSTextField(labelWithString: t.isNaN ? "—" : String(format: "%.1f °C", t))
+                label.textColor = .secondaryLabelColor
+                label.toolTip = "Melting temperature of the bases that bind"
+                return label
+            default:
+                let text = p.length > 0 ? location(start: p.start, length: p.length, strand: 0) : "doesn't bind"
+                let label = NSTextField(labelWithString: text)
+                label.textColor = .secondaryLabelColor
                 return label
             }
-            let text = p.length > 0 ? location(start: p.start, length: p.length, strand: p.strand) : "doesn't bind"
-            let label = NSTextField(labelWithString: text)
-            label.textColor = .secondaryLabelColor
-            return label
         }
         if tableView === featureTable {
             let f = features[row]

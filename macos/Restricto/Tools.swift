@@ -138,8 +138,8 @@ enum ToolMenus {
         if let view = main.item(withTitle: "View")?.submenu {
             let frames = NSMenu(title: "Translate")
             frames.addItem(item("No Translation", #selector(W.setFrames(_:))))
-            frames.addItem(item("Three Forward Frames", #selector(W.setFrames(_:))))
-            frames.addItem(item("All Six Frames", #selector(W.setFrames(_:))))
+            frames.addItem(item("Forward ORFs", #selector(W.setFrames(_:))))
+            frames.addItem(item("ORFs on Both Strands", #selector(W.setFrames(_:))))
             for (i, f) in frames.items.enumerated() { f.tag = [0, 3, 6][i] }
             let translate = NSMenuItem(title: "Translate", action: nil, keyEquivalent: "")
             translate.submenu = frames
@@ -785,7 +785,7 @@ extension DocumentWindowController {
 
     @objc func mapDisplay(_ sender: Any?) {
         guard let d = doc else { return }
-        let form = Form("Map Display", "Exports follow these settings.")
+        let form = Form("Map Display", "The sequence view and map exports follow these settings too.")
         let enzymes = form.check("Show", "Enzymes", on: d.mapShowsEnzymes)
         let primers = form.check("", "Primers", on: d.mapShowsPrimers)
         let types = Array(Set(d.features.filter { $0.drawn }.map { $0.type })).sorted()
