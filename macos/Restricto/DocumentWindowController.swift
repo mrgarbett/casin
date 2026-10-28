@@ -42,6 +42,11 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         window.setContentSize(NSSize(width: 1320, height: 820))
         window.minSize = NSSize(width: 900, height: 480)
         window.setFrameAutosaveName("RestrictoDocumentWindow")
+        // Every document, opened or new (including tool products), joins the
+        // front window as a tab rather than opening a window of its own,
+        // whatever the system-wide "Prefer tabs" setting says.
+        window.tabbingMode = .preferred
+        window.tabbingIdentifier = "RestrictoDocument"
         core.observe { [weak self] _ in self?.updateTexts() }
         updateTexts()
         window.center()
