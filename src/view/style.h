@@ -6,7 +6,7 @@
 
 namespace oc::view {
 
-// OpenClone's own palette, based on the GNOME HIG color palette.
+// Restricto's own palette, based on the GNOME HIG color palette.
 struct FeatureStyle {
     // Default fill for a feature type; `explicitColor` ("#rrggbb") wins when set.
     static Color fill(const std::string &type, const std::string &explicitColor = {});

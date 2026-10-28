@@ -1,11 +1,9 @@
-# OpenClone
+# Restricto
 
 An open-source, native desktop plasmid viewer for Linux and macOS. It opens
 GenBank, FASTA and SnapGene `.dna` files and shows a circular (or linear) map with
 features and restriction sites, next to a double-strand sequence view with
 translations.
-
-*OpenClone is a working name. It isn't affiliated with any commercial product.*
 
 **Status: alpha (0.1.0-alpha).** The tools work and are tested, but file formats,
 menus and the C API may still change. The version is set in `src/core/version.h`
@@ -24,12 +22,12 @@ No Electron, no web stack, no Qt.
 ## Layout
 
 ```
-src/core/     openclone_core  sequence model, GenBank/FASTA/.dna readers, enzymes, Tm, I/O (C++17, std only)
-src/view/     openclone_view  map + sequence-view layout, hit testing, Document model (C++17, std only)
+src/core/     restricto_core  sequence model, GenBank/FASTA/.dna readers, enzymes, Tm, I/O (C++17, std only)
+src/view/     restricto_view  map + sequence-view layout, hit testing, Document model (C++17, std only)
               cairo_render.*  draws layouts with cairo/Pango (Linux app, PNG/SVG/PDF export)
-src/capi/     openclone_capi  C API over core + view, used by the Swift app
-src/gtk/      OpenClone for Linux (GTK4 + libadwaita)
-macos/        OpenClone for macOS (Swift + AppKit), built via Package.swift
+src/capi/     restricto_capi  C API over core + view, used by the Swift app
+src/gtk/      Restricto for Linux (GTK4 + libadwaita)
+macos/        Restricto for macOS (Swift + AppKit), built via Package.swift
 tests/        core_tests, view_tests, capi_tests (CTest)
 samples/      synthetic demo plasmid (.gb + .dna) from scripts/make_demo_plasmid.py
 packaging/    .desktop file, MIME types, AppStream metainfo, icon, macOS Info.plist
@@ -44,18 +42,18 @@ sudo dnf install gcc-c++ cmake ninja-build pkgconfig gtk4-devel libadwaita-devel
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build --output-on-failure
-./build/src/gtk/openclone samples/pOC-demo.dna
+./build/src/gtk/restricto samples/pOC-demo.dna
 sudo cmake --install build      # binary, .desktop file, MIME types, icon, metainfo
 ```
 
-To build an RPM, use `packaging/fedora/openclone.spec`:
+To build an RPM, use `packaging/fedora/restricto.spec`:
 
 ```sh
 sudo dnf install rpm-build rpmdevtools desktop-file-utils libappstream-glib
 rpmdev-setuptree
-git archive --prefix=openclone-0.1.0/ -o ~/rpmbuild/SOURCES/openclone-0.1.0.tar.gz HEAD
-rpmbuild -ba packaging/fedora/openclone.spec
-sudo dnf install ~/rpmbuild/RPMS/*/openclone-0.1.0-*.rpm
+git archive --prefix=restricto-0.1.0/ -o ~/rpmbuild/SOURCES/restricto-0.1.0.tar.gz HEAD
+rpmbuild -ba packaging/fedora/restricto.spec
+sudo dnf install ~/rpmbuild/RPMS/*/restricto-0.1.0-*.rpm
 ```
 
 You need GTK ≥ 4.12 and libadwaita ≥ 1.5 (Fedora 40 or newer). Other distributions
@@ -64,20 +62,20 @@ pkg-config libgtk-4-dev libadwaita-1-dev libcairo2-dev` instead.
 
 ### Flatpak
 
-CI also builds a single-file Flatpak bundle (`openclone.flatpak`, in the
+CI also builds a single-file Flatpak bundle (`restricto.flatpak`, in the
 `flatpak-bundle` artifact). To install it:
 
 ```sh
 flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak install --user ./openclone.flatpak
-flatpak run io.github.openclone.OpenClone
+flatpak install --user ./restricto.flatpak
+flatpak run io.github.mrgarbett.Restricto
 ```
 
 The sandbox only sees files you hand it (file dialog, drag and drop, or Files).
 To open a file from the command line, forward it through the document portal:
 
 ```sh
-flatpak run --file-forwarding io.github.openclone.OpenClone @@ samples/pOC-demo.dna @@
+flatpak run --file-forwarding io.github.mrgarbett.Restricto @@ samples/pOC-demo.dna @@
 ```
 
 To build it yourself from the repo:
@@ -85,7 +83,7 @@ To build it yourself from the repo:
 ```sh
 sudo dnf install flatpak-builder
 flatpak-builder --user --install-deps-from=flathub --force-clean --install \
-    build-flatpak/app packaging/flatpak/io.github.openclone.OpenClone.yml
+    build-flatpak/app packaging/flatpak/io.github.mrgarbett.Restricto.yml
 ```
 
 CI (`.github/workflows/ci.yml`) builds and tests on Fedora, produces the RPM and a
@@ -95,22 +93,22 @@ Flatpak bundle, and builds the macOS app with both an older Xcode and Xcode 26.
 
 ```sh
 xcode-select --install                 # or a full Xcode, 15 or newer
-scripts/build_macos_app.sh             # -> build/macos/OpenClone.app
-open build/macos/OpenClone.app
+scripts/build_macos_app.sh             # -> build/macos/Restricto.app
+open build/macos/Restricto.app
 ```
 
 The app runs on macOS 13 Ventura and later, with the same features everywhere.
 Built with Xcode 26 and run on macOS 26 or later, it also adopts Liquid Glass: the
 Features/Enzymes sidebar floats as glass with the map running underneath, and the
 status line becomes a floating glass capsule. An older Xcode builds the app
-without that code (see `macos/OpenClone/Glass.swift`).
+without that code (see `macos/Restricto/Glass.swift`).
 
 You can also open `Package.swift` in Xcode, or run `swift build`. The C++ core and
 its tests still build with CMake on macOS:
 
 ```sh
 brew install cmake ninja
-cmake -S . -B build -G Ninja -DOPENCLONE_FRONTEND=none && cmake --build build
+cmake -S . -B build -G Ninja -DRESTRICTO_FRONTEND=none && cmake --build build
 ctest --test-dir build
 ```
 
@@ -118,12 +116,12 @@ ctest --test-dir build
 
 ```sh
 # Map image without a display (.png, .svg or .pdf). Linux:
-./build/src/gtk/openclone --render-map map.png --enzymes all samples/pOC-demo.dna
+./build/src/gtk/restricto --render-map map.png --enzymes all samples/pOC-demo.dna
 # Window screenshot (needs a display; Xvfb works, from xorg-x11-server-Xvfb on Fedora):
-xvfb-run -a env GSK_RENDERER=cairo ./build/src/gtk/openclone \
+xvfb-run -a env GSK_RENDERER=cairo ./build/src/gtk/restricto \
     --screenshot window.png --size 1440x900 --select 170-892 samples/pOC-demo.dna
 # macOS map image:
-build/macos/OpenClone.app/Contents/MacOS/OpenClone --render-map map.png samples/pOC-demo.dna
+build/macos/Restricto.app/Contents/MacOS/Restricto --render-map map.png samples/pOC-demo.dna
 ```
 
 Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
@@ -208,7 +206,7 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
 - Search a Folder: find sequence files by name, description, feature or primer name, or by
   a DNA sequence on either strand; click a result to open it.
 - Print… (Ctrl+P): the map on the first page, then the sequence in whole lines; the same
-  pages come out of `openclone --print-pdf out.pdf <file>` without a display.
+  pages come out of `restricto --print-pdf out.pdf <file>` without a display.
 - Enzyme sets: the Enzymes panel picks a set (Type IIS, enzymes sold by a supplier, or one you
   saved from the checked enzymes); saved sets are shared by every window.
 - View → Map Display: show or hide enzyme sites, primers and each feature type on the map

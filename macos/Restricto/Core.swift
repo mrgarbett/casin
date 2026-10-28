@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Swift wrappers over the C API (src/capi/include/openclone.h).
+// Swift wrappers over the C API (src/capi/include/restricto.h).
 import AppKit
-import OpenCloneCore
+import RestrictoCore
 
 /// Takes ownership of a malloc'd C string from the core.
 func takeString(_ p: UnsafeMutablePointer<CChar>?) -> String {
@@ -79,7 +79,7 @@ final class CoreDocument {
     func load(path: String) throws {
         var err: UnsafeMutablePointer<CChar>?
         if !oc_document_load(handle, path, &err) {
-            throw NSError(domain: "OpenClone", code: 1,
+            throw NSError(domain: "Restricto", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: takeString(err)])
         }
     }
@@ -87,7 +87,7 @@ final class CoreDocument {
     func save(path: String, format: Int32) throws {
         var err: UnsafeMutablePointer<CChar>?
         if !oc_document_save(handle, path, format, &err) {
-            throw NSError(domain: "OpenClone", code: 2,
+            throw NSError(domain: "Restricto", code: 2,
                           userInfo: [NSLocalizedDescriptionKey: takeString(err)])
         }
     }

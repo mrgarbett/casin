@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
-import OpenCloneCore
+import RestrictoCore
 
 /// Circular or linear map, drawn from the shared MapLayout.
 final class MapView: NSView {

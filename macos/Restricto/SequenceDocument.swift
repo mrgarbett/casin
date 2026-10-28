@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
-import OpenCloneCore
+import RestrictoCore
 
 /// One open sequence. Saves as GenBank, SnapGene .dna or EMBL (chosen in the
 /// save panel); FASTA stays an export. Edits, undo and redo live in the shared
@@ -50,15 +50,15 @@ final class SequenceDocument: NSDocument {
     }
 
     override func writableTypes(for saveOperation: NSDocument.SaveOperationType) -> [String] {
-        ["io.github.openclone.genbank", "io.github.openclone.snapgene-dna", "io.github.openclone.embl"]
+        ["io.github.mrgarbett.restricto.genbank", "io.github.mrgarbett.restricto.snapgene-dna", "io.github.mrgarbett.restricto.embl"]
     }
 
     override func write(to url: URL, ofType typeName: String) throws {
         let format: Int32
         switch typeName {
-        case "io.github.openclone.snapgene-dna": format = Int32(OC_FORMAT_SNAPGENE)
-        case "io.github.openclone.embl": format = Int32(OC_FORMAT_EMBL)
-        case "io.github.openclone.fasta": format = Int32(OC_FORMAT_FASTA)
+        case "io.github.mrgarbett.restricto.snapgene-dna": format = Int32(OC_FORMAT_SNAPGENE)
+        case "io.github.mrgarbett.restricto.embl": format = Int32(OC_FORMAT_EMBL)
+        case "io.github.mrgarbett.restricto.fasta": format = Int32(OC_FORMAT_FASTA)
         default: format = Int32(OC_FORMAT_GENBANK)
         }
         try core.save(path: url.path, format: format)

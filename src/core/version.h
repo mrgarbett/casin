@@ -3,4 +3,4 @@
 // AppStream metainfo and the macOS Info.plist carry the numeric part.
 #pragma once
 
-#define OPENCLONE_VERSION "0.1.0-alpha"
+#define RESTRICTO_VERSION "0.1.0-alpha"

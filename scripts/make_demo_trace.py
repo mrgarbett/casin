@@ -3,7 +3,7 @@
 """Writes samples/demo-trace.ab1: a simulated Sanger read of pOC-demo.
 
 The file follows the public ABIF layout (big-endian directory of tagged
-entries) with the tags OpenClone reads: PBAS, PCON, PLOC, DATA 9-12, FWO_
+entries) with the tags Restricto reads: PBAS, PCON, PLOC, DATA 9-12, FWO_
 and SMPL. Peaks are Gaussians; quality is low at both ends like a real read.
 One base differs from the plasmid so alignment tools have something to find.
 
