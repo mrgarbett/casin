@@ -452,7 +452,7 @@ extension DocumentWindowController {
             let length = move?.state == .on ? d.selectionLength : f.length
             oc_document_update_feature(d.handle, Int32(index), name.stringValue, types[type.indexOfSelectedItem],
                                        strands[strand.indexOfSelectedItem], Int32(start), Int32(length))
-            let color = hexColor(well.color)
+            let color = self.hexColor(well.color)
             if color != oldColor { oc_document_set_feature_color(d.handle, Int32(index), color) }
             d.activateFeature(index)
         }

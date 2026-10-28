@@ -529,6 +529,53 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         tab.attributedTitle = title
     }
 
+    private func updateTexts() {
+        updateStatus()
+        updateTitle()
+    }
+
+    /// The status: a Find message, or the caret or selection and the base under
+    /// the mouse. On macOS 26 the second capsule shows only while there is text.
+    private func updateStatus() {
+        var parts: [String] = []
+        if let message = statusMessage {
+            parts.append(message)
+        } else {
+            let selection = core.selectionText
+            if !selection.isEmpty { parts.append(selection) }
+            if hoverBase >= 0 && hoverBase < core.length { parts.append("Base \((hoverBase + 1).formatted())") }
+        }
+        status.stringValue = parts.joined(separator: "  ·  ")
+        guard let info = infoCapsule else { return }
+        let show = !parts.isEmpty
+        guard info.isHidden == show else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.25
+            context.allowsImplicitAnimation = true
+            info.isHidden = !show
+            info.superview?.layoutSubtreeIfNeeded()
+        }
+    }
+
+    /// The centred title: the file name, a red dot while there are unsaved
+    /// changes, and under it the sequence name (when it differs), length and
+    /// topology.
+    private func updateTitle() {
+        let doc = document as? NSDocument
+        let edited = (doc?.isDocumentEdited ?? false) || core.isModified
+        let subtitle: String
+        if core.isEmpty {
+            subtitle = "Open a file from the sidebar, or drop one here"
+        } else {
+            var parts = ["\(core.length.formatted()) bp", core.isCircular ? "circular" : "linear"]
+            let fileName = doc?.fileURL?.deletingPathExtension().lastPathComponent
+            if !core.name.isEmpty && core.name != fileName { parts.insert(core.name, at: 0) }
+            subtitle = parts.joined(separator: " · ")
+        }
+        titleView.update(name: doc?.displayName ?? (core.name.isEmpty ? "Untitled" : core.name),
+                         subtitle: subtitle, edited: edited)
+    }
+
     // MARK: Toolbar
 
     /// Undo, redo, save and export, as one pill beside the sidebar button.
