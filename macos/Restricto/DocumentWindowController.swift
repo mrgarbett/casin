@@ -603,16 +603,18 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         return menu
     }()
 
-    // The actions pill sits with the sidebar button (in the sidebar's part of
-    // the toolbar while it is open), the title in the centre, the view toggles
-    // at the right. Find opens on the sequence (⌘F).
+    // The actions pill sits just past the sidebar button: first in the
+    // toolbar's main part, which starts at the sidebar's edge. (Before the
+    // tracking separator it shares the sidebar's width with the window buttons
+    // and never fits, so AppKit moves it into the overflow menu.) The title
+    // is in the centre, the view toggles at the right. Find opens on ⌘F.
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, actionsItem, .sidebarTrackingSeparator, .flexibleSpace, titleItem, .flexibleSpace,
+        [.toggleSidebar, .sidebarTrackingSeparator, actionsItem, .flexibleSpace, titleItem, .flexibleSpace,
          mapItem, layoutItem, inspectorToolbarItem]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, actionsItem, .sidebarTrackingSeparator, titleItem, .flexibleSpace, .space,
+        [.toggleSidebar, .sidebarTrackingSeparator, actionsItem, titleItem, .flexibleSpace, .space,
          mapItem, layoutItem, complementItem, inspectorToolbarItem]
     }
 
