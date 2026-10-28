@@ -3,7 +3,8 @@
 //   Restricto --ui-smoke <out-dir> <file>
 // opens <file> in a real window, then resizes it to its minimum size, below
 // it (as a restored frame can be), collapses and reopens the sidebar, stacks
-// and hides the map, hides and shows the inspector, and saves a PNG of the
+// and hides the map, walks the right panel's panes (the sequence among them
+// with the map beside it), hides and shows the inspector, and saves a PNG of the
 // window after each step. It exits 0 when every step got
 // through layout; a layout loop or other exception aborts the process instead.
 import AppKit
@@ -55,8 +56,15 @@ enum UISmokeTest {
             ("7-map-hidden", { controller?.toggleMapHidden(nil) }),
             ("8-map-shown", { controller?.toggleMapHidden(nil) }),
             ("9-map-beside", { controller?.toggleMapStacked(nil) }),
-            ("9a-inspector-hidden", { controller?.toggleInspector(nil) }),
-            ("9b-inspector-shown", { controller?.toggleInspector(nil) }),
+            ("9-panel-enzymes", { controller?.showInspectorPane(.enzymes) }),
+            ("9-panel-primers", { controller?.showInspectorPane(.primers) }),
+            ("9-panel-sequence-grouped", {
+                controller?.showInspectorPane(.sequence)
+                controller?.toggleGroupTens(nil)
+            }),
+            ("9-ungrouped", { controller?.toggleGroupTens(nil) }),
+            ("9a-inspector-hidden", { controller?.toggleInspectorPanel(nil) }),
+            ("9b-inspector-shown", { controller?.toggleInspectorPanel(nil) }),
             ("10-below-minimum", { resize(NSSize(width: 600, height: 400)) }),
             ("11-sidebar-toggled-at-quit", { split?.toggleSidebar(nil) }),
         ]

@@ -147,6 +147,25 @@ std::vector<view::Scene> pagesFor(const OCDocument *doc, double w, double h, OCM
     ps.height = h;
     return view::printPages(doc->doc.sequence(), doc->doc.visibleSites(), doc->doc.reads(), tm, ps);
 }
+
+// "CDS, promoter" -> {"CDS", "promoter"}
+std::set<std::string> typeSet(const char *list)
+{
+    std::set<std::string> out;
+    std::string types = list ? list : "";
+    size_t from = 0;
+    while (from <= types.size()) {
+        const size_t comma = types.find(',', from);
+        const std::string t = trim(types.substr(from, comma == std::string::npos ? std::string::npos : comma - from));
+        if (!t.empty())
+            out.insert(t);
+        if (comma == std::string::npos)
+            break;
+        from = comma + 1;
+    }
+    return out;
+}
+
 } // namespace
 
 extern "C" {
@@ -825,17 +844,7 @@ OCMapLayout *oc_map_layout_new_options(const OCDocument *doc, double width, doub
     view::MapOptions opt;
     opt.enzymes = show_enzymes;
     opt.primers = show_primers;
-    std::string types = hidden_types ? hidden_types : "";
-    size_t from = 0;
-    while (from <= types.size()) {
-        const size_t comma = types.find(',', from);
-        const std::string t = trim(types.substr(from, comma == std::string::npos ? std::string::npos : comma - from));
-        if (!t.empty())
-            opt.hiddenTypes.insert(t);
-        if (comma == std::string::npos)
-            break;
-        from = comma + 1;
-    }
+    opt.hiddenTypes = typeSet(hidden_types);
     auto *l = new OCMapLayout;
     l->layout = std::make_unique<view::MapLayout>(doc->doc.sequence(), doc->doc.visibleSites(),
                                                   dark ? view::Theme::darkTheme() : view::Theme::light(), tm, width,
@@ -888,6 +897,27 @@ OCSeqLayout *oc_seq_layout_new_frames(const OCDocument *doc, double width, bool 
     l->layout = std::make_unique<view::SequenceLayout>(doc->doc.sequence(), doc->doc.visibleSites(),
                                                        dark ? view::Theme::darkTheme() : view::Theme::light(), tm,
                                                        width, show_complement, frames, doc->doc.reads());
+    return l;
+}
+
+OCSeqLayout *oc_seq_layout_new_options(const OCDocument *doc, double width, bool show_complement,
+                                       const OCSeqOptions *options, bool dark, OCMeasureText measure,
+                                       void *context)
+{
+    CallbackMeasurer tm(measure, context);
+    view::SeqOptions opt;
+    if (options) {
+        opt.frames = options->frames;
+        opt.groupTens = options->group_tens;
+        opt.enzymes = options->show_enzymes;
+        opt.features = options->show_features;
+        opt.primers = options->show_primers;
+        opt.hiddenTypes = typeSet(options->hidden_types);
+    }
+    auto *l = new OCSeqLayout;
+    l->layout = std::make_unique<view::SequenceLayout>(doc->doc.sequence(), doc->doc.visibleSites(),
+                                                       dark ? view::Theme::darkTheme() : view::Theme::light(), tm,
+                                                       width, show_complement, opt, doc->doc.reads());
     return l;
 }
 

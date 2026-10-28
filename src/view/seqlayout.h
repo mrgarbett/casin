@@ -8,6 +8,7 @@
 #include "../core/sequence.h"
 
 #include <map>
+#include <set>
 
 namespace oc::view {
 
@@ -18,18 +19,33 @@ struct SeqViewState {
     int activeSite = -1;   // index into the sites passed to the layout
 };
 
+// What the sequence view shows besides the bases.
+struct SeqOptions {
+    int frames = 0;            // 0, 3 (forward) or 6 reading frames
+    bool groupTens = false;    // a small gap after every 10 bases
+    bool enzymes = true;
+    bool features = true;
+    bool primers = true;
+    std::set<std::string> hiddenTypes;   // feature types left out (Feature::type)
+    int minOrfCodons = 75;     // frames show only ORFs at least this long (stop excluded)
+};
+
 // Wraps the sequence into lines of a multiple of 10 bp that fit `width`.
 // Each line: enzyme label rows, top strand, optional complement, ruler,
 // then feature lanes (CDS lanes get an amino-acid row). Forward primers sit
 // just above the top strand, reverse primers just below the bottom one.
-// With `frames` = 3 or 6, the forward reading frames are translated above the
-// strands and (for 6) the reverse frames below them. Aligned reads get a row
+// With `frames` = 3 or 6, open reading frames are translated above the strands
+// (forward, green) and for 6 below them (reverse, red); a line only gets rows
+// for the frames that have an ORF on it. 5' and 3' mark the strand ends. Aligned reads get a row
 // each under the ruler, with differences from the reference highlighted.
 // Holds references to `seq` and `sites`.
 class SequenceLayout {
 public:
     SequenceLayout(const oc::Sequence &seq, const std::vector<CutSite> &sites, const Theme &theme,
                    TextMeasurer &measure, double width, bool showComplement, int frames = 0,
+                   std::vector<ReadTrack> reads = {});
+    SequenceLayout(const oc::Sequence &seq, const std::vector<CutSite> &sites, const Theme &theme,
+                   TextMeasurer &measure, double width, bool showComplement, const SeqOptions &options,
                    std::vector<ReadTrack> reads = {});
 
     double totalHeight() const { return m_totalHeight; }
@@ -77,6 +93,7 @@ private:
         std::vector<bool> laneHasAA;
         std::vector<PrimerPiece> primers;
         int primerRowsTop = 0, primerRowsBottom = 0;
+        std::vector<int> framesTop, framesBottom;   // frame rows on this line (0..2, as +1..+3 / -1..-3)
         std::vector<int> reads;   // reads that cover part of this line, one row each
         // y offsets within the line
         double yFramesTop = 0, yFramesBottom = 0, yPrimersTop = 0, yTop = 0, yBottom = 0, yPrimersBottom = 0, yRuler = 0, yReads = 0, yLanes = 0;
@@ -95,19 +112,22 @@ private:
     const std::vector<CutSite> &m_sites;
     Theme m_theme;
     bool m_complement;
-    int m_frames = 0;
+    SeqOptions m_opt;
+    std::vector<char> m_orfFwd, m_orfRev;   // amino acid at each ORF codon's first top-strand base, else 0
     std::vector<ReadTrack> m_reads;
     int m_n = 0;
     int m_bpl = 10;
     double m_width = 0;
     double m_charW = 8;
     double m_left = 0;
+    double m_numRight = 0;   // right edge of the position numbers
+    double m_endW = 0;       // room for a 5'/3' mark at each end of a line
     double m_gap = 6;
     double m_totalHeight = 0;
     Font m_baseFont{13, false, true};
     Font m_smallFont{10, false, false};
     Font m_numFont{10, false, true};
-    double m_baseH = 18, m_labelH = 13, m_rulerH = 19, m_laneH = 14, m_aaH = 15, m_primerH = 13;
+    double m_baseH = 18, m_labelH = 13, m_rulerH = 19, m_laneH = 14, m_aaH = 15, m_primerH = 18;
     std::vector<Line> m_lines;
     std::vector<int> m_cutCount;
     std::map<int, std::vector<CodonMark>> m_marks;   // CDS feature -> marks sorted by position

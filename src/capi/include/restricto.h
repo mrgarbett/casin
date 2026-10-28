@@ -190,6 +190,20 @@ OCSeqLayout *oc_seq_layout_new(const OCDocument *doc, double width, bool show_co
 // Like oc_seq_layout_new, with 0, 3 (forward) or 6 reading frames translated.
 OCSeqLayout *oc_seq_layout_new_frames(const OCDocument *doc, double width, bool show_complement, int frames,
                                       bool dark, OCMeasureText measure, void *context);
+// What a sequence layout shows: reading frames (0, 3 or 6; only ORFs are
+// translated), a gap after every 10 bases, enzymes, features and primers.
+// `hidden_types` is a comma-separated list of feature types to leave out, or NULL.
+typedef struct OCSeqOptions {
+    int frames;
+    bool group_tens;
+    bool show_enzymes;
+    bool show_features;
+    bool show_primers;
+    const char *hidden_types;
+} OCSeqOptions;
+OCSeqLayout *oc_seq_layout_new_options(const OCDocument *doc, double width, bool show_complement,
+                                       const OCSeqOptions *options, bool dark, OCMeasureText measure,
+                                       void *context);
 void oc_seq_layout_free(OCSeqLayout *layout);
 double oc_seq_layout_total_height(const OCSeqLayout *layout);
 /* Lines visible in [scroll_y, scroll_y + view_height), shifted up by scroll_y. */

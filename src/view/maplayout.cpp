@@ -400,7 +400,7 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
         g.swatch = m_theme.primer;
         g.priority = -1;
         g.angle = angleOfPos((pr.binding.start + pr.binding.end) / 2.0);
-        g.anchorR = m_featureOuter + 6;
+        g.anchorR = m_featureOuter + 10;
         g.rect = {0, 0, tm.width(g.text, g.font) + 12, tm.height(g.font)};
         m_labels.push_back(g);
     }
@@ -411,7 +411,7 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
     bool primerBand = false;
     for (const Primer &pr : m_seq.primers)
         primerBand = primerBand || (m_options.primers && pr.binding.length() > 0 && pr.binding.end <= m_n);
-    const double elbowR = m_featureOuter + (primerBand ? 12 : 6);
+    const double elbowR = m_featureOuter + (primerBand ? 15 : 6);
     const double rLabel = elbowR + 12;
     for (LabelGlyph &g : m_labels) {
         if (g.feature < 0 && g.primer < 0) {
@@ -474,8 +474,8 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
 void MapLayout::layoutLinear(TextMeasurer &tm)
 {
     buildLabels(tm);
-    m_xl = kMargin + 12;
-    m_xr = m_w - kMargin - 12;
+    m_xl = kMargin + 20;   // room for the 5'/3' marks
+    m_xr = m_w - kMargin - 20;
     m_laneH = 14;
     const double lh = tm.height(m_labelFont) + 3;
 
@@ -700,13 +700,13 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
             s.text(t);
     }
 
-    // Primers: thin arrows just outside the feature lanes, pointing 5' to 3'.
+    // Primers: outlined arrows just outside the feature lanes, pointing 5' to 3'.
     for (const Primer &pr : m_seq.primers) {
         if (!m_options.primers || pr.binding.length() <= 0 || pr.binding.end > m_n)
             continue;
-        const double r0 = m_featureOuter + 2, r1 = r0 + 4, rm = (r0 + r1) / 2;
+        const double r0 = m_featureOuter + 2, r1 = r0 + 7, rm = (r0 + r1) / 2;
         double a0 = angleOfPos(pr.binding.start), a1 = angleOfPos(pr.binding.end);
-        const double head = std::min(6.0 / rm, (a1 - a0) * 0.5);
+        const double head = std::min(8.0 / rm, (a1 - a0) * 0.5);
         std::vector<Point> poly;
         if (pr.strand == Strand::Reverse) {
             poly.push_back(polar(a0, rm));
@@ -717,7 +717,7 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
             poly.push_back(polar(a1, rm));
             arcPoints(poly, a1 - head, a0, r0);
         }
-        s.polygon(poly, m_theme.primer, m_theme.featureOutline, 0.6);
+        s.polygon(poly, m_theme.primer.withAlpha(0.12), m_theme.primer, 1.4);
     }
 
     // Caret.
@@ -762,6 +762,9 @@ void MapLayout::renderLinear(Scene &s, const MapState &st) const
     renderLabels(s, st);
     s.line({m_xl, m_yb}, {m_xr, m_yb}, m_theme.backbone, 1.2);
     s.line({m_xl, m_yb + 3}, {m_xr, m_yb + 3}, m_theme.backbone, 1.2);
+    const Font endFont{10, false, false};
+    s.label("5\u2032", {m_xl - 4, m_yb + 1.5}, endFont, m_theme.mutedText, HAlign::Right, VAlign::Middle);
+    s.label("3\u2032", {m_xr + 4, m_yb + 1.5}, endFont, m_theme.mutedText, HAlign::Left, VAlign::Middle);
     for (const auto &t : m_ticks)
         s.line(t.first, t.second, m_theme.tick, 1);
     for (const TextItem &t : m_tickLabels)

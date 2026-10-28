@@ -60,8 +60,15 @@ final class SequenceView: NSView {
         let dark = isDarkAppearance
         if layout == nil || layoutWidth != width || layoutDark != dark {
             if let old = layout { oc_seq_layout_free(old) }
-            layout = oc_seq_layout_new_frames(document.handle, width, showComplement, Int32(document.frames), dark,
-                                              measureText, nil)
+            // The bottom-pill toggles and map options apply here as on the map.
+            let hidden = document.mapHiddenTypes.sorted().joined(separator: ",")
+            layout = hidden.withCString { types in
+                var options = OCSeqOptions(frames: Int32(document.frames), group_tens: document.groupTens,
+                                           show_enzymes: document.mapShowsEnzymes, show_features: true,
+                                           show_primers: document.mapShowsPrimers, hidden_types: types)
+                return oc_seq_layout_new_options(document.handle, width, showComplement, &options, dark,
+                                                 measureText, nil)
+            }
             layoutWidth = width
             layoutDark = dark
         }

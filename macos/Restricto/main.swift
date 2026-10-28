@@ -107,13 +107,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ])
         submenu("View", [
             item("Toggle Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)), "s", [.command, .control]),
-            item("Toggle Inspector", #selector(DocumentWindowController.toggleInspector(_:)), "i",
+            item("Hide Inspector", #selector(DocumentWindowController.toggleInspectorPanel(_:)), "i",
                  [.command, .option]),
             .separator(),
             item("Hide Map", #selector(DocumentWindowController.toggleMapHidden(_:)), "m", [.command, .shift]),
             item("Stack Map Above Sequence", #selector(DocumentWindowController.toggleMapStacked(_:))),
             .separator(),
             item("Show Complement Strand", #selector(DocumentWindowController.toggleComplementStrand(_:))),
+            item("Group Bases in Tens", #selector(DocumentWindowController.toggleGroupTens(_:))),
             .separator(),
             item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]),
         ])

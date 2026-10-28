@@ -75,8 +75,16 @@ final class CoreDocument {
 
     // MARK: View options (the window's map and sequence views follow these)
 
-    /// Reading frames translated in the sequence view: 0, 3 or 6.
+    /// Reading frames translated in the sequence view: 0, 3 or 6 (open reading frames only).
     var frames = 0 { didSet { viewOptionsChanged() } }
+    /// A small gap after every 10 bases in the sequence view; off by default, remembered.
+    static let groupTensKey = "GroupTens"
+    var groupTens = UserDefaults.standard.bool(forKey: CoreDocument.groupTensKey) {
+        didSet {
+            UserDefaults.standard.set(groupTens, forKey: Self.groupTensKey)
+            viewOptionsChanged()
+        }
+    }
     var mapShowsEnzymes = true { didSet { viewOptionsChanged() } }
     var mapShowsPrimers = true { didSet { viewOptionsChanged() } }
     var mapHiddenTypes: Set<String> = [] { didSet { viewOptionsChanged() } }
