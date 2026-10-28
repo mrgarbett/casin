@@ -58,6 +58,9 @@ public:
     int featureAt(Point p) const;      // -1 if none
     int siteAt(Point p) const;         // -1 if none
     int primerAt(Point p) const;       // -1 if none
+    // First base of the codon whose amino acid is under p (in an ORF frame
+    // row or a CDS translation row), or -1.
+    int codonAt(Point p) const;
     int readAt(Point p) const;         // -1 if none
     double lineTopFor(int pos) const;
     double lineHeightFor(int pos) const;
@@ -80,7 +83,9 @@ private:
     struct PrimerPiece {
         int primer;
         int row;
-        int a, b;   // columns within the line, [a, b)
+        int a, b;   // columns within the line, [a, b): the annealing bases and the 5' tail
+        int bindA, bindB;   // the annealing columns among them (empty when only tail)
+        int nameCols;       // columns kept free past the 3' end for the name (0: no name here)
         bool head;  // 3' end is in this piece
         bool top;   // forward primers sit above the top strand, reverse ones below
     };
@@ -100,6 +105,7 @@ private:
     };
 
     double colX(int col) const;        // left edge of the base at column col
+    int columnAt(double x) const;      // the column whose base covers x (may be < 0 or >= m_bpl)
     double boundaryX(int b) const;     // x of the boundary before column b
     int lineIndexAt(double y) const;
     double laneY(const Line &l, int lane) const;
@@ -127,6 +133,7 @@ private:
     Font m_baseFont{13, false, true};
     Font m_smallFont{10, false, false};
     Font m_numFont{10, false, true};
+    Font m_primerNameFont{10, true, false};
     double m_baseH = 18, m_labelH = 13, m_rulerH = 19, m_laneH = 14, m_aaH = 15, m_primerH = 18;
     std::vector<Line> m_lines;
     std::vector<int> m_cutCount;

@@ -144,9 +144,20 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
                 content.trailingAnchor.constraint(equalTo: root.trailingAnchor),
                 content.topAnchor.constraint(equalTo: root.topAnchor),
                 content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-                // Shifted as the map is, which leaves room for the panel's pill.
-                pill.centerXAnchor.constraint(equalTo: root.safeAreaLayoutGuide.centerXAnchor,
-                                              constant: -Self.panelPillRoom / 2),
+            ])
+            // Shifted as the map is, which leaves room for the panel's pill on the
+            // left. The edges stay inside the visible middle: on a narrow middle
+            // the status text truncates instead of the pill running under the
+            // sidebar or the panel pill.
+            let centre = pill.centerXAnchor.constraint(equalTo: root.safeAreaLayoutGuide.centerXAnchor,
+                                                       constant: Self.panelPillRoom / 2)
+            centre.priority = .defaultHigh
+            NSLayoutConstraint.activate([
+                centre,
+                pill.leadingAnchor.constraint(greaterThanOrEqualTo: root.safeAreaLayoutGuide.leadingAnchor,
+                                              constant: Self.panelPillRoom + 8),
+                pill.trailingAnchor.constraint(lessThanOrEqualTo: root.safeAreaLayoutGuide.trailingAnchor,
+                                               constant: -8),
             ])
             statusPill = pill
             pillMaxWidth = pill.widthAnchor.constraint(lessThanOrEqualToConstant: 400)
@@ -174,13 +185,13 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             ])
         }
 
-        // The panel's pill floats over the top right of the middle, beside the
-        // panel, and stays there when the panel is hidden to bring it back.
+        // The panel's pill floats at the top left of the middle, beside the
+        // folder sidebar, and stays put whether the panels are shown or hidden.
         let panelPill = inspector.pill
         root.addSubview(panelPill)
         NSLayoutConstraint.activate([
             panelPill.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 10),
-            panelPill.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor, constant: -8),
+            panelPill.leadingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.leadingAnchor, constant: 8),
         ])
         inspector.onPick = { [weak self] _, wasShowing in
             guard let item = self?.inspectorItem else { return }
@@ -189,7 +200,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             if item.isCollapsed { item.animator().isCollapsed = false }
             else if wasShowing { item.animator().isCollapsed = true }
         }
-        mapView.trailingInset = Self.panelPillRoom
+        mapView.leadingInset = Self.panelPillRoom
 
         browser.fallbackFolder = { [weak self] in
             (self?.document as? NSDocument)?.fileURL?.deletingLastPathComponent()
@@ -310,7 +321,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             pillBottom?.isActive = true
         }
         // In the middle, the sequence leaves room for the panel's floating pill.
-        sequenceView.trailingInset = sequenceInPanel ? 0 : Self.panelPillRoom
+        sequenceView.leadingInset = sequenceInPanel ? 0 : Self.panelPillRoom
         // A panel holding the sequence may grow as wide as the user likes, but
         // not over the middle: the split view (not the constraints inside the
         // middle) has to keep room for the map, or for the sequence when the
@@ -425,17 +436,41 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         searchField.action = #selector(findFromField(_:))
     }
 
-    /// NSDocument calls this when its unsaved-changes state flips: show a red dot
-    /// beside the file name in the tab.
+    /// NSDocument calls this when its unsaved-changes state flips: a small red
+    /// dot just left of the file name in the tab. (A tab's accessory view sits
+    /// at its far edge, away from the centred name, so the dot goes in the title.)
     override func setDocumentEdited(_ dirtyFlag: Bool) {
         super.setDocumentEdited(dirtyFlag)
-        window?.tab.accessoryView = dirtyFlag ? UnsavedDot() : nil
+        updateTabTitle()
+    }
+
+    override func synchronizeWindowTitleWithDocumentName() {
+        super.synchronizeWindowTitleWithDocumentName()
+        updateTabTitle()
+    }
+
+    private func updateTabTitle() {
+        guard let tab = window?.tab else { return }
+        guard let doc = document as? NSDocument, doc.isDocumentEdited else {
+            tab.attributedTitle = nil
+            return
+        }
+        let font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        let title = NSMutableAttributedString(string: "●  ", attributes: [
+            .font: NSFont.systemFont(ofSize: 7), .foregroundColor: NSColor.systemRed, .baselineOffset: 1.5,
+        ])
+        title.append(NSAttributedString(string: doc.displayName, attributes: [.font: font]))
+        tab.attributedTitle = title
     }
 
     private func updateTexts() {
         status.stringValue = core.statusText
         // The title stays the document's file name (NSDocument's, with the
         // proxy icon); the sequence name can differ, so it goes in the subtitle.
+        if core.isEmpty {
+            window?.subtitle = "Open a file from the sidebar, or drop one here"
+            return
+        }
         var parts = ["\(core.length.formatted()) bp", core.isCircular ? "circular" : "linear"]
         let fileName = (document as? NSDocument)?.fileURL?.deletingPathExtension().lastPathComponent
         if !core.name.isEmpty && core.name != fileName { parts.insert(core.name, at: 0) }
