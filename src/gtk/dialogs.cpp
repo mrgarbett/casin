@@ -1080,8 +1080,11 @@ struct PrimerSeqForm {
 
 void updatePrimerSeq(PrimerSeqForm *st)
 {
-    const std::string bases = cleanBases(text(st->bases));
-    st->primer = {trim(text(st->name)), bases, {0, 0}, Strand::Forward};
+    // As on the Mac: a primer typed in mixed case keeps it (lowercase can mark
+    // a tail); the binding search is on uppercase.
+    const std::string typed = cleanPrimerBases(text(st->bases));
+    const std::string bases = cleanBases(typed);
+    st->primer = {trim(text(st->name)), typed, {0, 0}, Strand::Forward};
     std::string msg;
     if (bases.size() < 15) {
         msg = "Enter at least 15 bases";
