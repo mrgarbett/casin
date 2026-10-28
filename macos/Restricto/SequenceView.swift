@@ -11,6 +11,17 @@ final class SequenceView: NSView {
     private var layoutDark = false
     private var dragging = false
     private var anchor = 0
+    /// A drag that started on an amino acid: the codon it started on, so the
+    /// selection grows codon by codon while it stays on amino acids.
+    private var codonAnchor: Int?
+    /// The codon whose amino acid is under the mouse, outlined on the strands.
+    private var hoverCodon = -1 {
+        didSet {
+            guard hoverCodon != oldValue else { return }
+            if let layout = layout { oc_seq_layout_set_hover_codon(layout, Int32(hoverCodon)) }
+            needsDisplay = true
+        }
+    }
 
     var showComplement = true {
         didSet { invalidateLayout() }
@@ -50,15 +61,14 @@ final class SequenceView: NSView {
         invalidateLayout()
     }
 
-    /// Room kept free along the left edge (the panel's pill floats there).
-    var leadingInset: CGFloat = 0 {
-        didSet { if leadingInset != oldValue { invalidateLayout() } }
+    /// Room kept free along the right edge (the panel's pill floats there).
+    var trailingInset: CGFloat = 0 {
+        didSet { if trailingInset != oldValue { invalidateLayout() } }
     }
 
-    /// An event's point in the layout's coordinates (right of the inset).
+    /// An event's point in the layout's coordinates.
     private func layoutPoint(_ event: NSEvent) -> NSPoint {
-        let p = convert(event.locationInWindow, from: nil)
-        return NSPoint(x: p.x - leadingInset, y: p.y)
+        convert(event.locationInWindow, from: nil)
     }
 
     private var availableWidth: CGFloat {
@@ -67,7 +77,7 @@ final class SequenceView: NSView {
 
     @discardableResult
     private func ensureLayout() -> OpaquePointer? {
-        let width = Double(max(1, availableWidth - leadingInset))
+        let width = Double(max(1, availableWidth - trailingInset))
         let dark = isDarkAppearance
         if layout == nil || layoutWidth != width || layoutDark != dark {
             if let old = layout { oc_seq_layout_free(old) }
@@ -82,6 +92,7 @@ final class SequenceView: NSView {
             }
             layoutWidth = width
             layoutDark = dark
+            if let layout = layout { oc_seq_layout_set_hover_codon(layout, Int32(hoverCodon)) }
         }
         return layout
     }
@@ -109,8 +120,8 @@ final class SequenceView: NSView {
               let scene = oc_seq_layout_render(layout, document.handle, dirtyRect.minY, dirtyRect.height) else { return }
         defer { oc_scene_free(scene) }
         ctx.saveGState()
-        ctx.translateBy(x: leadingInset, y: dirtyRect.minY)   // scenes are relative to the scroll offset
-        drawScene(scene, in: ctx, leading: leadingInset)
+        ctx.translateBy(x: 0, y: dirtyRect.minY)   // scenes are relative to the scroll offset
+        drawScene(scene, in: ctx, trailing: trailingInset)
         ctx.restoreGState()
     }
 
@@ -183,13 +194,16 @@ final class SequenceView: NSView {
             SelectionBadge.shared.show(for: document, event: event, in: self)
             return
         }
-        // An amino acid in a translation row selects its codon.
+        // An amino acid in a translation row selects its codon; dragging on
+        // across amino acids selects their codons too.
         let codon = Int(oc_seq_layout_codon_at(layout, p.x, p.y))
         if codon >= 0 {
             window?.makeFirstResponder(self)
+            dragging = true
+            codonAnchor = codon
+            anchor = codon
             document.select(start: codon, length: 3)
             SelectionBadge.shared.show(for: document, event: event, in: self)
-            SelectionBadge.shared.hideSoon()
             return
         }
         let site = Int(oc_seq_layout_site_at(layout, p.x, p.y))
@@ -212,28 +226,51 @@ final class SequenceView: NSView {
     override func mouseUp(with event: NSEvent) {
         if dragging { SelectionBadge.shared.hideSoon() }
         dragging = false
+        codonAnchor = nil
     }
 
     private func extendSelection(to p: NSPoint) {
         guard let layout = layout else { return }
         let y = min(max(p.y, visibleRect.minY), visibleRect.maxY - 1)
+        if let first = codonAnchor {
+            // From the first codon to the one under the mouse, both whole;
+            // off the amino acids, to the nearest base.
+            let codon = Int(oc_seq_layout_codon_at(layout, p.x, y))
+            hoverCodon = codon
+            let end: Int
+            if codon >= 0 {
+                end = codon >= first ? codon + 3 : codon
+            } else {
+                end = Int(oc_seq_layout_position_at(layout, p.x, y))
+            }
+            let start = min(first, end), stop = max(first + 3, end)
+            document.select(start: start, length: min(stop, document.length) - start)
+            return
+        }
         let pos = Int(oc_seq_layout_position_at(layout, p.x, y))
         document.select(start: min(pos, anchor), length: abs(pos - anchor))
     }
 
-    // MARK: Tooltips
+    // MARK: Hover: codons and tooltips
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+        addTrackingArea(NSTrackingArea(rect: .zero,
+                                       options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
                                        owner: self, userInfo: nil))
     }
 
     override func mouseMoved(with event: NSEvent) {
         guard let layout = layout else { return }
         let p = layoutPoint(event)
+        // An amino acid under the mouse outlines its codon.
+        hoverCodon = Int(oc_seq_layout_codon_at(layout, p.x, p.y))
         let tip = takeString(oc_seq_layout_tooltip(layout, p.x, p.y))
         toolTip = tip.isEmpty ? nil : tip
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoverCodon = -1
     }
 }

@@ -143,6 +143,21 @@ final class DocumentController: NSDocumentController {
         }
         return type
     }
+
+    /// A file opened from anywhere (sidebar, Finder, Open, a drop) replaces the
+    /// empty window the app starts with, while that window is still untouched.
+    /// AppKit's own transient-document swap doesn't happen once windows are tabbed.
+    override func openDocument(withContentsOf url: URL, display displayDocument: Bool,
+                               completionHandler: @escaping (NSDocument?, Bool, Error?) -> Void) {
+        let empty = documents.filter {
+            guard let seq = $0 as? SequenceDocument else { return false }
+            return seq.fileURL == nil && !seq.isDocumentEdited && seq.core.isEmpty
+        }
+        super.openDocument(withContentsOf: url, display: displayDocument) { document, wasOpen, error in
+            if document != nil { empty.forEach { $0.close() } }
+            completionHandler(document, wasOpen, error)
+        }
+    }
 }
 
 // MARK: - Entry point

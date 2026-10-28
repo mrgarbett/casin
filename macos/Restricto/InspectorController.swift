@@ -3,8 +3,9 @@ import AppKit
 import RestrictoCore
 
 /// The window's right-hand panel: the sequence (when the map sits beside it),
-/// Enzymes, Features or Primers, picked from a vertical pill. The window floats
-/// the pill at the left of the middle, where it stays when the panel is hidden. Vibrant on Ventura, glass on macOS 26.
+/// Enzymes, Features or Primers, picked from a vertical pill. The window keeps
+/// the pill at its right edge: in this panel's free strip while the panel
+/// shows, over the middle when it is hidden. Vibrant on Ventura, glass on macOS 26.
 final class InspectorController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     enum Pane: String, CaseIterable {
         case sequence, enzymes, features, primers
@@ -16,6 +17,8 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     private var pillButtons: [NSButton] = []
     /// The vertical pill; the window places it.
     private(set) lazy var pill: NSView = buildPill()
+    /// The strip kept free for the pill along the right edge.
+    static let pillRoom: CGFloat = 52
     /// Called after a pill button picks a pane, with whether it was already showing.
     var onPick: ((Pane, Bool) -> Void)?
     /// Holds the window's sequence view while the panel shows it.
@@ -64,10 +67,24 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         root.addSubview(tabs)
         NSLayoutConstraint.activate([
             tabs.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 4),
-            tabs.leadingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.leadingAnchor),
-            tabs.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor),
+            tabs.leadingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.leadingAnchor, constant: 6),
+            tabs.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor, constant: -Self.pillRoom),
             tabs.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
+        // macOS 26 draws no line between the middle and the panel. Draw one
+        // (with a grab handle) over the panel's edge; the drag stays the split
+        // view's. Earlier systems draw their own divider.
+        if Glass.isAvailable {
+            let edge = PanelEdgeLine()
+            edge.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(edge)
+            NSLayoutConstraint.activate([
+                edge.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+                edge.topAnchor.constraint(equalTo: root.topAnchor),
+                edge.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+                edge.widthAnchor.constraint(equalToConstant: 5),
+            ])
+        }
         view = root
 
         document.observe { [weak self] what in
@@ -466,4 +483,17 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
             document.activateSite(next)
         }
     }
+}
+
+/// The line along the panel's left edge, with a small handle at its middle,
+/// like the map/sequence divider. It lets clicks through to the divider.
+final class PanelEdgeLine: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.separatorColor.setFill()
+        NSRect(x: 0, y: 0, width: 1, height: bounds.height).fill()
+        NSColor.tertiaryLabelColor.setFill()
+        NSBezierPath(roundedRect: NSRect(x: 0, y: bounds.midY - 16, width: 4, height: 32), xRadius: 2, yRadius: 2).fill()
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

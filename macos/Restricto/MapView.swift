@@ -30,20 +30,19 @@ final class MapView: NSView {
         if let layout = layout { oc_map_layout_free(layout) }
     }
 
-    /// Room kept free along the left edge (the panel's pill floats there).
-    var leadingInset: CGFloat = 0 {
-        didSet { if leadingInset != oldValue { invalidateLayout() } }
+    /// Room kept free along the right edge (the panel's pill floats there).
+    var trailingInset: CGFloat = 0 {
+        didSet { if trailingInset != oldValue { invalidateLayout() } }
     }
 
-    /// The size the map is laid out in: the view less the leading inset.
+    /// The size the map is laid out in: the view less the trailing inset.
     private var mapSize: CGSize {
-        CGSize(width: max(1, bounds.width - leadingInset), height: bounds.height)
+        CGSize(width: max(1, bounds.width - trailingInset), height: bounds.height)
     }
 
-    /// An event's point in the map's own coordinates (right of the inset).
+    /// An event's point in the map's own coordinates.
     private func mapPoint(_ event: NSEvent) -> NSPoint {
-        let p = convert(event.locationInWindow, from: nil)
-        return NSPoint(x: p.x - leadingInset, y: p.y)
+        convert(event.locationInWindow, from: nil)
     }
 
     override var isFlipped: Bool { true }
@@ -75,10 +74,7 @@ final class MapView: NSView {
         guard let ctx = NSGraphicsContext.current?.cgContext, let layout = ensureLayout(),
               let scene = oc_map_layout_render(layout, document.handle) else { return }
         defer { oc_scene_free(scene) }
-        ctx.saveGState()
-        ctx.translateBy(x: leadingInset, y: 0)
-        drawScene(scene, in: ctx, leading: leadingInset)
-        ctx.restoreGState()
+        drawScene(scene, in: ctx, trailing: trailingInset)
     }
 
     // MARK: Mouse

@@ -41,8 +41,16 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private var statusPill: NSView?
     private var pillBottom: NSLayoutConstraint?
     private var detailRoot: NSView?
-    /// Room the right panel's floating pill takes over the middle.
-    private static let panelPillRoom: CGFloat = 52
+    /// Room the panel's pill takes at the window's right edge.
+    private static let panelPillRoom = InspectorController.pillRoom
+    /// The panel pill's place: at the window's right edge, inside the panel
+    /// while it shows, else over the middle (see placePanelPill).
+    private var panelPillConstraints: [NSLayoutConstraint] = []
+    private var panelPillOverMiddle: Bool?
+    /// The status capsule's centre and right edge guard, which leave room for
+    /// the panel pill while it is over the middle.
+    private var statusCentre: NSLayoutConstraint?
+    private var statusTrailing: NSLayoutConstraint?
     /// Minimum sizes for the two panes; which pair is active follows the layout.
     private var minWidths: [NSLayoutConstraint] = []
     private var minHeights: [NSLayoutConstraint] = []
@@ -100,11 +108,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             // This runs inside the window's layout pass; changing a constraint
             // here marks layout dirty again and can loop until AppKit aborts.
             // Apply the new width after the pass, and only when it changed.
-            DispatchQueue.main.async {
-                guard let self = self, let limit = self.pillMaxWidth else { return }
-                let width = max(0, self.split.frame.width - 32)
-                if abs(limit.constant - width) >= 1 { limit.constant = width }
-            }
+            DispatchQueue.main.async { self?.updatePillMaxWidth() }
         }
 
         split.isVertical = true
@@ -145,20 +149,29 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
                 content.topAnchor.constraint(equalTo: root.topAnchor),
                 content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             ])
-            // Shifted as the map is, which leaves room for the panel's pill on the
-            // left. The edges stay inside the visible middle: on a narrow middle
-            // the status text truncates instead of the pill running under the
-            // sidebar or the panel pill.
-            let centre = pill.centerXAnchor.constraint(equalTo: root.safeAreaLayoutGuide.centerXAnchor,
-                                                       constant: Self.panelPillRoom / 2)
+            // Shifted as the map is while the panel pill is over the middle
+            // (placePanelPill). The edges stay inside the visible middle: on a
+            // narrow middle the status text truncates instead of the pill
+            // running under the sidebar or the panel pill.
+            // The max width (updatePillMaxWidth) is what keeps it inside; these
+            // guards stay below the split view's holding priority, so the pill
+            // never raises the middle's minimum width, and the window's with it.
+            let centre = pill.centerXAnchor.constraint(equalTo: root.safeAreaLayoutGuide.centerXAnchor)
             centre.priority = .defaultHigh
-            NSLayoutConstraint.activate([
-                centre,
-                pill.leadingAnchor.constraint(greaterThanOrEqualTo: root.safeAreaLayoutGuide.leadingAnchor,
-                                              constant: Self.panelPillRoom + 8),
-                pill.trailingAnchor.constraint(lessThanOrEqualTo: root.safeAreaLayoutGuide.trailingAnchor,
-                                               constant: -8),
-            ])
+            let leading = pill.leadingAnchor.constraint(greaterThanOrEqualTo: root.safeAreaLayoutGuide.leadingAnchor,
+                                                        constant: 8)
+            let trailing = pill.trailingAnchor.constraint(lessThanOrEqualTo: root.safeAreaLayoutGuide.trailingAnchor,
+                                                          constant: -8)
+            leading.priority = .defaultLow - 1
+            trailing.priority = .defaultLow - 1
+            NSLayoutConstraint.activate([centre, leading, trailing])
+            statusCentre = centre
+            statusTrailing = trailing
+            root.postsFrameChangedNotifications = true
+            NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: root,
+                                                   queue: .main) { [weak self] _ in
+                DispatchQueue.main.async { self?.updatePillMaxWidth() }
+            }
             statusPill = pill
             pillMaxWidth = pill.widthAnchor.constraint(lessThanOrEqualToConstant: 400)
             pillMaxWidth?.isActive = true
@@ -185,14 +198,6 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             ])
         }
 
-        // The panel's pill floats at the top left of the middle, beside the
-        // folder sidebar, and stays put whether the panels are shown or hidden.
-        let panelPill = inspector.pill
-        root.addSubview(panelPill)
-        NSLayoutConstraint.activate([
-            panelPill.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 10),
-            panelPill.leadingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.leadingAnchor, constant: 8),
-        ])
         inspector.onPick = { [weak self] _, wasShowing in
             guard let item = self?.inspectorItem else { return }
             // A hidden panel opens on the pane picked; picking the pane already
@@ -200,7 +205,6 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             if item.isCollapsed { item.animator().isCollapsed = false }
             else if wasShowing { item.animator().isCollapsed = true }
         }
-        mapView.leadingInset = Self.panelPillRoom
 
         browser.fallbackFolder = { [weak self] in
             (self?.document as? NSDocument)?.fileURL?.deletingLastPathComponent()
@@ -227,6 +231,13 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         window.contentViewController = splitController
         self.splitController = splitController
         applyMapLayout()
+        placePanelPill()
+        // The panel pill follows the panel being shown or hidden (by the pill,
+        // the menu or dragging the divider), after the resize, not inside it.
+        NotificationCenter.default.addObserver(forName: NSSplitView.didResizeSubviewsNotification,
+                                               object: splitController.splitView, queue: .main) { [weak self] _ in
+            DispatchQueue.main.async { self?.placePanelPill() }
+        }
 
         // The background extension places its content inside the safe area only
         // when it lays out, which a sidebar collapsing or opening doesn't cause.
@@ -267,9 +278,10 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         super.showWindow(sender)
         guard !didFirstShow, let window = window else { return }
         didFirstShow = true
-        // Keep the tab bar up even with one document, so the file name and its
-        // unsaved-changes dot are always in view.
-        if let group = window.tabGroup, !group.isTabBarVisible { window.toggleTabBar(nil) }
+        // One document: no tab bar (the title shows its name and unsaved dot).
+        // Earlier builds kept the bar up, and AppKit remembers that choice, so
+        // take it down once; with two or more tabs AppKit shows it again.
+        if let group = window.tabGroup, group.isTabBarVisible, group.windows.count <= 1 { window.toggleTabBar(nil) }
         // init ran before the document was attached, so the subtitle could
         // not yet tell the sequence name from the file name.
         updateTexts()
@@ -320,8 +332,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
                 : pill.bottomAnchor.constraint(equalTo: root.safeAreaLayoutGuide.bottomAnchor, constant: -12)
             pillBottom?.isActive = true
         }
-        // In the middle, the sequence leaves room for the panel's floating pill.
-        sequenceView.leadingInset = sequenceInPanel ? 0 : Self.panelPillRoom
+        updateMiddleInsets()
         // A panel holding the sequence may grow as wide as the user likes, but
         // not over the middle: the split view (not the constraints inside the
         // middle) has to keep room for the map, or for the sequence when the
@@ -330,6 +341,40 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         detailItem?.minimumThickness = sequenceInPanel ? 260 : 320
         split.adjustSubviews()
         sequenceView.updateSize()
+    }
+
+    /// The panel's pill stays at the window's right edge, near the top: in the
+    /// panel while it shows (the panel keeps that strip free), else over the
+    /// middle, whose map (or sequence, when it is alone) then keeps it free.
+    /// Moves it only when the panel's state changed.
+    private func placePanelPill() {
+        guard let item = inspectorItem, let root = detailRoot else { return }
+        let overMiddle = item.isCollapsed
+        guard overMiddle != panelPillOverMiddle else { return }
+        panelPillOverMiddle = overMiddle
+        let pill = inspector.pill
+        NSLayoutConstraint.deactivate(panelPillConstraints)
+        pill.removeFromSuperview()
+        let host = overMiddle ? root : inspector.view
+        pill.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(pill)
+        panelPillConstraints = [
+            pill.topAnchor.constraint(equalTo: host.safeAreaLayoutGuide.topAnchor, constant: 10),
+            pill.trailingAnchor.constraint(equalTo: host.safeAreaLayoutGuide.trailingAnchor, constant: -8),
+        ]
+        NSLayoutConstraint.activate(panelPillConstraints)
+        updateMiddleInsets()
+        DispatchQueue.main.async { self.updatePillMaxWidth() }
+    }
+
+    /// Room for the panel pill in the middle while it floats there: the map
+    /// keeps a strip free on its right, or the sequence when it is alone.
+    private func updateMiddleInsets() {
+        let room = panelPillOverMiddle == true ? Self.panelPillRoom : 0
+        mapView.trailingInset = mapHidden ? 0 : room
+        sequenceView.trailingInset = !sequenceInPanel && mapHidden ? room : 0
+        statusCentre?.constant = -room / 2
+        statusTrailing?.constant = -8 - room
     }
 
     /// Map 45 %, sequence the rest, along the split's axis; with the sequence in
@@ -355,6 +400,17 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     /// Shows one pane of the right panel (the UI smoke test walks through them).
     func showInspectorPane(_ pane: InspectorController.Pane) {
         inspector.select(pane)
+    }
+
+    /// The widest the status pill may be: the visible middle (the root's safe
+    /// area leaves out the sidebar it runs under) less the panel pill's room
+    /// and a margin. Called after layout, never from inside it, and the
+    /// constant changes only when the width really did.
+    private func updatePillMaxWidth() {
+        guard let limit = pillMaxWidth, let root = detailRoot else { return }
+        let room = panelPillOverMiddle == true ? Self.panelPillRoom : 0
+        let width = max(0, root.safeAreaRect.width - room - 16)
+        if abs(limit.constant - width) >= 1 { limit.constant = width }
     }
 
     /// The status line inside a glass capsule, or nil before macOS 26.
@@ -437,8 +493,9 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     }
 
     /// NSDocument calls this when its unsaved-changes state flips: a small red
-    /// dot just left of the file name in the tab. (A tab's accessory view sits
-    /// at its far edge, away from the centred name, so the dot goes in the title.)
+    /// dot beside the window title, and just left of the file name in the tab
+    /// (shown with two or more documents). A tab's accessory view sits at its
+    /// far edge, away from the centred name, so that dot goes in the tab title.
     override func setDocumentEdited(_ dirtyFlag: Bool) {
         super.setDocumentEdited(dirtyFlag)
         updateTabTitle()
@@ -449,7 +506,23 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         updateTabTitle()
     }
 
+    /// The title's dot: shown only while the document has unsaved changes.
+    private func updateUnsavedDot() {
+        guard let item = unsavedToolbarItem else { return }
+        let edited = (document as? NSDocument)?.isDocumentEdited ?? false
+        // A hidden item takes no room (macOS 15 SDK and later); otherwise the
+        // dot only fades.
+        #if compiler(>=6.0)
+        if #available(macOS 15, *) {
+            item.isHidden = !edited
+            return
+        }
+        #endif
+        item.view?.alphaValue = edited ? 1 : 0
+    }
+
     private func updateTabTitle() {
+        updateUnsavedDot()
         guard let tab = window?.tab else { return }
         guard let doc = document as? NSDocument, doc.isDocumentEdited else {
             tab.attributedTitle = nil
@@ -485,20 +558,43 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private let mapItem = NSToolbarItem.Identifier("map")
     private let layoutItem = NSToolbarItem.Identifier("mapLayout")
     private let inspectorToolbarItem = NSToolbarItem.Identifier("inspector")
+    /// A red dot just right of the window title while there are unsaved changes.
+    private let unsavedItem = NSToolbarItem.Identifier("unsaved")
+    private var unsavedToolbarItem: NSToolbarItem?
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace, mapItem, layoutItem, exportItem, searchItem,
-         inspectorToolbarItem]
+        [.toggleSidebar, .sidebarTrackingSeparator, unsavedItem, .flexibleSpace, mapItem, layoutItem, exportItem,
+         searchItem, inspectorToolbarItem]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace, .space, mapItem, layoutItem, complementItem,
-         exportItem, searchItem, inspectorToolbarItem]
+        [.toggleSidebar, .sidebarTrackingSeparator, unsavedItem, .flexibleSpace, .space, mapItem, layoutItem,
+         complementItem, exportItem, searchItem, inspectorToolbarItem]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         switch id {
+        case unsavedItem:
+            // The title sits at the start of the toolbar's middle section, so
+            // the first item there is just right of it.
+            let item = NSToolbarItem(itemIdentifier: id)
+            let holder = NSView(frame: NSRect(x: 0, y: 0, width: 12, height: 12))
+            let dot = UnsavedDot(diameter: 8)
+            holder.addSubview(dot)
+            NSLayoutConstraint.activate([
+                dot.centerXAnchor.constraint(equalTo: holder.centerXAnchor),
+                dot.centerYAnchor.constraint(equalTo: holder.centerYAnchor),
+                holder.widthAnchor.constraint(equalToConstant: 12),
+                holder.heightAnchor.constraint(equalToConstant: 12),
+            ])
+            item.view = holder
+            item.isBordered = false
+            item.label = "Unsaved"
+            item.toolTip = "Unsaved changes"
+            unsavedToolbarItem = item
+            updateUnsavedDot()
+            return item
         case searchItem:
             let item = NSSearchToolbarItem(itemIdentifier: id)
             item.searchField = searchField

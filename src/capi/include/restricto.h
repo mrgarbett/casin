@@ -215,6 +215,9 @@ int oc_seq_layout_site_at(const OCSeqLayout *layout, double x, double y);
 int oc_seq_layout_primer_at(const OCSeqLayout *layout, double x, double y);
 /* First base of the codon whose amino acid is at (x, y) in a translation row, or -1. */
 int oc_seq_layout_codon_at(const OCSeqLayout *layout, double x, double y);
+/* Outlines the codon starting at codon_start on the strands in later renders
+   (the one whose amino acid is under the mouse); -1 for none. */
+void oc_seq_layout_set_hover_codon(OCSeqLayout *layout, int codon_start);
 double oc_seq_layout_line_top(const OCSeqLayout *layout, int position);
 double oc_seq_layout_line_height(const OCSeqLayout *layout, int position);
 char *oc_seq_layout_tooltip(const OCSeqLayout *layout, double x, double y);
