@@ -286,7 +286,7 @@ bool readSnapGene(const std::string &data, Sequence *out, std::string *error)
             if (payload.empty())
                 return fail("empty DNA packet");
             seq.circular = (uint8_t(payload[0]) & 0x01) != 0;
-            seq.bases = cleanBases(payload.substr(1));
+            seq.setBasesFromText(payload.substr(1));
             haveDna = true;
             break;
         case kFeatures: featuresXml = payload; break;
@@ -319,7 +319,7 @@ std::string writeSnapGene(const Sequence &seq)
         header.push_back(char(v & 0xFF));
     }
     putPacket(out, kHeader, header);
-    putPacket(out, kDna, std::string(1, char(seq.circular ? 0x01 : 0x00)) + seq.bases);
+    putPacket(out, kDna, std::string(1, char(seq.circular ? 0x01 : 0x00)) + seq.shownBases());
     putPacket(out, kPrimers, primersXml(seq));
     std::string notes = "<Notes><Type>Synthetic</Type>";
     if (!seq.description.empty())

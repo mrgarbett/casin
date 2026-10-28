@@ -127,6 +127,13 @@ jobs:
           test -s build/macos/Restricto.app/Contents/Resources/Restricto.icns
           # AppKit picks the macOS 26 design from the SDK version in the binary.
           test "$(awk '$1 == "sdk" { print $2 }' vtool.txt)" = "$(xcrun --show-sdk-version)"
+      - name: Check the Quick Look extension
+        run: |
+          APPEX=build/macos/Restricto.app/Contents/PlugIns/RestrictoQuickLook.appex
+          test -x "$APPEX/Contents/MacOS/RestrictoQuickLook"
+          plutil -lint "$APPEX/Contents/Info.plist"
+          strings "$APPEX/Contents/MacOS/RestrictoQuickLook" | grep -q PreviewProvider
+          codesign -d --entitlements - "$APPEX" 2>&1 | grep -q app-sandbox
       - name: App size
         run: du -sk build/macos/Restricto.app | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Headless map render

@@ -2,18 +2,9 @@
 // Swift wrappers over the C API (src/capi/include/restricto.h).
 import AppKit
 import RestrictoCore
-
-/// Takes ownership of a malloc'd C string from the core.
-func takeString(_ p: UnsafeMutablePointer<CChar>?) -> String {
-    guard let p = p else { return "" }
-    defer { oc_string_free(p) }
-    return String(cString: p)
-}
-
-extension OCColor {
-    var nsColor: NSColor { NSColor(srgbRed: r, green: g, blue: b, alpha: a) }
-    var cgColor: CGColor { CGColor(srgbRed: r, green: g, blue: b, alpha: a) }
-}
+// Scene drawing and the C-string helpers, shared with the Quick Look extension;
+// exported so every file of the app sees them.
+@_exported import RestrictoDrawing
 
 enum Change {
     static let sequence = Int32(OC_CHANGED_SEQUENCE)
@@ -50,6 +41,10 @@ struct EnzymeInfo {
     let cuts: Int
     let hidden: Bool
     let passesFilter: Bool
+    /// How many of its sites Dam or Dcm methylation blocks, and which ("Dam",
+    /// "Dcm", "Dam and Dcm"; empty when none).
+    let methylationBlocked: Int
+    let methylation: String
 }
 
 /// The document model shared with the Linux app (selection, enzyme filter, ...).
@@ -116,6 +111,8 @@ final class CoreDocument {
     var length: Int { Int(oc_document_length(handle)) }
     var isCircular: Bool { oc_document_is_circular(handle) }
     var statusText: String { takeString(oc_document_status_text(handle)) }
+    /// The caret or selection part of the status (the title shows the length).
+    var selectionText: String { takeString(oc_document_selection_text(handle)) }
 
     var features: [FeatureInfo] {
         (0..<Int(oc_document_feature_count(handle))).compactMap { i in
@@ -132,7 +129,9 @@ final class CoreDocument {
             var e = OCEnzymeInfo()
             guard oc_document_enzyme(handle, Int32(i), &e) else { return nil }
             return EnzymeInfo(name: String(cString: e.name), site: String(cString: e.site), cuts: Int(e.cuts),
-                              hidden: e.hidden, passesFilter: e.passes_filter)
+                              hidden: e.hidden, passesFilter: e.passes_filter,
+                              methylationBlocked: Int(e.methylation_blocked),
+                              methylation: e.methylation != nil ? String(cString: e.methylation) : "")
         }
     }
 
@@ -158,6 +157,10 @@ final class CoreDocument {
         }
     }
 
+    /// Adds features for the common elements found in the sequence (one undo
+    /// step); returns how many.
+    func annotateCommonFeatures() -> Int { Int(oc_document_annotate_common(handle)) }
+
     var hasSelection: Bool { oc_document_has_selection(handle) }
     var selectionStart: Int { Int(oc_document_selection_start(handle)) }
     var selectionLength: Int { Int(oc_document_selection_length(handle)) }
@@ -175,24 +178,6 @@ final class CoreDocument {
         let n = oc_document_find_next(handle, query, &count)
         return (Int(n), Int(count))
     }
-}
-
-// MARK: - Fonts and text metrics
-
-enum SceneFonts {
-    static func font(size: Double, bold: Bool, mono: Bool) -> NSFont {
-        if mono {
-            return NSFont.monospacedSystemFont(ofSize: size, weight: bold ? .bold : .regular)
-        }
-        return NSFont.systemFont(ofSize: size, weight: bold ? .semibold : .regular)
-    }
-}
-
-/// Text widths for the shared layout code, measured with AppKit fonts.
-let measureText: OCMeasureText = { _, text, size, bold, mono in
-    guard let text = text else { return 0 }
-    let font = SceneFonts.font(size: size, bold: bold, mono: mono)
-    return Double((String(cString: text) as NSString).size(withAttributes: [.font: font]).width)
 }
 
 extension NSView {

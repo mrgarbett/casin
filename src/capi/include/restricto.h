@@ -62,6 +62,9 @@ const char *oc_document_description(OCDocument *doc);
 int oc_document_length(const OCDocument *doc);
 bool oc_document_is_circular(const OCDocument *doc);
 char *oc_document_status_text(const OCDocument *doc);
+/* The status without the length and topology: only the caret or selection
+   (empty when there is neither), for a window that shows the length elsewhere. */
+char *oc_document_selection_text(const OCDocument *doc);
 
 typedef struct {
     const char *name;
@@ -83,6 +86,8 @@ typedef struct {
     int cuts;
     bool hidden;
     bool passes_filter;
+    int methylation_blocked;   /* of its sites, how many Dam/Dcm methylation blocks */
+    const char *methylation;   /* "Dam", "Dcm", "Dam and Dcm", or "" */
 } OCEnzymeInfo;
 
 int oc_document_enzyme_count(const OCDocument *doc);           /* every known enzyme */
@@ -142,6 +147,11 @@ int oc_document_add_feature(OCDocument *doc, const char *name, const char *type,
 void oc_document_update_feature(OCDocument *doc, int index, const char *name, const char *type, int strand,
                                 int start, int length);
 void oc_document_remove_feature(OCDocument *doc, int index);
+/* Annotates common elements (promoters, origins, resistance genes, primer
+ * sites) found in the sequence, as one undo step. Returns how many were added. */
+int oc_document_annotate_common(OCDocument *doc);
+/* "#rrggbb", or "" (or NULL) for the type's default colour. Undoable. */
+void oc_document_set_feature_color(OCDocument *doc, int index, const char *color);
 
 typedef struct {
     const char *name;
@@ -176,6 +186,11 @@ OCMapLayout *oc_map_layout_new(const OCDocument *doc, double width, double heigh
 OCMapLayout *oc_map_layout_new_options(const OCDocument *doc, double width, double height, bool dark,
                                        bool show_enzymes, bool show_primers, const char *hidden_types,
                                        OCMeasureText measure, void *context);
+/* Like oc_map_layout_new_options, with the ORFs of 3 (forward) or 6 reading
+   frames drawn as arrows, as the sequence view translates them; 0 for none. */
+OCMapLayout *oc_map_layout_new_frames(const OCDocument *doc, double width, double height, bool dark,
+                                      bool show_enzymes, bool show_primers, const char *hidden_types, int frames,
+                                      OCMeasureText measure, void *context);
 void oc_map_layout_free(OCMapLayout *layout);
 OCScene *oc_map_layout_render(const OCMapLayout *layout, const OCDocument *doc);
 /* kind = OC_HIT_*; index = feature or visible-site index; position = base boundary. */
@@ -215,6 +230,8 @@ int oc_seq_layout_site_at(const OCSeqLayout *layout, double x, double y);
 int oc_seq_layout_primer_at(const OCSeqLayout *layout, double x, double y);
 /* First base of the codon whose amino acid is at (x, y) in a translation row, or -1. */
 int oc_seq_layout_codon_at(const OCSeqLayout *layout, double x, double y);
+/* The base (0-based) at (x, y) on either strand, or -1. */
+int oc_seq_layout_base_at(const OCSeqLayout *layout, double x, double y);
 /* Outlines the codon starting at codon_start on the strands in later renders
    (the one whose amino acid is under the mouse); -1 for none. */
 void oc_seq_layout_set_hover_codon(OCSeqLayout *layout, int codon_start);

@@ -267,6 +267,13 @@ const char *oc_document_description(OCDocument *doc)
 int oc_document_length(const OCDocument *doc) { return doc->doc.sequence().length(); }
 bool oc_document_is_circular(const OCDocument *doc) { return doc->doc.sequence().circular; }
 char *oc_document_status_text(const OCDocument *doc) { return dupString(doc->doc.statusText()); }
+char *oc_document_selection_text(const OCDocument *doc)
+{
+    std::string s = doc->doc.statusText(false);
+    if (!s.empty())
+        s[0] = char(std::toupper(static_cast<unsigned char>(s[0])));   // "Selected …", "Position …"
+    return dupString(s);
+}
 
 int oc_document_feature_count(const OCDocument *doc) { return int(doc->doc.sequence().features.size()); }
 
@@ -358,7 +365,22 @@ void oc_document_update_feature(OCDocument *doc, int index, const char *name, co
     doc->doc.replaceFeature(index, f);
 }
 
+void oc_document_set_feature_color(OCDocument *doc, int index, const char *color)
+{
+    const Sequence &s = doc->doc.sequence();
+    if (index < 0 || index >= int(s.features.size()))
+        return;
+    Feature f = s.features[size_t(index)];
+    const std::string c = color ? color : "";
+    if (c == f.color)
+        return;
+    f.color = c;
+    doc->doc.replaceFeature(index, f);
+}
+
 void oc_document_remove_feature(OCDocument *doc, int index) { doc->doc.removeFeature(index); }
+
+int oc_document_annotate_common(OCDocument *doc) { return doc->doc.annotateCommonFeatures(); }
 
 int oc_document_primer_count(const OCDocument *doc) { return int(doc->doc.sequence().primers.size()); }
 
@@ -428,6 +450,16 @@ bool oc_document_enzyme(OCDocument *doc, int index, OCEnzymeInfo *out)
     out->cuts = doc->doc.cutCount(e.name);
     out->hidden = doc->doc.isEnzymeHidden(e.name);
     out->passes_filter = doc->doc.enzymePassesFilter(e.name);
+    int blocked = 0, kinds = MethylNone;
+    for (const CutSite &s : doc->doc.allSites())
+        if (s.enzyme && s.enzyme->name == e.name) {
+            const int m = methylationBlock(doc->doc.sequence(), s);
+            blocked += m != MethylNone;
+            kinds |= m;
+        }
+    out->methylation_blocked = blocked;
+    static const char *const names[] = {"", "Dam", "Dcm", "Dam and Dcm"};
+    out->methylation = names[kinds & 3];
     return true;
 }
 
@@ -841,11 +873,20 @@ OCMapLayout *oc_map_layout_new_options(const OCDocument *doc, double width, doub
                                        bool show_enzymes, bool show_primers, const char *hidden_types,
                                        OCMeasureText measure, void *context)
 {
+    return oc_map_layout_new_frames(doc, width, height, dark, show_enzymes, show_primers, hidden_types, 0, measure,
+                                    context);
+}
+
+OCMapLayout *oc_map_layout_new_frames(const OCDocument *doc, double width, double height, bool dark,
+                                      bool show_enzymes, bool show_primers, const char *hidden_types, int frames,
+                                      OCMeasureText measure, void *context)
+{
     CallbackMeasurer tm(measure, context);
     view::MapOptions opt;
     opt.enzymes = show_enzymes;
     opt.primers = show_primers;
     opt.hiddenTypes = typeSet(hidden_types);
+    opt.frames = frames;
     auto *l = new OCMapLayout;
     l->layout = std::make_unique<view::MapLayout>(doc->doc.sequence(), doc->doc.visibleSites(),
                                                   dark ? view::Theme::darkTheme() : view::Theme::light(), tm, width,
@@ -943,6 +984,7 @@ int oc_seq_layout_feature_at(const OCSeqLayout *l, double x, double y) { return 
 int oc_seq_layout_site_at(const OCSeqLayout *l, double x, double y) { return l->layout->siteAt({x, y}); }
 int oc_seq_layout_primer_at(const OCSeqLayout *l, double x, double y) { return l->layout->primerAt({x, y}); }
 int oc_seq_layout_codon_at(const OCSeqLayout *l, double x, double y) { return l->layout->codonAt({x, y}); }
+int oc_seq_layout_base_at(const OCSeqLayout *l, double x, double y) { return l->layout->baseAt({x, y}); }
 double oc_seq_layout_line_top(const OCSeqLayout *l, int position) { return l->layout->lineTopFor(position); }
 double oc_seq_layout_line_height(const OCSeqLayout *l, int position) { return l->layout->lineHeightFor(position); }
 char *oc_seq_layout_tooltip(const OCSeqLayout *l, double x, double y) { return dupString(l->layout->tooltipAt({x, y})); }

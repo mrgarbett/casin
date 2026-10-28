@@ -2,11 +2,14 @@
 #include "document.h"
 #include "maplayout.h"   // withThousands
 #include "../core/edit.h"
+#include "../core/featurelib.h"
 #include "../core/tm.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 namespace oc {
 
@@ -316,7 +319,15 @@ void Document::markUnsaved()
 
 bool Document::typeBases(const std::string &text)
 {
-    const std::string bases = cleanBases(text);
+    std::string bases;
+    for (char c : text) {
+        const unsigned char u = static_cast<unsigned char>(c);
+        if (std::isspace(u) || std::isdigit(u))
+            continue;
+        if (!std::strchr("ACGTacgt", c))
+            return false;
+        bases.push_back(c);
+    }
     if (bases.empty())
         return false;
     const Span sel = m_hasSelection ? m_selection : Span{m_seq.length(), 0};
@@ -504,6 +515,21 @@ void Document::removeFeature(int index)
          [&] { return sel; });
 }
 
+int Document::annotateCommonFeatures()
+{
+    const std::vector<Feature> found = findCommonFeatures(m_seq);
+    if (found.empty())
+        return 0;
+    const Span sel = m_selection;
+    edit("Annotate Common Features",
+         [&](Sequence &s) {
+             s.features.insert(s.features.end(), found.begin(), found.end());
+             return true;
+         },
+         [&] { return sel; });
+    return int(found.size());
+}
+
 int Document::addPrimerFromSelection(const std::string &name, Strand strand)
 {
     if (!m_hasSelection || m_selection.length <= 0 || m_selection.wraps(m_seq.length()))
@@ -550,22 +576,23 @@ void Document::removePrimer(int index)
          [&] { return sel; });
 }
 
-std::string Document::statusText() const
+std::string Document::statusText(bool withLength) const
 {
     if (m_seq.empty())
-        return "No sequence";
+        return withLength ? "No sequence" : "";
     const int n = m_seq.length();
-    std::string s = view::formatBp(n) + "  ·  " + (m_seq.circular ? "circular" : "linear");
+    std::string s = withLength ? view::formatBp(n) + "  ·  " + (m_seq.circular ? "circular" : "linear") : "";
+    const std::string sep = s.empty() ? "" : "  ·  ";
     if (!m_hasSelection)
         return s;
     if (m_selection.length == 0) {
-        s += "  ·  position " + view::withThousands(m_selection.start);
+        s += sep + "position " + view::withThousands(m_selection.start);
         return s;
     }
     int end = m_selection.end();
     if (end > n)
         end -= n;
-    s += "  ·  selected " + view::withThousands(m_selection.start + 1) + "–" + view::withThousands(end) + " ("
+    s += sep + "selected " + view::withThousands(m_selection.start + 1) + "–" + view::withThousands(end) + " ("
        + view::formatBp(m_selection.length) + ")";
     const std::string bases = selectedBases();
     char buf[64];

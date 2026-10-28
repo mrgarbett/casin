@@ -86,8 +86,10 @@ SequenceLayout::SequenceLayout(const oc::Sequence &seq, const std::vector<CutSit
     std::map<const Enzyme *, int> counts;
     for (const CutSite &s : m_sites)
         ++counts[s.enzyme];
-    for (const CutSite &s : m_sites)
+    for (const CutSite &s : m_sites) {
         m_cutCount.push_back(counts[s.enzyme]);
+        m_methyl.push_back(methylationBlock(m_seq, s));
+    }
 
     for (size_t i = 0; i < m_seq.features.size(); ++i) {
         const Feature &f = m_seq.features[i];
@@ -133,6 +135,7 @@ SequenceLayout::SequenceLayout(const oc::Sequence &seq, const std::vector<CutSit
             }
             labels.back().unique = labels.back().unique || m_cutCount[size_t(si)] == 1;
             labels.back().typeIIS = labels.back().typeIIS || cs.enzyme->cutsOutsideSite();
+            labels.back().blocked = labels.back().blocked && m_methyl[size_t(si)] != MethylNone;
         }
         std::vector<double> rowEnd;
         for (SiteLabel &l : labels) {
@@ -330,6 +333,20 @@ int SequenceLayout::columnAt(double x) const
     return group * 10 + std::min(9, int(within / m_charW));
 }
 
+int SequenceLayout::baseAt(Point p) const
+{
+    const int li = lineIndexAt(p.y);
+    if (li < 0)
+        return -1;
+    const Line &l = m_lines[size_t(li)];
+    if (p.y < l.y + l.yTop || p.y >= l.y + l.yRuler)
+        return -1;
+    const int col = columnAt(p.x);
+    if (col < 0 || col >= l.len)
+        return -1;
+    return l.start + col;
+}
+
 int SequenceLayout::codonAt(Point p) const
 {
     const int li = lineIndexAt(p.y);
@@ -516,7 +533,10 @@ std::string SequenceLayout::tooltipAt(Point p) const
     const int si = siteAt(p);
     if (si >= 0) {
         const CutSite &c = m_sites[size_t(si)];
-        return c.enzyme->name + "  " + c.enzyme->site + "  cuts after " + withThousands(c.cutTop);
+        std::string tip = c.enzyme->name + "  " + c.enzyme->site + "  cuts after " + withThousands(c.cutTop);
+        if (m_methyl[size_t(si)] != MethylNone)
+            tip += "\nBlocked by " + methylationName(m_methyl[size_t(si)]) + " methylation (DNA from dam+ dcm+ E. coli)";
+        return tip;
     }
     const int pi = primerAt(p);
     if (pi >= 0) {
@@ -605,7 +625,7 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
         }
 
         // Bases, one text run per group of 10.
-        const std::string bases = m_seq.bases.substr(size_t(l.start), size_t(l.len));
+        const std::string bases = m_seq.shown(l.start, l.len);   // lowercase where marked
         const std::string comp = m_complement ? complement(bases) : std::string();
         for (int g = 0; g < l.len; g += 10) {
             const std::string chunk = bases.substr(size_t(g), 10);
@@ -658,7 +678,9 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
             const double yRow = y0 + l.yFramesTop - 3 - (lab.row + 1) * m_labelH;
             Font f = m_smallFont;
             f.bold = lab.unique;
+            // Sites methylation blocks are greyed out.
             const Color c = isActive ? m_theme.cutMarker
+                          : lab.blocked ? m_theme.mutedText
                           : lab.unique ? m_theme.enzymeUnique
                           : lab.typeIIS ? m_theme.enzymeTypeIIS
                                         : m_theme.enzymeLabel;

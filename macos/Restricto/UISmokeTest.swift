@@ -4,7 +4,9 @@
 // opens <file> in a real window, then resizes it to its minimum size, below
 // it (as a restored frame can be), collapses and reopens the sidebar, stacks
 // and hides the map, walks the right panel's panes (the sequence among them
-// with the map beside it), hides and shows the inspector, and saves a PNG of the
+// with the map beside it), hides and shows the inspector, opens Find (which
+// reopens a hidden panel on the sequence), selects bases (the status splits),
+// copies the map image, and saves a PNG of the
 // window after each step. It exits 0 when every step got
 // through layout; a layout loop or other exception aborts the process instead.
 import AppKit
@@ -73,6 +75,20 @@ enum UISmokeTest {
                 controller?.toggleMapStacked(nil)
                 controller?.toggleInspectorPanel(nil)
             }),
+            ("9e-find-open", { controller?.performFindPanelAction(nil) }),
+            ("9e-find-closed", { controller?.performFindPanelAction(nil) }),
+            ("9e-find-opens-hidden-panel", {
+                controller?.toggleInspectorPanel(nil)
+                controller?.performFindPanelAction(nil)
+            }),
+            ("9e-find-closed-again", { controller?.performFindPanelAction(nil) }),
+            ("9g-selection-split-status", {
+                (controller?.document as? SequenceDocument)?.core.select(start: 99, length: 30)
+            }),
+            ("9g-copy-map-image", { controller?.copyMapImage(nil) }),
+            ("9g-caret", { (controller?.document as? SequenceDocument)?.core.select(start: 10, length: 0) }),
+            ("9e-translation-on-map", { (controller?.document as? SequenceDocument)?.core.frames = 6 }),
+            ("9e-translation-off", { (controller?.document as? SequenceDocument)?.core.frames = 0 }),
             ("9e-edited", { (controller?.document as? NSDocument)?.updateChangeCount(.changeDone) }),
             ("9f-saved", { (controller?.document as? NSDocument)?.updateChangeCount(.changeCleared) }),
             ("10-below-minimum", { resize(NSSize(width: 600, height: 400)) }),

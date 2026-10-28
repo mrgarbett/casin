@@ -62,6 +62,8 @@ public:
     // First base of the codon whose amino acid is under p (in an ORF frame
     // row or a CDS translation row), or -1.
     int codonAt(Point p) const;
+    // The base under p on either strand, or -1.
+    int baseAt(Point p) const;
     int readAt(Point p) const;         // -1 if none
     double lineTopFor(int pos) const;
     double lineHeightFor(int pos) const;
@@ -74,6 +76,7 @@ private:
         double x = 0, w = 0;
         int row = 0;
         bool unique = false, typeIIS = false;
+        bool blocked = true;   // every site here blocked by Dam/Dcm methylation
     };
     struct LanePiece {
         int feature;
@@ -138,6 +141,7 @@ private:
     double m_baseH = 18, m_labelH = 13, m_rulerH = 19, m_laneH = 14, m_aaH = 15, m_primerH = 18;
     std::vector<Line> m_lines;
     std::vector<int> m_cutCount;
+    std::vector<int> m_methyl;   // per site: MethylationBlock flags
     std::map<int, std::vector<CodonMark>> m_marks;   // CDS feature -> marks sorted by position
 };
 

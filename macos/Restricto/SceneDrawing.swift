@@ -1,87 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Draws a shared-layout scene with CoreGraphics. Expects a flipped context
-// (y grows downward), as in a flipped NSView.
+// Map layouts and images for the window's document (the drawing itself is in
+// RestrictoDrawing).
 import AppKit
 import RestrictoCore
 
-/// `trailing` widens the background fill that far right of the scene, for a
-/// view that keeps an inset free on its right.
-func drawScene(_ scene: OpaquePointer, in ctx: CGContext, trailing: CGFloat = 0) {
-    let background = oc_scene_background(scene)
-    if background.a > 0 {
-        ctx.setFillColor(background.cgColor)
-        ctx.fill(CGRect(x: 0, y: 0, width: oc_scene_width(scene) + trailing, height: oc_scene_height(scene)))
-    }
-    ctx.setLineJoin(.round)
-    let count = Int(oc_scene_item_count(scene))
-    for i in 0..<count {
-        let index = Int32(i)
-        if oc_scene_item_kind(scene, index) == Int32(OC_ITEM_PATH) {
-            var p = OCPathInfo()
-            guard oc_scene_path(scene, index, &p), p.point_count >= 2, let pts = p.points else { continue }
-            let path = CGMutablePath()
-            path.move(to: CGPoint(x: pts[0].x, y: pts[0].y))
-            for j in 1..<Int(p.point_count) {
-                path.addLine(to: CGPoint(x: pts[j].x, y: pts[j].y))
-            }
-            if p.closed { path.closeSubpath() }
-            if p.fill.a > 0 {
-                ctx.addPath(path)
-                ctx.setFillColor(p.fill.cgColor)
-                ctx.fillPath()
-            }
-            if p.stroke.a > 0 {
-                ctx.addPath(path)
-                ctx.setStrokeColor(p.stroke.cgColor)
-                ctx.setLineWidth(p.line_width)
-                ctx.setLineDash(phase: 0, lengths: p.dashed ? [3, 3] : [])
-                ctx.strokePath()
-            }
-        } else {
-            var t = OCTextInfo()
-            guard oc_scene_text(scene, index, &t), let cText = t.text else { continue }
-            drawText(String(cString: cText), t, in: ctx)
-        }
-    }
-}
-
-private func drawText(_ string: String, _ t: OCTextInfo, in ctx: CGContext) {
-    let font = SceneFonts.font(size: t.size, bold: t.bold, mono: t.mono)
-    let attributed = NSAttributedString(string: string, attributes: [
-        .font: font,
-        .foregroundColor: t.color.nsColor,
-    ])
-    let size = attributed.size()
-    var dx = 0.0
-    switch t.halign {
-    case Int32(OC_HALIGN_CENTER): dx = -size.width / 2
-    case Int32(OC_HALIGN_RIGHT): dx = -size.width
-    default: break
-    }
-    var dy = 0.0   // offset to the top of the line box
-    switch t.valign {
-    case Int32(OC_VALIGN_MIDDLE): dy = -size.height / 2
-    case Int32(OC_VALIGN_TOP): dy = 0
-    default: dy = -font.ascender
-    }
-    ctx.saveGState()
-    ctx.translateBy(x: t.x, y: t.y)
-    if t.angle != 0 {
-        ctx.rotate(by: t.angle)   // clockwise on screen, since the context is flipped
-    }
-    // NSAttributedString draws through the current NSGraphicsContext.
-    let previous = NSGraphicsContext.current
-    NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: true)
-    attributed.draw(at: NSPoint(x: dx, y: dy))
-    NSGraphicsContext.current = previous
-    ctx.restoreGState()
-}
-
-/// A map layout that follows the document's Map Display options.
+/// A map layout that follows the document's Map Display options, with the
+/// translation's ORFs as arrows while it is on.
 func newMapLayout(_ document: CoreDocument, size: CGSize, dark: Bool) -> OpaquePointer? {
-    oc_map_layout_new_options(document.handle, size.width, size.height, dark, document.mapShowsEnzymes,
-                              document.mapShowsPrimers, document.mapHiddenTypes.sorted().joined(separator: ","),
-                              measureText, nil)
+    oc_map_layout_new_frames(document.handle, size.width, size.height, dark, document.mapShowsEnzymes,
+                             document.mapShowsPrimers, document.mapHiddenTypes.sorted().joined(separator: ","),
+                             Int32(document.frames), measureText, nil)
 }
 
 /// Draws a scene into a bitmap image now, so the scene can be freed.
@@ -96,6 +24,23 @@ func sceneImage(_ scene: OpaquePointer) -> NSImage {
 
 /// Writes a map to .png (2x) or .pdf, chosen by the file extension.
 func writeMapImage(document: CoreDocument, to url: URL, size: CGSize) throws {
+    try mapImageData(document: document, size: size, pdf: url.pathExtension.lowercased() == "pdf").write(to: url)
+}
+
+/// Puts the map on the clipboard as a PDF (sharp when pasted into slides or
+/// documents) and a 2x PNG, for apps that take only bitmaps.
+func copyMapImageToPasteboard(document: CoreDocument, size: CGSize) throws {
+    let pdf = try mapImageData(document: document, size: size, pdf: true)
+    let png = try mapImageData(document: document, size: size, pdf: false)
+    let board = NSPasteboard.general
+    board.clearContents()
+    board.declareTypes([.pdf, .png], owner: nil)
+    board.setData(pdf, forType: .pdf)
+    board.setData(png, forType: .png)
+}
+
+/// The map, light, as PDF or as a 2x PNG.
+func mapImageData(document: CoreDocument, size: CGSize, pdf: Bool) throws -> Data {
     guard let layout = newMapLayout(document, size: size, dark: false) else {
         throw NSError(domain: "Restricto", code: 3, userInfo: [NSLocalizedDescriptionKey: "Could not lay out the map"])
     }
@@ -104,18 +49,20 @@ func writeMapImage(document: CoreDocument, to url: URL, size: CGSize) throws {
         throw NSError(domain: "Restricto", code: 3, userInfo: [NSLocalizedDescriptionKey: "Could not draw the map"])
     }
     defer { oc_scene_free(scene) }
-    if url.pathExtension.lowercased() == "pdf" {
+    if pdf {
+        let data = NSMutableData()
         var box = CGRect(origin: .zero, size: size)
-        guard let pdf = CGContext(url as CFURL, mediaBox: &box, nil) else {
+        guard let consumer = CGDataConsumer(data: data as CFMutableData),
+              let ctx = CGContext(consumer: consumer, mediaBox: &box, nil) else {
             throw NSError(domain: "Restricto", code: 4, userInfo: [NSLocalizedDescriptionKey: "Could not create the PDF"])
         }
-        pdf.beginPDFPage(nil)
-        pdf.translateBy(x: 0, y: size.height)
-        pdf.scaleBy(x: 1, y: -1)
-        drawScene(scene, in: pdf)
-        pdf.endPDFPage()
-        pdf.closePDF()
-        return
+        ctx.beginPDFPage(nil)
+        ctx.translateBy(x: 0, y: size.height)
+        ctx.scaleBy(x: 1, y: -1)
+        drawScene(scene, in: ctx)
+        ctx.endPDFPage()
+        ctx.closePDF()
+        return data as Data
     }
     let scale = 2.0
     guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale),
@@ -132,5 +79,5 @@ func writeMapImage(document: CoreDocument, to url: URL, size: CGSize) throws {
     guard let png = rep.representation(using: .png, properties: [:]) else {
         throw NSError(domain: "Restricto", code: 6, userInfo: [NSLocalizedDescriptionKey: "Could not encode the PNG"])
     }
-    try png.write(to: url)
+    return png
 }

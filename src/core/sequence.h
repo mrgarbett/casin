@@ -70,6 +70,10 @@ public:
     std::string name;
     std::string description;
     std::string bases;      // uppercase IUPAC
+    // Bases shown (and saved) in lowercase, one flag per base, as read from a
+    // mixed-case file or typed; empty when there are none. Everything else
+    // works on the uppercase `bases`.
+    std::vector<bool> lower;
     bool circular = false;
     std::vector<Feature> features;
     std::vector<Primer> primers;
@@ -78,6 +82,13 @@ public:
 
     int length() const { return int(bases.size()); }
     bool empty() const { return bases.empty(); }
+    bool isLower(int i) const { return size_t(i) < lower.size() && lower[size_t(i)]; }
+    // [start, start + len) as shown: lowercase where marked. Doesn't wrap.
+    std::string shown(int start, int len) const;
+    std::string shownBases() const { return shown(0, length()); }
+    // Sets the bases from text in any case. Mixed case keeps its lowercase
+    // marks; text all in one case is plain uppercase.
+    void setBasesFromText(const std::string &raw);
 
     // `length` bases from `start`. Wraps the origin on circular sequences;
     // clipped at the end on linear ones.
@@ -101,6 +112,8 @@ char translateCodon(const char *codon);
 double gcFraction(const std::string &bases);         // S counts as GC; N etc. excluded
 // Uppercase, U -> T, drops whitespace, digits and anything that isn't IUPAC.
 std::string cleanBases(const std::string &raw);
+// Like cleanBases, but keeps the case of each letter (u -> t, U -> T).
+std::string cleanBasesKeepingCase(const std::string &raw);
 // Like cleanBases, but a primer typed in mixed case keeps it (u -> t): the
 // lowercase marks something, such as a tail. All one case comes out uppercase.
 std::string cleanPrimerBases(const std::string &raw);

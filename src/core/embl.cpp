@@ -131,7 +131,7 @@ std::string writeEmbl(const Sequence &seq)
     out += "SQ   Sequence " + std::to_string(n) + " BP; " + std::to_string(counts[0]) + " A; "
          + std::to_string(counts[1]) + " C; " + std::to_string(counts[2]) + " G; " + std::to_string(counts[3])
          + " T; " + std::to_string(counts[4]) + " other;\n";
-    const std::string lower = toLower(seq.bases);
+    const std::string lower = seq.lower.empty() ? toLower(seq.bases) : seq.shownBases();
     for (int i = 0; i < n; i += 60) {
         std::string l = "    ";
         const int end = std::min(i + 60, n);

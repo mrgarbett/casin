@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "maplayout.h"
 
+#include "../core/orf.h"
+
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -12,7 +14,8 @@ namespace {
 const double kPi = 3.14159265358979323846;
 const double kMargin = 14;
 const double kLaneGap = 3;
-const double kLinearPitch = 32;   // lane height + room for a name underneath
+const double kLinearPitch = 32;
+const double kOrfPitch = 6;       // between ORF rows   // lane height + room for a name underneath
 
 double clampd(double v, double lo, double hi) { return std::max(lo, std::min(hi, v)); }
 
@@ -60,14 +63,97 @@ MapLayout::MapLayout(const oc::Sequence &seq, const std::vector<CutSite> &sites,
     std::map<const Enzyme *, int> counts;
     for (const CutSite &s : m_sites)
         ++counts[s.enzyme];
-    for (const CutSite &s : m_sites)
+    for (const CutSite &s : m_sites) {
         m_cutCount.push_back(counts[s.enzyme]);
+        m_methyl.push_back(methylationBlock(m_seq, s));
+    }
     if (m_n == 0)
         return;
+    findMapOrfs();
     if (m_circular)
         layoutCircular(measure);
     else
         layoutLinear(measure);
+}
+
+// ORFs for the translation toggle, as on the sequence: forward ones for 3
+// frames, both strands for 6. Each strand's ORFs share rows where they don't
+// overlap.
+void MapLayout::findMapOrfs()
+{
+    if (m_options.frames != 3 && m_options.frames != 6)
+        return;
+    std::vector<std::vector<std::pair<int, int>>> used[2];   // per strand, per row: [start, end) spans
+    for (const Orf &o : findOrfs(m_seq, std::max(1, m_options.minOrfCodons))) {
+        const bool fwd = o.strand != Strand::Reverse;
+        if (!fwd && m_options.frames != 6)
+            continue;
+        auto &rows = used[fwd ? 0 : 1];
+        // A span past the origin counts as two pieces.
+        std::vector<std::pair<int, int>> pieces;
+        if (o.start + o.length > m_n) {
+            pieces = {{o.start, m_n}, {0, o.start + o.length - m_n}};
+        } else {
+            pieces = {{o.start, o.start + o.length}};
+        }
+        size_t row = 0;
+        for (; row < rows.size(); ++row) {
+            bool clash = false;
+            for (const auto &u : rows[row])
+                for (const auto &p : pieces)
+                    clash = clash || (p.first < u.second && u.first < p.second);
+            if (!clash)
+                break;
+        }
+        if (row >= 3)   // keep the band small; the sequence lists them all
+            continue;
+        if (row == rows.size())
+            rows.emplace_back();
+        rows[row].insert(rows[row].end(), pieces.begin(), pieces.end());
+        m_orfs.push_back({o.start, o.length, fwd, int(row)});
+        m_orfRows = std::max(m_orfRows, int(row) + 1);
+    }
+    if (m_orfRows > 0)
+        m_orfBand = (m_options.frames == 6 ? 2 : 1) * m_orfRows * kOrfPitch + 6;
+}
+
+// ORF arrows: green forward ones, red reverse ones, each pointing the way it
+// reads, in a band between the backbone and the ticks and their numbers.
+void MapLayout::renderOrfs(Scene &s) const
+{
+    const double head = 6, w = 2.4, pitch = kOrfPitch;
+    for (const OrfGlyph &o : m_orfs) {
+        const Color c = o.forward ? m_theme.orfForward : m_theme.orfReverse;
+        const int a = o.start, b = o.start + o.length;   // b may run past the origin
+        if (m_circular) {
+            const double r = m_r - 7 - (o.forward ? 0 : m_orfRows * pitch) - o.row * pitch;
+            double a0 = angleOfPos(a), a1 = angleOfPos(b);
+            if (a1 <= a0)
+                a1 += 2 * kPi;
+            const double ah = std::min(head / std::max(r, 1.0), (a1 - a0) / 2);
+            PathItem arc;
+            if (o.forward)
+                arcPoints(arc.points, a0, a1 - ah, r);
+            else
+                arcPoints(arc.points, a0 + ah, a1, r);
+            arc.stroke = c;
+            arc.lineWidth = w;
+            s.path(arc);
+            const double tip = o.forward ? a1 : a0, base = o.forward ? a1 - ah : a0 + ah;
+            s.polygon({polar(tip, r), polar(base, r - 3), polar(base, r + 3)}, c);
+        } else {
+            const double y = m_yb + 9 + (o.forward ? 0 : m_orfRows * pitch) + o.row * pitch;
+            const double x0 = xOfPos(a), x1 = xOfPos(std::min(b, m_n));
+            const double hh = std::min(head, (x1 - x0) / 2);
+            if (o.forward) {
+                s.line({x0, y}, {x1 - hh, y}, c, w);
+                s.polygon({{x1, y}, {x1 - hh, y - 3}, {x1 - hh, y + 3}}, c);
+            } else {
+                s.line({x0 + hh, y}, {x1, y}, c, w);
+                s.polygon({{x0, y}, {x0 + hh, y - 3}, {x0 + hh, y + 3}}, c);
+            }
+        }
+    }
 }
 
 bool MapLayout::shows(const Feature &f) const
@@ -175,7 +261,7 @@ void MapLayout::buildLabels(TextMeasurer &tm)
         LabelGlyph g;
         g.sites = kv.second;
         int minCount = 1 << 30;
-        bool typeIIS = false;
+        bool typeIIS = false, blocked = true;
         for (int si : g.sites) {
             const CutSite &cs = m_sites[size_t(si)];
             if (!g.text.empty())
@@ -183,10 +269,13 @@ void MapLayout::buildLabels(TextMeasurer &tm)
             g.text += cs.enzyme->name;
             minCount = std::min(minCount, m_cutCount[size_t(si)]);
             typeIIS = typeIIS || cs.enzyme->cutsOutsideSite();
+            blocked = blocked && m_methyl[size_t(si)] != MethylNone;
         }
         g.font = m_labelFont;
         g.font.bold = minCount == 1;
-        g.color = minCount == 1 ? m_theme.enzymeUnique
+        // Sites methylation blocks are greyed out.
+        g.color = blocked       ? m_theme.mutedText
+                : minCount == 1 ? m_theme.enzymeUnique
                 : typeIIS       ? m_theme.enzymeTypeIIS
                                 : m_theme.enzymeLabel;
         g.priority = minCount;
@@ -255,7 +344,8 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
     for (int p = 0; p < m_n; p += step) {
         const double a = angleOfPos(p);
         const double len = p == 0 ? 9 : 5;
-        m_ticks.push_back({polar(a, m_r - 1.5), polar(a, m_r - 1.5 - len)});
+        // Inside the backbone, past the ORF band (if any).
+        m_ticks.push_back({polar(a, m_r - 1.5 - m_orfBand), polar(a, m_r - 1.5 - m_orfBand - len)});
         if (p == 0)
             continue;
         // Skip a label that would crowd the origin.
@@ -269,7 +359,7 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
         const double th = tm.height(tickFont);
         // Push the label inward far enough that its box clears the ticks.
         const double extra = std::fabs(std::sin(a)) * tw / 2 + std::fabs(std::cos(a)) * th / 2;
-        t.pos = polar(a, m_r - 10 - extra);
+        t.pos = polar(a, m_r - 10 - m_orfBand - extra);
         const Rect box{t.pos.x - tw / 2, t.pos.y - th / 2, tw, th};
         if (box.intersects(centre))
             continue;
@@ -523,12 +613,12 @@ void MapLayout::layoutLinear(TextMeasurer &tm)
     const Font tickFont{9.5, false, false};
     for (int p = 0; p <= m_n; p += step) {
         const double x = xOfPos(p == 0 ? 0 : p);
-        m_ticks.push_back({{x, m_yb + 4}, {x, m_yb + 9}});
+        m_ticks.push_back({{x, m_yb + 4 + m_orfBand}, {x, m_yb + 9 + m_orfBand}});
         TextItem t;
         t.text = withThousands(p == 0 ? 1 : p);
         t.font = tickFont;
         t.color = m_theme.mutedText;
-        t.pos = {x, m_yb + 20};
+        t.pos = {x, m_yb + 20 + m_orfBand};
         t.halign = HAlign::Center;
         m_tickLabels.push_back(t);
     }
@@ -543,7 +633,8 @@ void MapLayout::layoutLinear(TextMeasurer &tm)
     });
     int laneCount = 0;
     const std::vector<int> lanes = assignLanes(order, &laneCount);
-    const double lane0 = m_yb + 30;
+    // Feature lanes start below the ORF rows, if any, and the ticks.
+    const double lane0 = m_yb + 30 + m_orfBand;
     std::map<int, std::vector<std::pair<double, double>>> below;   // lane -> used x ranges
     const auto blocks = featureBlocks();
     for (int fi : order) {
@@ -684,6 +775,7 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
         s.line(t.first, t.second, m_theme.tick, 1);
     for (const TextItem &t : m_tickLabels)
         s.text(t);
+    renderOrfs(s);
 
     for (const FeatureGlyph &g : m_features) {
         const bool active = g.feature == st.activeFeature;
@@ -782,6 +874,7 @@ void MapLayout::renderLinear(Scene &s, const MapState &st) const
         s.line(t.first, t.second, m_theme.tick, 1);
     for (const TextItem &t : m_tickLabels)
         s.text(t);
+    renderOrfs(s);
     for (const FeatureGlyph &g : m_features) {
         const bool active = g.feature == st.activeFeature;
         for (const auto &c : g.connectors)
@@ -872,6 +965,8 @@ std::string MapLayout::siteTooltip(const std::vector<int> &sites) const
         s += c.enzyme->name + "  " + c.enzyme->site + "  cuts after " + withThousands(c.cutTop);
         const int count = m_cutCount[size_t(si)];
         s += count == 1 ? "  (unique)" : "  (" + std::to_string(count) + " sites)";
+        if (m_methyl[size_t(si)] != MethylNone)
+            s += "\nBlocked by " + methylationName(m_methyl[size_t(si)]) + " methylation (DNA from dam+ dcm+ E. coli)";
     }
     return s;
 }
