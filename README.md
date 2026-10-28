@@ -89,7 +89,7 @@ flatpak-builder --user --install-deps-from=flathub --force-clean --install \
 ```
 
 CI (`.github/workflows/ci.yml`) builds and tests on Fedora, produces the RPM and a
-Flatpak bundle, and builds the macOS app on a macOS runner.
+Flatpak bundle, and builds the macOS app with both an older Xcode and Xcode 26.
 
 ## Building on macOS
 
@@ -98,6 +98,12 @@ xcode-select --install                 # or a full Xcode, 15 or newer
 scripts/build_macos_app.sh             # -> build/macos/OpenClone.app
 open build/macos/OpenClone.app
 ```
+
+The app runs on macOS 13 Ventura and later, with the same features everywhere.
+Built with Xcode 26 and run on macOS 26 or later, it also adopts Liquid Glass: the
+Features/Enzymes sidebar floats as glass with the map running underneath, and the
+status line becomes a floating glass capsule. An older Xcode builds the app
+without that code (see `macos/OpenClone/Glass.swift`).
 
 You can also open `Package.swift` in Xcode, or run `swift build`. The C++ core and
 its tests still build with CMake on macOS:
