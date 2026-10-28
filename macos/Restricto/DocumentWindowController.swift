@@ -467,6 +467,10 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         status.stringValue = core.statusText
         // The title stays the document's file name (NSDocument's, with the
         // proxy icon); the sequence name can differ, so it goes in the subtitle.
+        if core.isEmpty {
+            window?.subtitle = "Open a file from the sidebar, or drop one here"
+            return
+        }
         var parts = ["\(core.length.formatted()) bp", core.isCircular ? "circular" : "linear"]
         let fileName = (document as? NSDocument)?.fileURL?.deletingPathExtension().lastPathComponent
         if !core.name.isEmpty && core.name != fileName { parts.insert(core.name, at: 0) }

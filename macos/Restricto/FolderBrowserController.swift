@@ -176,7 +176,11 @@ final class FolderBrowserController: NSViewController, NSOutlineViewDataSource, 
         // clearing a search brings back the folders that were open before it.
         if !listsMatches { treeExpanded = expandedURLs() }
         unsaved = NSDocumentController.shared.documents
-            .filter { $0.isDocumentEdited || $0.fileURL == nil }
+            .filter { doc in
+                // An empty untitled window has nothing to lose.
+                if let seq = doc as? SequenceDocument, seq.core.isEmpty { return false }
+                return doc.isDocumentEdited || doc.fileURL == nil
+            }
             .map { OpenDocument($0) }
         outline.reloadData()
         for header in topLevel { outline.expandItem(header) }
