@@ -65,6 +65,16 @@ enum UISmokeTest {
             ("9-ungrouped", { controller?.toggleGroupTens(nil) }),
             ("9a-inspector-hidden", { controller?.toggleInspectorPanel(nil) }),
             ("9b-inspector-shown", { controller?.toggleInspectorPanel(nil) }),
+            ("9c-inspector-hidden-stacked", {
+                controller?.toggleInspectorPanel(nil)
+                controller?.toggleMapStacked(nil)
+            }),
+            ("9d-inspector-shown-beside", {
+                controller?.toggleMapStacked(nil)
+                controller?.toggleInspectorPanel(nil)
+            }),
+            ("9e-edited", { (controller?.document as? NSDocument)?.updateChangeCount(.changeDone) }),
+            ("9f-saved", { (controller?.document as? NSDocument)?.updateChangeCount(.changeCleared) }),
             ("10-below-minimum", { resize(NSSize(width: 600, height: 400)) }),
             ("11-sidebar-toggled-at-quit", { split?.toggleSidebar(nil) }),
         ]

@@ -554,6 +554,14 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
             sel.push_back({a, e});
         }
     }
+    // The codon whose amino acid is under the mouse, as up to two pieces.
+    std::vector<Range> hover;
+    if (st.hoverCodon >= 0 && st.hoverCodon < m_n) {
+        const int a = st.hoverCodon, e = a + 3;
+        hover.push_back({a, std::min(e, m_n)});
+        if (e > m_n && m_seq.circular)
+            hover.push_back({0, e - m_n});
+    }
     const CutSite *active = (m_opt.enzymes && st.activeSite >= 0 && st.activeSite < int(m_sites.size()))
                               ? &m_sites[size_t(st.activeSite)] : nullptr;
 
@@ -571,6 +579,13 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
             const int b = std::min(r.end, l.start + l.len) - l.start;
             if (b > a)
                 s.rect({boundaryX(a), top, boundaryX(b) - boundaryX(a), strandsEnd - top}, m_theme.selection);
+        }
+        for (const Range &r : hover) {
+            const int a = std::max(r.start, l.start) - l.start;
+            const int b = std::min(r.end, l.start + l.len) - l.start;
+            if (b > a)
+                s.rect({boundaryX(a), top, boundaryX(b) - boundaryX(a), strandsEnd - top},
+                       m_theme.selection.withAlpha(m_theme.selection.a * 0.6), m_theme.selectionEdge, 1.0);
         }
 
         // Position number.
@@ -671,7 +686,7 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
 
         // Primers, with their bases over the strand they read: the annealing
         // bases in an outlined arrow pointing 5' to 3' (mismatches in red), and
-        // a 5' tail that doesn't anneal in lowercase, raised off the strand
+        // a 5' tail that doesn't anneal (muted; lowercase only where typed so), raised off the strand
         // with a nick where it leaves the arrow.
         for (const PrimerPiece &pc : l.primers) {
             const Primer &pr = m_seq.primers[size_t(pc.primer)];
@@ -698,13 +713,13 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
                 const int i = pc.top ? pos - first : first - pos;   // index in the primer, 5' to 3'
                 if (i < 0 || i >= int(pr.bases.size()))
                     continue;
-                const char base = char(std::toupper(static_cast<unsigned char>(pr.bases[size_t(i)])));
+                const char typed = pr.bases[size_t(i)];   // uppercase unless typed in mixed case
+                const char base = char(std::toupper(static_cast<unsigned char>(typed)));
                 const bool anneals = c >= pc.bindA && c < pc.bindB;
                 const char ref = m_seq.bases[size_t(pos)];
                 const char want = pc.top ? ref : complement(std::string(1, ref))[0];
                 const Color color = !anneals ? m_theme.mutedText : base == want ? m_theme.text : m_theme.cutMarker;
-                const char shown = anneals ? base : char(std::tolower(static_cast<unsigned char>(base)));
-                s.label(std::string(1, shown), {colX(c) + m_charW / 2, ym + (anneals ? 0 : lift)}, m_baseFont,
+                s.label(std::string(1, typed), {colX(c) + m_charW / 2, ym + (anneals ? 0 : lift)}, m_baseFont,
                         color, HAlign::Center, VAlign::Middle);
             }
             // The tail: a line along it, kinked back to the arrow where annealing starts.

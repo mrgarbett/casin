@@ -150,8 +150,9 @@ bool pcrProduct(const Sequence &templ, const Primer &fwd, const Primer &rev, Seq
     const int fwdTailLen = std::max(0, int(fwd.bases.size()) - fwd.binding.length());
     const int revTailLen = std::max(0, int(rev.bases.size()) - rev.binding.length());
     Sequence product = extractFragment(templ, {fwd.binding.start, len});
-    const std::string fwdTail = fwd.bases.substr(0, size_t(fwdTailLen));
-    const std::string revTail = reverseComplement(rev.bases.substr(0, size_t(revTailLen)));
+    // Primers keep the case they were typed in; the product's bases are uppercase.
+    const std::string fwdTail = cleanBases(fwd.bases.substr(0, size_t(fwdTailLen)));
+    const std::string revTail = reverseComplement(cleanBases(rev.bases.substr(0, size_t(revTailLen))));
     insertBases(product, 0, fwdTail);
     insertBases(product, product.length(), revTail);
     product.circular = false;

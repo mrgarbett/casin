@@ -17,6 +17,7 @@ struct SeqViewState {
     bool hasSelection = false;
     int activeFeature = -1;
     int activeSite = -1;   // index into the sites passed to the layout
+    int hoverCodon = -1;   // first base of a codon outlined on the strands (its amino acid is under the mouse)
 };
 
 // What the sequence view shows besides the bases.

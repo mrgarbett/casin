@@ -273,6 +273,23 @@ std::string cleanBases(const std::string &raw)
     return out;
 }
 
+std::string cleanPrimerBases(const std::string &raw)
+{
+    std::string out;
+    out.reserve(raw.size());
+    for (char c : raw) {
+        const bool lower = c >= 'a' && c <= 'z';
+        char u = lower ? char(c - 32) : c;
+        if (u == 'U')
+            u = 'T';
+        if (iupacMask(u))
+            out.push_back(lower ? char(u + 32) : u);
+    }
+    const bool hasLower = std::any_of(out.begin(), out.end(), [](char c) { return c >= 'a' && c <= 'z'; });
+    const bool hasUpper = std::any_of(out.begin(), out.end(), [](char c) { return c >= 'A' && c <= 'Z'; });
+    return hasLower && hasUpper ? out : cleanBases(out);
+}
+
 std::string defaultFeatureName(const std::string &type, const std::vector<Qualifier> &qualifiers)
 {
     static const char *keys[] = {"label", "gene", "product", "locus_tag", "standard_name", "note"};
