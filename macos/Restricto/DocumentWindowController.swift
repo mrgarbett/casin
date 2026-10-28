@@ -144,9 +144,20 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
                 content.trailingAnchor.constraint(equalTo: root.trailingAnchor),
                 content.topAnchor.constraint(equalTo: root.topAnchor),
                 content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-                // Shifted as the map is, which leaves room for the panel's pill.
-                pill.centerXAnchor.constraint(equalTo: root.safeAreaLayoutGuide.centerXAnchor,
-                                              constant: Self.panelPillRoom / 2),
+            ])
+            // Shifted as the map is, which leaves room for the panel's pill on the
+            // left. The edges stay inside the visible middle: on a narrow middle
+            // the status text truncates instead of the pill running under the
+            // sidebar or the panel pill.
+            let centre = pill.centerXAnchor.constraint(equalTo: root.safeAreaLayoutGuide.centerXAnchor,
+                                                       constant: Self.panelPillRoom / 2)
+            centre.priority = .defaultHigh
+            NSLayoutConstraint.activate([
+                centre,
+                pill.leadingAnchor.constraint(greaterThanOrEqualTo: root.safeAreaLayoutGuide.leadingAnchor,
+                                              constant: Self.panelPillRoom + 8),
+                pill.trailingAnchor.constraint(lessThanOrEqualTo: root.safeAreaLayoutGuide.trailingAnchor,
+                                               constant: -8),
             ])
             statusPill = pill
             pillMaxWidth = pill.widthAnchor.constraint(lessThanOrEqualToConstant: 400)
@@ -426,7 +437,8 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     }
 
     /// NSDocument calls this when its unsaved-changes state flips: a small red
-    /// dot just left of the file name in the tab.
+    /// dot just left of the file name in the tab. (A tab's accessory view sits
+    /// at its far edge, away from the centred name, so the dot goes in the title.)
     override func setDocumentEdited(_ dirtyFlag: Bool) {
         super.setDocumentEdited(dirtyFlag)
         updateTabTitle()
@@ -438,19 +450,17 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     }
 
     private func updateTabTitle() {
-        guard let window = window else { return }
-        guard (document as? NSDocument)?.isDocumentEdited == true else {
-            window.tab.attributedTitle = nil
+        guard let tab = window?.tab else { return }
+        guard let doc = document as? NSDocument, doc.isDocumentEdited else {
+            tab.attributedTitle = nil
             return
         }
-        let title = NSMutableAttributedString(string: "● ", attributes: [
-            .foregroundColor: NSColor.systemRed,
-            .font: NSFont.systemFont(ofSize: 7),
-            .baselineOffset: 1.5,
+        let font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        let title = NSMutableAttributedString(string: "●  ", attributes: [
+            .font: NSFont.systemFont(ofSize: 7), .foregroundColor: NSColor.systemRed, .baselineOffset: 1.5,
         ])
-        // Tabs set their titles in 12 pt system type.
-        title.append(NSAttributedString(string: window.title, attributes: [.font: NSFont.systemFont(ofSize: 12)]))
-        window.tab.attributedTitle = title
+        title.append(NSAttributedString(string: doc.displayName, attributes: [.font: font]))
+        tab.attributedTitle = title
     }
 
     private func updateTexts() {
