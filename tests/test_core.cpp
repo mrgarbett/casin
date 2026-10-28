@@ -220,6 +220,99 @@ static void testGenBankRoundTrip()
     CHECK(!r.circular);
 }
 
+// Primers are saved as primer_bind entries whose note holds the primer, and
+// read back as primers. Plain primer_bind features stay features.
+static void testGenBankPrimers(const char *samples)
+{
+    Sequence s;
+    s.name = "pPrim";
+    s.circular = true;
+    for (int i = 0; i < 25; ++i)
+        s.bases += "ATGAAACCCGGGTTTAAAGGATCCTAG";
+    const int n = s.length();
+    Feature site;
+    site.type = "primer_bind";
+    site.name = "fwd site";
+    site.strand = Strand::Forward;
+    site.ranges = {{27, 45}};
+    s.features = {site};
+    // A 6 nt lowercase 5' tail; a reverse primer; one long enough to wrap;
+    // one ending at the origin.
+    s.primers = {{"tailed fwd", "gaattc" + s.bases.substr(27, 18), {27, 45}, Strand::Forward},
+                 {"rev", reverseComplement(s.bases.substr(100, 20)), {100, 120}, Strand::Reverse},
+                 {"long", std::string(50, 'C') + s.bases.substr(200, 25), {200, 225}, Strand::Forward},
+                 {"at end", s.bases.substr(size_t(n - 15)), {n - 15, n}, Strand::Forward}};
+
+    const std::string text = writeGenBank(s);
+    size_t lineStart = 0, longest = 0;
+    for (size_t i = 0; i <= text.size(); ++i)
+        if (i == text.size() || text[i] == '\n') {
+            longest = std::max(longest, i - lineStart);
+            lineStart = i + 1;
+        }
+    CHECK(longest <= 80);
+    CHECK(text.find("complement(101..120)") != std::string::npos);
+
+    for (const std::string &file : {text, writeEmbl(s)}) {
+        Sequence r;
+        std::string err;
+        CHECK(readGenBank(file, &r, &err) || readEmbl(file, &r, &err));
+        CHECK_EQ(r.features.size(), size_t(1));
+        CHECK(!r.features.empty() && r.features[0].name == "fwd site" && r.features[0].type == "primer_bind");
+        CHECK_EQ(r.primers.size(), s.primers.size());
+        if (r.primers.size() != s.primers.size())
+            continue;
+        for (size_t i = 0; i < s.primers.size(); ++i) {
+            CHECK_EQ(r.primers[i].name, s.primers[i].name);
+            CHECK_EQ(r.primers[i].bases, s.primers[i].bases);
+            CHECK(r.primers[i].binding == s.primers[i].binding);
+            CHECK(r.primers[i].strand == s.primers[i].strand);
+        }
+        // The tail is what lies beyond the binding site.
+        CHECK_EQ(int(r.primers[0].bases.size()) - r.primers[0].binding.length(), 6);
+        CHECK_EQ(r.primers[0].bases.substr(0, 6), std::string("gaattc"));
+        // Saving again gives the same file.
+        Sequence again;
+        CHECK(readGenBank(writeGenBank(r), &again));
+        CHECK_EQ(again.primers.size(), s.primers.size());
+        CHECK_EQ(again.features.size(), size_t(1));
+    }
+
+    // SnapGene-style notes read too; a note without bases leaves a feature.
+    const std::string other = "LOCUS       x 30 bp DNA linear\nFEATURES             Location/Qualifiers\n"
+                              "     primer_bind     complement(11..30)\n"
+                              "                     /label=\"P2\"\n"
+                              "                     /note=\"color: black; sequence: ACGTACGTACGTACGTACGT\"\n"
+                              "     primer_bind     1..10\n"
+                              "                     /note=\"sequence: none here\"\n"
+                              "ORIGIN\n        1 acgtacgtac gtacgtacgt acgtacgtac\n//\n";
+    Sequence r;
+    CHECK(readGenBank(other, &r));
+    CHECK_EQ(r.primers.size(), size_t(1));
+    CHECK_EQ(r.features.size(), size_t(1));
+    if (!r.primers.empty()) {
+        CHECK_EQ(r.primers[0].name, std::string("P2"));
+        CHECK_EQ(r.primers[0].bases, std::string("ACGTACGTACGTACGTACGT"));
+        CHECK(r.primers[0].binding == (Range{10, 30}));
+        CHECK(r.primers[0].strand == Strand::Reverse);
+    }
+
+    // pOC-demo.dna: 2 primers and 11 features, the same after GenBank.
+    if (!samples)
+        return;
+    Sequence dna, gb;
+    CHECK(loadSequenceFile(std::string(samples) + "/pOC-demo.dna", &dna));
+    CHECK(readGenBank(writeGenBank(dna), &gb));
+    CHECK_EQ(gb.primers.size(), size_t(2));
+    CHECK_EQ(gb.features.size(), dna.features.size());
+    for (size_t i = 0; i < std::min(gb.primers.size(), dna.primers.size()); ++i) {
+        CHECK_EQ(gb.primers[i].name, dna.primers[i].name);
+        CHECK_EQ(gb.primers[i].bases, dna.primers[i].bases);
+        CHECK(gb.primers[i].binding == dna.primers[i].binding);
+        CHECK(gb.primers[i].strand == dna.primers[i].strand);
+    }
+}
+
 // ---- .dna built byte by byte ------------------------------------------------
 
 static void putPacket(std::string &out, uint8_t type, const std::string &payload)
@@ -1422,6 +1515,7 @@ int main(int argc, char **argv)
     testBasics();
     testLocations();
     testGenBankRoundTrip();
+    testGenBankPrimers(argc > 1 ? argv[1] : nullptr);
     testSnapGene();
     testEnzymes();
     testTm();

@@ -263,6 +263,49 @@ std::string unquote(std::string v)
     return out;
 }
 
+// The /note that marks a primer_bind as one of the document's primers.
+const char *const kPrimerNote = "sequence: ";
+
+// A primer_bind whose note gives the primer's bases (see writeGenBank) is a
+// primer, not a feature. The location is the binding site; the note has the
+// whole primer, 5' tail included. "color: black; sequence: ..." reads too.
+bool readPrimer(const RawFeature &rf, const Location &loc, int n, Primer *out)
+{
+    if (rf.type != "primer_bind")
+        return false;
+    std::string bases, label;
+    for (const Qualifier &q : rf.qualifiers) {
+        if (q.key == "label" && label.empty())
+            label = trim(q.value);
+        if (q.key != "note" || !bases.empty())
+            continue;
+        size_t at = q.value.find("sequence:");
+        if (at == std::string::npos || (at > 0 && (at < 2 || q.value.compare(at - 2, 2, "; ") != 0)))
+            continue;
+        std::string v = q.value.substr(at + 9);
+        v = v.substr(0, v.find(';'));
+        // Only bases, and the spaces of wrapped lines.
+        const size_t letters = size_t(std::count_if(v.begin(), v.end(), [](char c) {
+            return !std::isspace(static_cast<unsigned char>(c));
+        }));
+        bases = cleanPrimerBases(v);
+        if (bases.size() != letters)
+            bases.clear();
+    }
+    if (bases.empty())
+        return false;
+    // One binding site. A Range can't wrap, so a site across the origin keeps
+    // the part before it, as the .dna reader does.
+    const bool wraps = loc.ranges.size() == 2 && loc.ranges[0].end == n && loc.ranges[1].start == 0;
+    if (loc.ranges.size() != 1 && !wraps)
+        return false;
+    out->name = label.empty() ? "primer" : label;
+    out->bases = bases;
+    out->binding = loc.ranges[0];
+    out->strand = loc.strand == Strand::Reverse ? Strand::Reverse : Strand::Forward;
+    return true;
+}
+
 std::string firstWord(const std::string &line)
 {
     size_t sp = line.find_first_of(" \t");
@@ -407,6 +450,11 @@ bool readGenBank(const std::string &data, Sequence *out, std::string *error)
         Location loc = parseLocation(rf.location, n, seq.circular);
         if (!loc.ok)
             continue;
+        Primer p;
+        if (readPrimer(rf, loc, n, &p)) {
+            seq.primers.push_back(p);
+            continue;
+        }
         Feature f;
         f.type = rf.type;
         f.strand = loc.strand;
@@ -527,8 +575,25 @@ std::string writeGenBank(const Sequence &seq)
         out += (i == 0 ? "COMMENT     " : std::string(12, ' ')) + "History: " + seq.history[i] + "\n";
     out += "FEATURES             Location/Qualifiers\n";
 
+    // Primers go after the features as primer_bind entries: the location is
+    // the binding site, and a note holds the whole primer (see readPrimer).
+    std::vector<Feature> features = seq.features;
+    for (const Primer &p : seq.primers) {
+        if (p.binding.length() <= 0 || p.bases.empty())
+            continue;
+        Feature f;
+        f.type = "primer_bind";
+        f.name = p.name;
+        f.strand = p.strand == Strand::Reverse ? Strand::Reverse : Strand::Forward;
+        f.ranges = {p.binding};
+        if (!p.name.empty())
+            f.qualifiers.push_back({"label", p.name});
+        f.qualifiers.push_back({"note", kPrimerNote + p.bases});
+        features.push_back(f);
+    }
+
     const std::string indent(kQualIndent, ' ');
-    for (const Feature &f : seq.features) {
+    for (const Feature &f : features) {
         const std::string head = "     " + pad(f.type, 15) + " ";
         const std::string loc = formatLocation(f.ranges, f.strand, n, seq.circular);
         const std::vector<std::string> locLines = wrapText(loc, kLineWidth - kQualIndent, false, ',');
@@ -563,7 +628,9 @@ std::string writeGenBank(const Sequence &seq)
                 }
                 text = "/" + q.key + "=\"" + v + "\"";
             }
-            for (const std::string &l : wrapText(text, kLineWidth - kQualIndent, q.key == "translation"))
+            // Bases may break anywhere: the reader drops the joining space.
+            const bool hard = q.key == "translation" || (q.key == "note" && startsWith(q.value, kPrimerNote));
+            for (const std::string &l : wrapText(text, kLineWidth - kQualIndent, hard))
                 out += indent + l + "\n";
         }
     }
