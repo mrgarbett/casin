@@ -62,6 +62,9 @@ const char *oc_document_description(OCDocument *doc);
 int oc_document_length(const OCDocument *doc);
 bool oc_document_is_circular(const OCDocument *doc);
 char *oc_document_status_text(const OCDocument *doc);
+/* The status without the length and topology: only the caret or selection
+   (empty when there is neither), for a window that shows the length elsewhere. */
+char *oc_document_selection_text(const OCDocument *doc);
 
 typedef struct {
     const char *name;
@@ -176,6 +179,11 @@ OCMapLayout *oc_map_layout_new(const OCDocument *doc, double width, double heigh
 OCMapLayout *oc_map_layout_new_options(const OCDocument *doc, double width, double height, bool dark,
                                        bool show_enzymes, bool show_primers, const char *hidden_types,
                                        OCMeasureText measure, void *context);
+/* Like oc_map_layout_new_options, with the ORFs of 3 (forward) or 6 reading
+   frames drawn as arrows, as the sequence view translates them; 0 for none. */
+OCMapLayout *oc_map_layout_new_frames(const OCDocument *doc, double width, double height, bool dark,
+                                      bool show_enzymes, bool show_primers, const char *hidden_types, int frames,
+                                      OCMeasureText measure, void *context);
 void oc_map_layout_free(OCMapLayout *layout);
 OCScene *oc_map_layout_render(const OCMapLayout *layout, const OCDocument *doc);
 /* kind = OC_HIT_*; index = feature or visible-site index; position = base boundary. */

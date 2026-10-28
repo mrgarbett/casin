@@ -169,6 +169,17 @@ int main(int argc, char **argv)
         SequenceLayout plain(orf, none, theme, tm, 900, true), six(orf, none, theme, tm, 900, true, sixOpt);
         CHECK(six.totalHeight() > plain.totalHeight() + 10);
         CHECK(six.totalHeight() < plain.totalHeight() + 2 * 20);
+        // The map draws that ORF as an arrow (a line and a head) with the
+        // translation on, linear and circular.
+        MapOptions mapOrfs;
+        mapOrfs.frames = 6;
+        mapOrfs.minOrfCodons = 2;
+        for (bool circular : {false, true}) {
+            orf.circular = circular;
+            CHECK(MapLayout(orf, none, theme, tm, 600, 400, mapOrfs).render({}).items.size()
+                  == MapLayout(orf, none, theme, tm, 600, 400).render({}).items.size() + 2);
+        }
+        orf.circular = false;
         std::string letters;
         bool ends = false;
         for (const Item &it : six.render(0, 600, {}).items)

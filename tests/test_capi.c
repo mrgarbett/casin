@@ -77,8 +77,16 @@ int main(int argc, char **argv)
         CHECK(oc_scene_item_count(b) < oc_scene_item_count(a));
         oc_scene_free(a);
         oc_scene_free(b);
-        oc_map_layout_free(full);
         oc_map_layout_free(bare);
+        /* The demo's ORFs as arrows on the map. */
+        OCMapLayout *orfMap = oc_map_layout_new_frames(doc, 900, 700, false, true, true, "", 6, measure, NULL);
+        OCScene *c = oc_map_layout_render(orfMap, doc);
+        a = oc_map_layout_render(full, doc);
+        CHECK(oc_scene_item_count(c) > oc_scene_item_count(a));
+        oc_scene_free(a);
+        oc_scene_free(c);
+        oc_map_layout_free(orfMap);
+        oc_map_layout_free(full);
         char *orfs = oc_find_orfs(doc, 100);
         CHECK(orfs && strchr(orfs, '\t') != NULL);
         oc_string_free(orfs);
@@ -262,6 +270,10 @@ int main(int argc, char **argv)
 
     char *status = oc_document_status_text(doc);
     CHECK(strstr(status, "3,188 bp") != NULL);
+    oc_string_free(status);
+    oc_document_set_selection(doc, 9, 10);
+    status = oc_document_selection_text(doc);
+    CHECK(strncmp(status, "Selected 10", 11) == 0 && strstr(status, "3,188") == NULL);
     oc_string_free(status);
     oc_document_free(doc);
     printf("%d checks, %d failures\n", checks, failures);

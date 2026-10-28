@@ -77,11 +77,12 @@ private func drawText(_ string: String, _ t: OCTextInfo, in ctx: CGContext) {
     ctx.restoreGState()
 }
 
-/// A map layout that follows the document's Map Display options.
+/// A map layout that follows the document's Map Display options, with the
+/// translation's ORFs as arrows while it is on.
 func newMapLayout(_ document: CoreDocument, size: CGSize, dark: Bool) -> OpaquePointer? {
-    oc_map_layout_new_options(document.handle, size.width, size.height, dark, document.mapShowsEnzymes,
-                              document.mapShowsPrimers, document.mapHiddenTypes.sorted().joined(separator: ","),
-                              measureText, nil)
+    oc_map_layout_new_frames(document.handle, size.width, size.height, dark, document.mapShowsEnzymes,
+                             document.mapShowsPrimers, document.mapHiddenTypes.sorted().joined(separator: ","),
+                             Int32(document.frames), measureText, nil)
 }
 
 /// Draws a scene into a bitmap image now, so the scene can be freed.

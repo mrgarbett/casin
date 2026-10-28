@@ -267,6 +267,13 @@ const char *oc_document_description(OCDocument *doc)
 int oc_document_length(const OCDocument *doc) { return doc->doc.sequence().length(); }
 bool oc_document_is_circular(const OCDocument *doc) { return doc->doc.sequence().circular; }
 char *oc_document_status_text(const OCDocument *doc) { return dupString(doc->doc.statusText()); }
+char *oc_document_selection_text(const OCDocument *doc)
+{
+    std::string s = doc->doc.statusText(false);
+    if (!s.empty())
+        s[0] = char(std::toupper(static_cast<unsigned char>(s[0])));   // "Selected …", "Position …"
+    return dupString(s);
+}
 
 int oc_document_feature_count(const OCDocument *doc) { return int(doc->doc.sequence().features.size()); }
 
@@ -841,11 +848,20 @@ OCMapLayout *oc_map_layout_new_options(const OCDocument *doc, double width, doub
                                        bool show_enzymes, bool show_primers, const char *hidden_types,
                                        OCMeasureText measure, void *context)
 {
+    return oc_map_layout_new_frames(doc, width, height, dark, show_enzymes, show_primers, hidden_types, 0, measure,
+                                    context);
+}
+
+OCMapLayout *oc_map_layout_new_frames(const OCDocument *doc, double width, double height, bool dark,
+                                      bool show_enzymes, bool show_primers, const char *hidden_types, int frames,
+                                      OCMeasureText measure, void *context)
+{
     CallbackMeasurer tm(measure, context);
     view::MapOptions opt;
     opt.enzymes = show_enzymes;
     opt.primers = show_primers;
     opt.hiddenTypes = typeSet(hidden_types);
+    opt.frames = frames;
     auto *l = new OCMapLayout;
     l->layout = std::make_unique<view::MapLayout>(doc->doc.sequence(), doc->doc.visibleSites(),
                                                   dark ? view::Theme::darkTheme() : view::Theme::light(), tm, width,
