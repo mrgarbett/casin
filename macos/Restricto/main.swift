@@ -100,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                  [.command, .shift]),
             item("Select All", #selector(NSText.selectAll(_:)), "a"),
             .separator(),
-            item("Find…", #selector(DocumentWindowController.performFindPanelAction(_:)), "f"),
+            item("Find…", #selector(DocumentWindowController.toggleFindBar(_:)), "f"),
         ])
         submenu("View", [
             item("Toggle Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)), "s", [.command, .control]),
