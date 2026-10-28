@@ -32,11 +32,16 @@ public:
     void showOnlyEnzymes(const std::set<std::string> &names, int maxCuts);
     // Saves a PNG of the window once it has been laid out, then calls done.
     void screenshot(const std::string &path, void (*done)(bool ok, gpointer), gpointer data);
+    // Tools from the first alpha, hidden until each gets its own tested step.
+    // Saved in the user's settings and applied to every open window.
+    static bool experimentalTools();
+    static void setExperimentalTools(GtkApplication *app, bool on);
 
 private:
     explicit Window(GtkApplication *app);
     ~Window();
     void buildUi(GtkApplication *app);
+    void rebuildMenu();
     GtkWidget *buildSidebar();
     void rebuildFeatureList();
     void rebuildEnzymeList();
@@ -138,6 +143,7 @@ private:
     GtkWidget *m_toasts = nullptr;
     GtkWidget *m_stack = nullptr;
     GtkWidget *m_title = nullptr;
+    GtkWidget *m_menuButton = nullptr;
     GtkWidget *m_status = nullptr;
     GtkWidget *m_search = nullptr;
     GtkWidget *m_split = nullptr;

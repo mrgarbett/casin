@@ -185,15 +185,24 @@ void actAbout(GSimpleAction *, GVariant *, gpointer app)
     adw_dialog_present(about, GTK_WIDGET(gtk_application_get_active_window(GTK_APPLICATION(app))));
 }
 
+void actExperimental(GSimpleAction *action, GVariant *value, gpointer app)
+{
+    g_simple_action_set_state(action, value);
+    gtk::Window::setExperimentalTools(GTK_APPLICATION(app), g_variant_get_boolean(value));
+}
+
 void onStartup(GApplication *app, gpointer)
 {
     static const GActionEntry entries[] = {
+        {"experimental", nullptr, nullptr, "false", actExperimental, {0, 0, 0}},
         {"new", actNew, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"open", actOpen, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"quit", actQuit, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"about", actAbout, nullptr, nullptr, nullptr, {0, 0, 0}},
     };
     g_action_map_add_action_entries(G_ACTION_MAP(app), entries, G_N_ELEMENTS(entries), app);
+    g_simple_action_set_state(G_SIMPLE_ACTION(g_action_map_lookup_action(G_ACTION_MAP(app), "experimental")),
+                              g_variant_new_boolean(gtk::Window::experimentalTools()));
     struct Accel { const char *action; const char *keys[3]; };
     static const Accel accels[] = {
         {"app.open", {"<Control>o", nullptr}},
