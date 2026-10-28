@@ -39,15 +39,18 @@ enum UISmokeTest {
             frame.size = size
             window.setFrame(frame, display: true)
         }
-        // Ends below the minimum size, so the frame saved for the next launch
-        // is one the constraints must correct (run the check twice to test it).
+        // Ends below the minimum size with the sidebar toggled, so the next
+        // launch restores state the layout must correct: a too-small frame and
+        // a collapsed sidebar that then reopens (run the check twice to test it;
+        // reopening a sidebar saved collapsed once made its width run away).
         return [
             ("1-default", {}),
             ("2-minimum", { resize(window.minSize) }),
-            ("3-sidebar-collapsed", { split?.toggleSidebar(nil) }),
-            ("4-sidebar-reopened", { split?.toggleSidebar(nil) }),
+            ("3-sidebar-toggled", { split?.toggleSidebar(nil) }),
+            ("4-sidebar-toggled-back", { split?.toggleSidebar(nil) }),
             ("5-large", { resize(NSSize(width: 1400, height: 900)) }),
             ("6-below-minimum", { resize(NSSize(width: 600, height: 400)) }),
+            ("7-sidebar-toggled-at-quit", { split?.toggleSidebar(nil) }),
         ]
     }
 
@@ -63,7 +66,15 @@ enum UISmokeTest {
         // Let a few display cycles run, as a real launch would.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             capture(window, to: out.appendingPathComponent("\(name).png"))
-            print("ui-smoke: \(name) \(Int(window.frame.width))x\(Int(window.frame.height))")
+            let split = window.contentViewController as? NSSplitViewController
+            let sidebar = split?.splitViewItems.first?.viewController.view.frame.width ?? -1
+            print("ui-smoke: \(name) \(Int(window.frame.width))x\(Int(window.frame.height)) sidebar \(sidebar)")
+            fflush(stdout)   // keep the log if a later step aborts
+            // A sidebar wider than the window means its width ran away.
+            if !sidebar.isFinite || sidebar > window.frame.width {
+                FileHandle.standardError.write("ui-smoke: sidebar width ran away\n".data(using: .utf8)!)
+                exit(4)
+            }
             run(Array(steps.dropFirst()), out: out)
         }
     }
