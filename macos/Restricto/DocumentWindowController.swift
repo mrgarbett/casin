@@ -675,8 +675,10 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     }
 
     /// ⌘F: opens the find bar at the bottom of the middle and puts the cursor
-    /// in it; again (or Esc) closes it.
-    @objc func performFindPanelAction(_ sender: Any?) {
+    /// in it; again (or Esc) closes it. Not performFindPanelAction: while the
+    /// find field is being edited its field editor, an NSTextView, has that
+    /// action too and takes ⌘F first, so the bar would never close.
+    @objc func toggleFindBar(_ sender: Any?) {
         guard let bar = findBar else { return }
         let editing = searchField.currentEditor() != nil
         if !bar.isHidden && editing {
