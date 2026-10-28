@@ -144,9 +144,19 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
                 content.trailingAnchor.constraint(equalTo: root.trailingAnchor),
                 content.topAnchor.constraint(equalTo: root.topAnchor),
                 content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-                // Shifted as the map is, which leaves room for the panel's pill.
-                pill.centerXAnchor.constraint(equalTo: root.safeAreaLayoutGuide.centerXAnchor,
-                                              constant: -Self.panelPillRoom / 2),
+            ])
+            // Shifted as the map is, which leaves room for the panel's pill. The
+            // edges stay inside the visible middle: on a narrow middle the status
+            // text truncates instead of the pill running under the sidebar.
+            let centre = pill.centerXAnchor.constraint(equalTo: root.safeAreaLayoutGuide.centerXAnchor,
+                                                       constant: -Self.panelPillRoom / 2)
+            centre.priority = .defaultHigh
+            NSLayoutConstraint.activate([
+                centre,
+                pill.leadingAnchor.constraint(greaterThanOrEqualTo: root.safeAreaLayoutGuide.leadingAnchor,
+                                              constant: 8),
+                pill.trailingAnchor.constraint(lessThanOrEqualTo: root.safeAreaLayoutGuide.trailingAnchor,
+                                               constant: -Self.panelPillRoom - 8),
             ])
             statusPill = pill
             pillMaxWidth = pill.widthAnchor.constraint(lessThanOrEqualToConstant: 400)
@@ -426,10 +436,21 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     }
 
     /// NSDocument calls this when its unsaved-changes state flips: show a red dot
-    /// beside the file name in the tab.
+    /// beside the file name in the tab. (A tab's accessory view sits at its far
+    /// edge, away from the centred name, so the dot goes in the title.)
     override func setDocumentEdited(_ dirtyFlag: Bool) {
         super.setDocumentEdited(dirtyFlag)
-        window?.tab.accessoryView = dirtyFlag ? UnsavedDot() : nil
+        guard let tab = window?.tab else { return }
+        guard dirtyFlag, let name = (document as? NSDocument)?.displayName else {
+            tab.attributedTitle = nil
+            return
+        }
+        let font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        let title = NSMutableAttributedString(string: name, attributes: [.font: font])
+        title.append(NSAttributedString(string: "  ●", attributes: [
+            .font: font, .foregroundColor: NSColor.systemRed,
+        ]))
+        tab.attributedTitle = title
     }
 
     private func updateTexts() {

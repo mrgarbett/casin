@@ -26,6 +26,10 @@ final class FolderBrowserController: NSViewController, NSOutlineViewDataSource, 
     private let unsavedHeader = Header(title: "Not Saved")
     private let filesHeader = Header(title: "Files")
     private var unsaved: [OpenDocument] = []
+    /// The folders open in the tree, kept while a search lists matches instead.
+    private var treeExpanded = Set<URL>()
+    /// True while the outline shows search results rather than the tree.
+    private var listsMatches = false
     /// The files matching the search, or nil when there is no search.
     private var matches: [Node]?
     private let empty = NSTextField(wrappingLabelWithString: "Choose a folder to list its sequence files here.")
@@ -168,13 +172,16 @@ final class FolderBrowserController: NSViewController, NSOutlineViewDataSource, 
     /// Rebuilds the Not Saved section and the red dots, keeping the files listed.
     @objc private func documentsChanged() {
         guard isViewLoaded else { return }
-        let expanded = expandedURLs()
+        // Remember the open folders only while the tree is what's listed, so
+        // clearing a search brings back the folders that were open before it.
+        if !listsMatches { treeExpanded = expandedURLs() }
         unsaved = NSDocumentController.shared.documents
             .filter { $0.isDocumentEdited || $0.fileURL == nil }
             .map { OpenDocument($0) }
         outline.reloadData()
         for header in topLevel { outline.expandItem(header) }
-        if matches == nil { expand(expanded, in: root?.children ?? []) }
+        listsMatches = matches != nil
+        if !listsMatches { expand(treeExpanded, in: root?.children ?? []) }
     }
 
     private var topLevel: [Header] { unsaved.isEmpty ? [filesHeader] : [unsavedHeader, filesHeader] }
