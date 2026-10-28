@@ -1417,6 +1417,71 @@ static void testCommonFeatures()
     CHECK(found.size() == 1 && found[0].name == "T7 promoter");
 }
 
+// Primers and PCR on pUC19, against Primer3's Tm and the record's sequence.
+static void testPrimersOnReference(const std::string &dir)
+{
+    // Tm with SantaLucia (1998) parameters, 50 mM Na+, 500 nM oligo: the
+    // values Primer3 (primer3-py 2.x calc_tm, tm_method and salt correction
+    // "santalucia") gives for the same conditions.
+    const struct { const char *bases; double tm; } tms[] = {
+        {"GTAAAACGACGGCCAGT", 52.77},          // M13/pUC forward (-20)
+        {"CAGGAAACAGCTATGAC", 47.18},          // M13/pUC reverse
+        {"GTAAAACGACGGCCAGTGAG", 56.67},
+        {"AGCGGATAACAATTTCACACAGGA", 57.53},
+        {"ATATATATTTAAAT", 19.47},
+        {"GCGCGCGGCCGCGCGC", 74.13},           // self-complementary
+    };
+    for (const auto &t : tms)
+        CHECK(std::fabs(meltingTemperature(t.bases) - t.tm) < 0.1);
+
+    Sequence puc;
+    std::string err;
+    CHECK(loadSequenceFile(dir + "/reference/pUC19-L09137.gb", &puc, &err));
+    // The M13 primers each bind once, facing each other across the MCS
+    // (EcoRI 396 .. HindIII 447): forward 379-395, reverse 465-481.
+    const std::vector<PrimerSite> f = findPrimerSites(puc, "GTAAAACGACGGCCAGT");
+    const std::vector<PrimerSite> r = findPrimerSites(puc, "CAGGAAACAGCTATGAC");
+    CHECK(f.size() == 1 && r.size() == 1);
+    if (f.size() != 1 || r.size() != 1)
+        return;
+    CHECK(f[0].strand == Strand::Forward && f[0].binding.start == 378 && f[0].binding.end == 395 && f[0].mismatches == 0);
+    CHECK(r[0].strand == Strand::Reverse && r[0].binding.start == 464 && r[0].binding.end == 481 && r[0].mismatches == 0);
+
+    // PCR: 379..481 is 103 bp; 5' tails add their bases to the product.
+    Primer fwd{"M13F", "GTAAAACGACGGCCAGT", f[0].binding, Strand::Forward};
+    Primer rev{"M13R", "CAGGAAACAGCTATGAC", r[0].binding, Strand::Reverse};
+    Sequence product;
+    CHECK(pcrProduct(puc, fwd, rev, &product, &err));
+    CHECK_EQ(product.length(), 103);
+    CHECK(product.bases == puc.bases.substr(378, 103));
+    Primer tailF = fwd, tailR = rev;
+    tailF.bases = "ggaattc" + fwd.bases;       // EcoRI tail, lowercase as typed
+    tailR.bases = "CCCAAGCTT" + rev.bases;     // HindIII tail
+    CHECK(pcrProduct(puc, tailF, tailR, &product, &err));
+    CHECK_EQ(product.length(), 7 + 103 + 9);
+    CHECK(startsWith(product.bases, "GGAATTC" + puc.bases.substr(378, 10)));
+    CHECK(endsWith(product.bases, reverseComplement("CCCAAGCTT")));
+    CHECK(!pcrProduct(puc, rev, fwd, &product, &err));   // swapped: they face away
+
+    // Design with a 50 bp flank around the MCS: both primers sit within the
+    // flank, the product holds the whole MCS, and both Tms are near 60.
+    PrimerDesign d;
+    const Span mcs{395, 57};
+    CHECK(designPrimers(puc, mcs, 60, &d, &err, 50));
+    CHECK(d.forward.strand == Strand::Forward && d.reverse.strand == Strand::Reverse);
+    CHECK(d.forward.binding.start >= mcs.start - 50 && d.forward.binding.start <= mcs.start);
+    CHECK(d.reverse.binding.end >= mcs.start + mcs.length && d.reverse.binding.end <= mcs.start + mcs.length + 50);
+    CHECK(std::fabs(d.forwardCheck.tm - 60) < 3 && std::fabs(d.reverseCheck.tm - 60) < 3);
+    CHECK(std::fabs(d.forwardCheck.tm - d.reverseCheck.tm) < 2);
+    CHECK(puc.bases.compare(d.forward.binding.start, d.forward.bases.size(), d.forward.bases) == 0);
+    CHECK(reverseComplement(d.reverse.bases) == puc.bases.substr(d.reverse.binding.start, d.reverse.bases.size()));
+    CHECK_EQ(d.forward.name, puc.name + "-fwd");
+    CHECK_EQ(d.reverse.name, puc.name + "-rev");
+    Sequence designed;
+    CHECK(pcrProduct(puc, d.forward, d.reverse, &designed, &err));
+    CHECK_EQ(designed.length(), d.reverse.binding.end - d.forward.binding.start);
+}
+
 int main(int argc, char **argv)
 {
     testBasics();
@@ -1449,6 +1514,7 @@ int main(int argc, char **argv)
         testEmbl(argv[1]);
         testSamples(argv[1]);
         testReferences(argv[1]);
+        testPrimersOnReference(argv[1]);
     } else
         std::fprintf(stderr, "note: no samples directory given, skipping sample tests\n");
     std::printf("%d checks, %d failures\n", g_checks, g_failures);

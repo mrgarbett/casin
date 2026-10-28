@@ -34,3 +34,18 @@ The two HindIII rows differ on purpose. Commercial lambda markers are made from
 the cI857ind1 Sam7 strain. That DNA has a seventh HindIII site at 37,584, which
 the wild-type record lacks (it reads AAGCTC there). The test makes that one-base
 change and then expects NEB's eight bands.
+
+## Primers and PCR (pUC19)
+
+| Check | Expected | Source |
+| --- | --- | --- |
+| Tm, M13/pUC forward (-20) `GTAAAACGACGGCCAGT` | 52.77 °C (within 0.1) | Primer3 `calc_tm`, SantaLucia 1998, 50 mM Na+, 500 nM oligo |
+| Tm, M13/pUC reverse `CAGGAAACAGCTATGAC` | 47.18 °C | same |
+| Tm, four more primers incl. a self-complementary one | see `testPrimersOnReference` | same |
+| M13 forward binding site | 379–395, top strand, exact | L09137.2 sequence |
+| M13 reverse binding site | 465–481, bottom strand, exact | L09137.2 sequence |
+| PCR with M13 forward + reverse | 103 bp (379–481), spans the MCS | L09137.2 sequence |
+| Same PCR with a 7 nt EcoRI and a 9 nt HindIII 5′ tail | 119 bp, tails at the ends | 103 + 7 + 9 |
+| Primer design for the MCS (396–452), 50 bp flank, Tm 60 | both primers within the flank, Tm 60 ± 3 °C, within 2 °C of each other | design target |
+
+Tm agreement with Primer3 is exact to two decimals for every primer tested, because both use the same SantaLucia (1998) unified parameters and salt correction.
