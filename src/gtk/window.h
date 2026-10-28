@@ -182,4 +182,9 @@ void showOpenDialog(GtkApplication *app, GtkWindow *parent);
 // A new window with a sequence typed or pasted by the user.
 void showNewSequenceDialog(GtkApplication *app, GtkWindow *parent);
 
+// Inside a Flatpak the host's files are only visible through the document
+// portal; when `path` can't be read there, returns `error` with a hint on how
+// to pass files in. Otherwise returns `error` unchanged.
+std::string withSandboxHint(const std::string &path, const std::string &error);
+
 } // namespace oc::gtk

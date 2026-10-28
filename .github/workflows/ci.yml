@@ -41,6 +41,45 @@ jobs:
             window.png
             openclone-*.rpm
 
+  flatpak:
+    name: Flatpak (GNOME runtime)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install flatpak-builder and the GNOME SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          # Ubuntu 24.04 blocks the user namespaces that bubblewrap needs.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+      - name: Build the Flatpak bundle
+        run: |
+          flatpak-builder --user --install-deps-from=flathub --force-clean --disable-rofiles-fuse \
+              --repo=build-flatpak/repo build-flatpak/app packaging/flatpak/io.github.openclone.OpenClone.yml
+          flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+              build-flatpak/repo openclone.flatpak io.github.openclone.OpenClone
+      - name: Smoke test inside the sandbox
+        run: |
+          sudo apt-get install -y dbus-daemon fuse3
+          flatpak install --user -y --noninteractive ./openclone.flatpak
+          out="$HOME/.var/app/io.github.openclone.OpenClone/demo-map.png"
+          mkdir -p "$(dirname "$out")"
+          # The document portal needs a session bus.
+          dbus-run-session -- flatpak run --file-forwarding io.github.openclone.OpenClone \
+              --render-map "$out" @@ "$PWD/samples/pOC-demo.dna" @@
+          test -s "$out"
+          # Without forwarding the host file is invisible; the error must say what to do.
+          if flatpak run io.github.openclone.OpenClone --render-map "$out" "$PWD/samples/pOC-demo.dna" 2>err.txt; then
+              echo "expected the unforwarded run to fail"; exit 1
+          fi
+          cat err.txt
+          grep -q -- "--file-forwarding" err.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-bundle
+          path: openclone.flatpak
+
   macos:
     # Two SDKs: macos-14 builds without the Liquid Glass code (older Xcode),
     # macos-26 builds it in with Xcode 26. Both binaries target macOS 13.
