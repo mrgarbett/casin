@@ -133,6 +133,10 @@ int main(int argc, char **argv)
     CHECK(oc_scene_item_count(scene) > 50);
     oc_scene_free(scene);
     oc_seq_layout_free(seq);
+    OCSeqOptions so = {6, true, false, true, false, "CDS"};
+    seq = oc_seq_layout_new_options(doc, 800, true, &so, false, measure, NULL);
+    CHECK(oc_seq_layout_total_height(seq) > 1000);
+    oc_seq_layout_free(seq);
 
     /* Editing, undo and primers. */
     const int len = oc_document_length(doc);

@@ -3,10 +3,11 @@ import AppKit
 import RestrictoCore
 import UniformTypeIdentifiers
 
-/// The window for one document: a folder browser on the left, map | sequence
-/// (or map over sequence, and the map can be hidden) in the middle, and an
-/// Enzymes/Features/Primers inspector on the right, with find and view
-/// controls in a unified toolbar and a status line.
+/// The window for one document: a folder browser on the left, the map in the
+/// middle and a Sequence/Enzymes/Features/Primers panel on the right; or, with
+/// the map stacked above the sequence (or hidden), both in the middle and an
+/// Enzymes/Features/Primers panel on the right. Find and view controls sit in
+/// a unified toolbar and a status line.
 ///
 /// Ventura through Sequoia get the classic layout: a vibrant sidebar and a flat
 /// status line under the content. macOS 26 adds Liquid Glass (see Glass.swift):
@@ -16,9 +17,14 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private let core: CoreDocument
     private let mapView: MapView
     private let sequenceView: SequenceView
+    /// The sequence view's scroll view; it moves between the middle and the panel.
+    private let sequenceScroll = NSScrollView()
     private let browser = FolderBrowserController()
     private let inspector: InspectorController
     private var inspectorItem: NSSplitViewItem?
+    private var splitController: NSSplitViewController?
+    /// macOS 26: the status floats over the middle, so the sequence there scrolls clear of it.
+    private var floatsStatus = false
     private let status = NSTextField(labelWithString: "")
     /// View toggles beside the status: complement strand, translation, and
     /// enzymes and features on the map.
@@ -74,21 +80,21 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
 
     private func buildContent() {
         guard let window = window else { return }
-        let scroll = NSScrollView()
+        let scroll = sequenceScroll
         scroll.documentView = sequenceView
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         scroll.contentView.postsFrameChangedNotifications = true
         NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: scroll.contentView,
-                                               queue: .main) { [weak self, weak scroll] _ in
+                                               queue: .main) { [weak self] _ in
             self?.sequenceView.updateSize()
             // This runs inside the window's layout pass; changing a constraint
             // here marks layout dirty again and can loop until AppKit aborts.
             // Apply the new width after the pass, and only when it changed.
             DispatchQueue.main.async {
-                guard let scroll = scroll, let limit = self?.pillMaxWidth else { return }
-                let width = max(0, scroll.frame.width - 32)
+                guard let self = self, let limit = self.pillMaxWidth else { return }
+                let width = max(0, self.split.frame.width - 32)
                 if abs(limit.constant - width) >= 1 { limit.constant = width }
             }
         }
@@ -103,7 +109,6 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
                      scroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 320)]
         minHeights = [mapView.heightAnchor.constraint(greaterThanOrEqualToConstant: 180),
                       scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 180)]
-        applyMapLayout()
 
         status.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         status.textColor = .secondaryLabelColor
@@ -122,14 +127,14 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
                 v.translatesAutoresizingMaskIntoConstraints = false
                 root.addSubview(v)
             }
+            floatsStatus = true
             scroll.automaticallyAdjustsContentInsets = false
-            scroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 52, right: 0)
             NSLayoutConstraint.activate([
                 content.leadingAnchor.constraint(equalTo: root.leadingAnchor),
                 content.trailingAnchor.constraint(equalTo: root.trailingAnchor),
                 content.topAnchor.constraint(equalTo: root.topAnchor),
                 content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-                pill.centerXAnchor.constraint(equalTo: scroll.centerXAnchor),
+                pill.centerXAnchor.constraint(equalTo: split.centerXAnchor),
                 pill.bottomAnchor.constraint(equalTo: root.safeAreaLayoutGuide.bottomAnchor, constant: -12),
             ])
             pillMaxWidth = pill.widthAnchor.constraint(lessThanOrEqualToConstant: 400)
@@ -179,6 +184,8 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         splitController.addSplitViewItem(detailItem)
         splitController.addSplitViewItem(inspectorItem)
         window.contentViewController = splitController
+        self.splitController = splitController
+        applyMapLayout()
 
         // The background extension places its content inside the safe area only
         // when it lays out, which a sidebar collapsing or opening doesn't cause.
@@ -228,23 +235,66 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         sequenceView.scroll(.zero)
     }
 
-    /// Puts the split in the window's current layout: side by side or stacked,
-    /// with or without the map. Only the minimum sizes along the split's axis
-    /// apply, and none for a hidden map, so it can collapse.
+    /// With the map beside the sequence, the sequence lives in the right panel
+    /// (its Sequence pane); stacked or without the map, it is in the middle.
+    private var sequenceInPanel: Bool { !mapStacked && !mapHidden }
+
+    /// Puts the window in its current layout: map in the middle and sequence in
+    /// the panel, or map over sequence (or the sequence alone) in the middle.
+    /// Only the minimum sizes along the split's axis apply, and none for a
+    /// hidden map, so it can collapse.
     private func applyMapLayout() {
         NSLayoutConstraint.deactivate(minWidths + minHeights)
         split.isVertical = !mapStacked
         mapView.isHidden = mapHidden
-        let mins = mapStacked ? minHeights : minWidths
-        NSLayoutConstraint.activate(mapHidden ? [mins[1]] : mins)
+        if sequenceInPanel {
+            if sequenceScroll.superview === split {
+                split.removeArrangedSubview(sequenceScroll)
+                sequenceScroll.removeFromSuperview()
+            }
+            inspector.hostSequence(sequenceScroll)
+            NSLayoutConstraint.activate([minWidths[0]])
+        } else {
+            inspector.hostSequence(nil)
+            if sequenceScroll.superview !== split {
+                split.addArrangedSubview(sequenceScroll)
+                split.setHoldingPriority(.defaultLow - 1, forSubviewAt: 1)
+            }
+            let mins = mapStacked ? minHeights : minWidths
+            NSLayoutConstraint.activate(mapHidden ? [mins[1]] : mins)
+        }
+        // The floating status covers the bottom of the middle only.
+        sequenceScroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: floatsStatus && !sequenceInPanel ? 52 : 0,
+                                                    right: 0)
+        // A panel holding the sequence may grow as wide as the user likes.
+        inspectorItem?.maximumThickness = sequenceInPanel ? NSSplitViewItem.unspecifiedDimension : 460
         split.adjustSubviews()
+        sequenceView.updateSize()
     }
 
-    /// Map 45 %, sequence the rest, along the split's axis.
+    /// Map 45 %, sequence the rest, along the split's axis; with the sequence in
+    /// the panel, the panel opens to about half of the space beside the sidebar.
     private func placeDivider() {
+        if sequenceInPanel, let item = inspectorItem, let outer = splitController?.splitView {
+            if item.isCollapsed { item.isCollapsed = false }
+            outer.layoutSubtreeIfNeeded()
+            let panel = item.viewController.view.frame.width
+            let sidebar = splitController?.splitViewItems.first.map { $0.isCollapsed ? 0 : $0.viewController.view.frame.width } ?? 0
+            // Only a panel still sized for the tables; a width the user chose stays.
+            let want = max(420, (outer.bounds.width - sidebar) * 0.5)
+            if panel < 420 {
+                outer.setPosition(outer.bounds.width - want - outer.dividerThickness, ofDividerAt: 1)
+            }
+            return
+        }
         guard !mapHidden else { return }
         let length = split.isVertical ? split.bounds.width : split.bounds.height
         split.setPosition(length * 0.45, ofDividerAt: 0)
+    }
+
+    /// Shows one pane of the right panel (the UI smoke test walks through them).
+    func showInspectorPane(_ pane: InspectorController.Pane) {
+        inspector.select(pane)
     }
 
     /// The status line inside a glass capsule, or nil before macOS 26.
@@ -274,8 +324,9 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
 
     /// Small icon toggles for the status pill (or the status row before macOS 26).
     private func makeToggles() -> NSStackView {
-        let entries = [("Complement strand", "arrow.left.arrow.right"), ("Translation (3 forward frames)", "textformat"),
-                       ("Restriction sites on the map", "scissors"), ("Features on the map", "tag")]
+        let entries = [("Complement strand", "arrow.left.arrow.right"),
+                       ("Translation of open reading frames (green forward, red reverse)", "textformat"),
+                       ("Restriction sites", "scissors"), ("Features", "tag")]
         viewToggles = entries.enumerated().map { (i, entry) -> NSButton in
             let image = NSImage(systemSymbolName: entry.1, accessibilityDescription: entry.0)
                 ?? NSImage(size: NSSize(width: 14, height: 14))
@@ -296,7 +347,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     @objc private func viewToggleClicked(_ sender: NSButton) {
         switch sender.tag {
         case 0: sequenceView.showComplement.toggle()
-        case 1: core.frames = core.frames == 0 ? 3 : 0
+        case 1: core.frames = core.frames == 0 ? 6 : 0
         case 2: core.mapShowsEnzymes.toggle()
         default:
             // Hide every feature type on the map, or show them all again.
@@ -363,7 +414,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             item.preferredWidthForSearchField = 240
             return item
         case inspectorToolbarItem:
-            return button(id, label: "Inspector", help: "Show or hide Enzymes, Features and Primers",
+            return button(id, label: "Inspector", help: "Show or hide the right panel",
                           symbol: "sidebar.right", action: #selector(toggleInspectorPanel(_:)))
         case mapItem:
             return button(id, label: "Map", help: "Show or hide the map",
@@ -434,6 +485,10 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         refreshToggles()
     }
 
+    @objc func toggleGroupTens(_ sender: Any?) {
+        core.groupTens.toggle()
+    }
+
     /// Shows or hides the right-hand panel. Not named toggleInspector: from
     /// macOS 14 NSSplitViewController has one, which comes first in the
     /// responder chain and never retitles the menu item.
@@ -502,6 +557,9 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             return core.hasSelection && core.selectionLength > 0
         case #selector(toggleComplementStrand(_:)):
             item.state = sequenceView.showComplement ? .on : .off
+            return true
+        case #selector(toggleGroupTens(_:)):
+            item.state = core.groupTens ? .on : .off
             return true
         case #selector(toggleMapHidden(_:)):
             item.title = mapHidden ? "Show Map" : "Hide Map"

@@ -114,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item("Stack Map Above Sequence", #selector(DocumentWindowController.toggleMapStacked(_:))),
             .separator(),
             item("Show Complement Strand", #selector(DocumentWindowController.toggleComplementStrand(_:))),
+            item("Group Bases in Tens", #selector(DocumentWindowController.toggleGroupTens(_:))),
             .separator(),
             item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]),
         ])
