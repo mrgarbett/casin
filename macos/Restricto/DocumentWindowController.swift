@@ -38,10 +38,10 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private var mapStacked = UserDefaults.standard.bool(forKey: DocumentWindowController.mapStackedKey)
     private var mapHidden = UserDefaults.standard.bool(forKey: DocumentWindowController.mapHiddenKey)
     private var didFirstShow = false
-    /// The view that mirrors content under the sidebar (macOS 26), and the
-    /// safe-area inset its content was last placed for.
+    /// The view that mirrors content under the side panels (macOS 26), and the
+    /// safe-area insets (left, right) its content was last placed for.
     private var backgroundExtension: NSView?
-    private var placedInset: CGFloat = -1
+    private var placedInsets: (CGFloat, CGFloat) = (-1, -1)
 
     init(document: SequenceDocument) {
         core = document.core
