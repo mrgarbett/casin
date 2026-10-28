@@ -107,7 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ])
         submenu("View", [
             item("Toggle Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)), "s", [.command, .control]),
-            item("Toggle Inspector", #selector(DocumentWindowController.toggleInspector(_:)), "i",
+            item("Hide Inspector", #selector(DocumentWindowController.toggleInspectorPanel(_:)), "i",
                  [.command, .option]),
             .separator(),
             item("Hide Map", #selector(DocumentWindowController.toggleMapHidden(_:)), "m", [.command, .shift]),

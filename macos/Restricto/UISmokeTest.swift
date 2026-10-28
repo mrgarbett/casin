@@ -55,8 +55,8 @@ enum UISmokeTest {
             ("7-map-hidden", { controller?.toggleMapHidden(nil) }),
             ("8-map-shown", { controller?.toggleMapHidden(nil) }),
             ("9-map-beside", { controller?.toggleMapStacked(nil) }),
-            ("9a-inspector-hidden", { controller?.toggleInspector(nil) }),
-            ("9b-inspector-shown", { controller?.toggleInspector(nil) }),
+            ("9a-inspector-hidden", { controller?.toggleInspectorPanel(nil) }),
+            ("9b-inspector-shown", { controller?.toggleInspectorPanel(nil) }),
             ("10-below-minimum", { resize(NSSize(width: 600, height: 400)) }),
             ("11-sidebar-toggled-at-quit", { split?.toggleSidebar(nil) }),
         ]
