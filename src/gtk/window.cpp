@@ -195,79 +195,12 @@ void Window::buildUi(GtkApplication *app)
     gtk_actionable_set_action_name(GTK_ACTIONABLE(redo), "win.redo");
     adw_header_bar_pack_start(ADW_HEADER_BAR(header), redo);
 
-    GMenu *menu = g_menu_new();
-    GMenu *fileSection = g_menu_new();
-    g_menu_append(fileSection, "New Sequence…", "app.new");
-    g_menu_append(fileSection, "Open…", "app.open");
-    g_menu_append(fileSection, "Search a Folder…", "win.search-folder");
-    g_menu_append(fileSection, "Save", "win.save");
-    g_menu_append(fileSection, "Save As…", "win.save-as");
-    g_menu_append(fileSection, "Export FASTA…", "win.export-fasta");
-    g_menu_append(fileSection, "Export Map…", "win.export-map");
-    g_menu_append(fileSection, "Print…", "win.print");
-    g_menu_append_section(menu, nullptr, G_MENU_MODEL(fileSection));
-    GMenu *editSection = g_menu_new();
-    g_menu_append(editSection, "Cut", "win.cut");
-    g_menu_append(editSection, "Copy", "win.copy");
-    g_menu_append(editSection, "Copy Reverse Complement", "win.copy-rc");
-    g_menu_append(editSection, "Paste", "win.paste");
-    g_menu_append(editSection, "Select All", "win.select-all");
-    g_menu_append(editSection, "Find…", "win.find");
-    g_menu_append_section(menu, nullptr, G_MENU_MODEL(editSection));
-    GMenu *seqSection = g_menu_new();
-    g_menu_append(seqSection, "Reverse Complement Sequence", "win.reverse-complement");
-    g_menu_append(seqSection, "Set Origin at Selection", "win.set-origin");
-    g_menu_append(seqSection, "Circular", "win.circular");
-    g_menu_append(seqSection, "Choose Enzymes…", "win.choose-enzymes");
-    g_menu_append(seqSection, "Digest and Gel…", "win.digest");
-    GMenu *featureMenu = g_menu_new();
-    g_menu_append(featureMenu, "Add Feature…", "win.add-feature");
-    g_menu_append(featureMenu, "Edit Feature…", "win.edit-feature");
-    g_menu_append(featureMenu, "Delete Feature", "win.delete-feature");
-    g_menu_append(featureMenu, "Find ORFs…", "win.orfs");
-    g_menu_append(featureMenu, "Protein Properties…", "win.protein");
-    g_menu_append_submenu(seqSection, "Features", G_MENU_MODEL(featureMenu));
-    GMenu *primerMenu = g_menu_new();
-    g_menu_append(primerMenu, "Add Primer…", "win.add-primer");
-    g_menu_append(primerMenu, "Design Primers for Selection…", "win.design-primers");
-    g_menu_append_submenu(seqSection, "Primers", G_MENU_MODEL(primerMenu));
-    GMenu *cloneMenu = g_menu_new();
-    g_menu_append(cloneMenu, "PCR Product…", "win.pcr");
-    g_menu_append(cloneMenu, "Restriction Cloning…", "win.clone");
-    g_menu_append(cloneMenu, "Golden Gate Assembly…", "win.golden-gate");
-    g_menu_append(cloneMenu, "Gibson Assembly…", "win.gibson");
-    g_menu_append(cloneMenu, "TA, GC and TOPO Cloning…", "win.ta-cloning");
-    g_menu_append(cloneMenu, "Overlap Extension PCR…", "win.overlap-extension");
-    g_menu_append(cloneMenu, "Insertion by PCR…", "win.insertion");
-    g_menu_append(cloneMenu, "Mutagenesis…", "win.mutagenesis");
-    g_menu_append(cloneMenu, "Cloning History…", "win.history");
-    g_menu_append_submenu(seqSection, "Cloning", G_MENU_MODEL(cloneMenu));
-    GMenu *verifyMenu = g_menu_new();
-    g_menu_append(verifyMenu, "Align Read…", "win.align");
-    g_menu_append(verifyMenu, "Compare with Another Sequence…", "win.compare");
-    g_menu_append(verifyMenu, "Hide Aligned Reads", "win.clear-reads");
-    g_menu_append_submenu(seqSection, "Align and Compare", G_MENU_MODEL(verifyMenu));
-    g_menu_append_section(menu, nullptr, G_MENU_MODEL(seqSection));
-    GMenu *viewMenu = g_menu_new();
-    g_menu_append(viewMenu, "Map Display…", "win.map-options");
-    g_menu_append(viewMenu, "Show Complement Strand", "win.show-complement");
-    GMenu *framesMenu = g_menu_new();
-    g_menu_append(framesMenu, "None", "win.frames::0");
-    g_menu_append(framesMenu, "Forward Frames", "win.frames::3");
-    g_menu_append(framesMenu, "All Six Frames", "win.frames::6");
-    g_menu_append_submenu(viewMenu, "Translate Frames", G_MENU_MODEL(framesMenu));
-    GMenu *appSection = g_menu_new();
-    g_menu_append_submenu(appSection, "View", G_MENU_MODEL(viewMenu));
-    g_menu_append(appSection, "About OpenClone", "app.about");
-    g_menu_append_section(menu, nullptr, G_MENU_MODEL(appSection));
     GtkWidget *menuButton = gtk_menu_button_new();
+    m_menuButton = menuButton;
+    rebuildMenu();
     gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(menuButton), "open-menu-symbolic");
-    gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menuButton), G_MENU_MODEL(menu));
     gtk_menu_button_set_primary(GTK_MENU_BUTTON(menuButton), TRUE);
     gtk_widget_set_tooltip_text(menuButton, "Main menu");
-    for (GMenu *m : {fileSection, editSection, seqSection, featureMenu, primerMenu, cloneMenu, verifyMenu, viewMenu,
-                     framesMenu, appSection, menu})
-        g_object_unref(m);
     adw_header_bar_pack_end(ADW_HEADER_BAR(header), menuButton);
 
     GtkWidget *sidebarToggle = gtk_toggle_button_new();
@@ -1074,6 +1007,139 @@ gboolean Window::onCloseRequest(GtkWindow *, gpointer p)
     return TRUE;
 }
 
+namespace {
+// Tools from the first alpha that wait for their own tested step. They stay
+// built and reachable with Experimental Tools on; off, their menu items and
+// shortcuts are gone.
+const char *const kExperimentalActions[] = {
+    "search-folder", "print", "choose-enzymes", "orfs", "protein", "clone", "golden-gate", "ta-cloning",
+    "overlap-extension", "mutagenesis", "history", "align", "compare", "clear-reads", "map-options", "frames",
+};
+
+std::string settingsPath()
+{
+    gchar *path = g_build_filename(g_get_user_config_dir(), "openclone", "settings.ini", nullptr);
+    std::string out = path;
+    g_free(path);
+    return out;
+}
+
+int g_experimental = -1;   // -1 = not read yet
+} // namespace
+
+bool Window::experimentalTools()
+{
+    if (g_experimental < 0) {
+        GKeyFile *kf = g_key_file_new();
+        g_experimental = g_key_file_load_from_file(kf, settingsPath().c_str(), G_KEY_FILE_NONE, nullptr) &&
+                         g_key_file_get_boolean(kf, "Tools", "experimental", nullptr);
+        g_key_file_free(kf);
+    }
+    return g_experimental > 0;
+}
+
+void Window::setExperimentalTools(GtkApplication *app, bool on)
+{
+    g_experimental = on;
+    const std::string path = settingsPath();
+    GKeyFile *kf = g_key_file_new();
+    g_key_file_load_from_file(kf, path.c_str(), G_KEY_FILE_KEEP_COMMENTS, nullptr);
+    g_key_file_set_boolean(kf, "Tools", "experimental", on);
+    gchar *dir = g_path_get_dirname(path.c_str());
+    g_mkdir_with_parents(dir, 0700);
+    g_free(dir);
+    g_key_file_save_to_file(kf, path.c_str(), nullptr);
+    g_key_file_free(kf);
+    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
+        auto *w = static_cast<Window *>(g_object_get_data(G_OBJECT(l->data), "oc-window"));
+        if (w) {
+            w->rebuildMenu();
+            w->updateActions();
+        }
+    }
+}
+
+void Window::rebuildMenu()
+{
+    const bool exp = experimentalTools();
+    auto addExp = [exp](GMenu *m, const char *label, const char *action) {
+        if (exp)
+            g_menu_append(m, label, action);
+    };
+    GMenu *menu = g_menu_new();
+    GMenu *fileSection = g_menu_new();
+    g_menu_append(fileSection, "New Sequence…", "app.new");
+    g_menu_append(fileSection, "Open…", "app.open");
+    addExp(fileSection, "Search a Folder…", "win.search-folder");
+    g_menu_append(fileSection, "Save", "win.save");
+    g_menu_append(fileSection, "Save As…", "win.save-as");
+    g_menu_append(fileSection, "Export FASTA…", "win.export-fasta");
+    g_menu_append(fileSection, "Export Map…", "win.export-map");
+    addExp(fileSection, "Print…", "win.print");
+    g_menu_append_section(menu, nullptr, G_MENU_MODEL(fileSection));
+    GMenu *editSection = g_menu_new();
+    g_menu_append(editSection, "Cut", "win.cut");
+    g_menu_append(editSection, "Copy", "win.copy");
+    g_menu_append(editSection, "Copy Reverse Complement", "win.copy-rc");
+    g_menu_append(editSection, "Paste", "win.paste");
+    g_menu_append(editSection, "Select All", "win.select-all");
+    g_menu_append(editSection, "Find…", "win.find");
+    g_menu_append_section(menu, nullptr, G_MENU_MODEL(editSection));
+    GMenu *seqSection = g_menu_new();
+    g_menu_append(seqSection, "Reverse Complement Sequence", "win.reverse-complement");
+    g_menu_append(seqSection, "Set Origin at Selection", "win.set-origin");
+    g_menu_append(seqSection, "Circular", "win.circular");
+    addExp(seqSection, "Choose Enzymes…", "win.choose-enzymes");
+    g_menu_append(seqSection, "Digest and Gel…", "win.digest");
+    GMenu *featureMenu = g_menu_new();
+    g_menu_append(featureMenu, "Add Feature…", "win.add-feature");
+    g_menu_append(featureMenu, "Edit Feature…", "win.edit-feature");
+    g_menu_append(featureMenu, "Delete Feature", "win.delete-feature");
+    addExp(featureMenu, "Find ORFs…", "win.orfs");
+    addExp(featureMenu, "Protein Properties…", "win.protein");
+    g_menu_append_submenu(seqSection, "Features", G_MENU_MODEL(featureMenu));
+    GMenu *primerMenu = g_menu_new();
+    g_menu_append(primerMenu, "Add Primer…", "win.add-primer");
+    g_menu_append(primerMenu, "Design Primers for Selection…", "win.design-primers");
+    g_menu_append_submenu(seqSection, "Primers", G_MENU_MODEL(primerMenu));
+    GMenu *cloneMenu = g_menu_new();
+    g_menu_append(cloneMenu, "PCR Product…", "win.pcr");
+    addExp(cloneMenu, "Restriction Cloning…", "win.clone");
+    addExp(cloneMenu, "Golden Gate Assembly…", "win.golden-gate");
+    g_menu_append(cloneMenu, "Gibson Assembly…", "win.gibson");
+    addExp(cloneMenu, "TA, GC and TOPO Cloning…", "win.ta-cloning");
+    addExp(cloneMenu, "Overlap Extension PCR…", "win.overlap-extension");
+    g_menu_append(cloneMenu, "Insertion by PCR…", "win.insertion");
+    addExp(cloneMenu, "Mutagenesis…", "win.mutagenesis");
+    addExp(cloneMenu, "Cloning History…", "win.history");
+    g_menu_append_submenu(seqSection, "Cloning", G_MENU_MODEL(cloneMenu));
+    GMenu *verifyMenu = g_menu_new();
+    g_menu_append(verifyMenu, "Align Read…", "win.align");
+    g_menu_append(verifyMenu, "Compare with Another Sequence…", "win.compare");
+    g_menu_append(verifyMenu, "Hide Aligned Reads", "win.clear-reads");
+    if (exp)
+        g_menu_append_submenu(seqSection, "Align and Compare", G_MENU_MODEL(verifyMenu));
+    g_menu_append_section(menu, nullptr, G_MENU_MODEL(seqSection));
+    GMenu *viewMenu = g_menu_new();
+    addExp(viewMenu, "Map Display…", "win.map-options");
+    g_menu_append(viewMenu, "Show Complement Strand", "win.show-complement");
+    GMenu *framesMenu = g_menu_new();
+    g_menu_append(framesMenu, "None", "win.frames::0");
+    g_menu_append(framesMenu, "Forward Frames", "win.frames::3");
+    g_menu_append(framesMenu, "All Six Frames", "win.frames::6");
+    if (exp)
+        g_menu_append_submenu(viewMenu, "Translate Frames", G_MENU_MODEL(framesMenu));
+    GMenu *appSection = g_menu_new();
+    g_menu_append_submenu(appSection, "View", G_MENU_MODEL(viewMenu));
+    g_menu_append(appSection, "Experimental Tools", "app.experimental");
+    g_menu_append(appSection, "About OpenClone", "app.about");
+    g_menu_append_section(menu, nullptr, G_MENU_MODEL(appSection));
+    gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(m_menuButton), G_MENU_MODEL(menu));
+    for (GMenu *m : {fileSection, editSection, seqSection, featureMenu, primerMenu, cloneMenu, verifyMenu, viewMenu,
+                     framesMenu, appSection, menu})
+        g_object_unref(m);
+}
+
 void Window::updateActions()
 {
     auto enable = [this](const char *name, bool on) {
@@ -1100,6 +1166,9 @@ void Window::updateActions()
     GAction *circ = g_action_map_lookup_action(G_ACTION_MAP(m_window), "circular");
     if (circ)
         g_simple_action_set_state(G_SIMPLE_ACTION(circ), g_variant_new_boolean(m_doc.sequence().circular));
+    if (!experimentalTools())
+        for (const char *name : kExperimentalActions)
+            enable(name, false);
     m_seq->setEditable(has);
 }
 

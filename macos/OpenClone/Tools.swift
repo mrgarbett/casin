@@ -24,10 +24,34 @@ enum ToolMenus {
 
     private typealias W = DocumentWindowController
 
+    /// Tools from the first alpha that wait for their own tested step: hidden
+    /// (menu items and their shortcuts) until Experimental Tools is on.
+    static let experimentalKey = "ExperimentalTools"
+    private static var experimentalItems: [NSMenuItem] = []
+    private static let experimentalToggle = NSMenuItem(title: "Experimental Tools",
+                                                       action: #selector(ExperimentalSwitch.toggle(_:)),
+                                                       keyEquivalent: "")
+
+    private static func exp(_ i: NSMenuItem) -> NSMenuItem {
+        experimentalItems.append(i)
+        return i
+    }
+
+    static func applyExperimental() {
+        let on = UserDefaults.standard.bool(forKey: experimentalKey)
+        experimentalItems.forEach { $0.isHidden = !on }
+        experimentalToggle.state = on ? .on : .off
+    }
+
     /// Adds the tools to the main menu: editing and saving to File and Edit,
     /// display options to View, and Sequence, Cloning and Align menus before
     /// View.
     static func install(in main: NSMenu) {
+        if let app = main.item(withTitle: "OpenClone")?.submenu {
+            experimentalToggle.target = ExperimentalSwitch.shared
+            app.insertItem(experimentalToggle, at: min(2, app.numberOfItems))
+            app.insertItem(.separator(), at: min(3, app.numberOfItems))
+        }
         if let file = main.item(withTitle: "File")?.submenu {
             // Real saving replaces the old "Save As GenBank" export.
             if let old = file.item(withTitle: "Save As GenBank…") { file.removeItem(old) }
@@ -41,10 +65,10 @@ enum ToolMenus {
                 file.insertItem(i, at: at)
                 at += 1
             }
-            file.addItem(.separator())
-            file.addItem(item("Search a Folder…", #selector(W.searchFolder(_:)), "f", [.command, .shift]))
-            file.addItem(.separator())
-            file.addItem(item("Print…", #selector(W.printSequence(_:)), "p"))
+            file.addItem(exp(.separator()))
+            file.addItem(exp(item("Search a Folder…", #selector(W.searchFolder(_:)), "f", [.command, .shift])))
+            file.addItem(exp(.separator()))
+            file.addItem(exp(item("Print…", #selector(W.printSequence(_:)), "p")))
         }
         if let edit = main.item(withTitle: "Edit")?.submenu {
             let top = [item("Undo", #selector(W.undoEdit(_:)), "z"),
@@ -68,9 +92,9 @@ enum ToolMenus {
                 menu("Features", [
                     item("Add Feature…", #selector(W.addFeature(_:)), "k"),
                     item("Delete Feature", #selector(W.deleteFeature(_:))),
-                    .separator(),
-                    item("Find ORFs…", #selector(W.findOrfs(_:))),
-                    item("Protein Properties…", #selector(W.proteinProperties(_:))),
+                    exp(.separator()),
+                    exp(item("Find ORFs…", #selector(W.findOrfs(_:)))),
+                    exp(item("Protein Properties…", #selector(W.proteinProperties(_:)))),
                 ]),
                 menu("Primers", [
                     item("Add Primer…", #selector(W.addPrimer(_:))),
@@ -82,27 +106,28 @@ enum ToolMenus {
             ]),
             menu("Cloning", [
                 item("Digest and Gel…", #selector(W.digestAndGel(_:)), "g", [.command, .shift]),
-                item("Choose Enzymes…", #selector(W.chooseEnzymes(_:))),
-                item("Enzyme Set…", #selector(W.enzymeSet(_:))),
+                exp(item("Choose Enzymes…", #selector(W.chooseEnzymes(_:)))),
+                exp(item("Enzyme Set…", #selector(W.enzymeSet(_:)))),
                 .separator(),
                 item("PCR Product…", #selector(W.pcrProduct(_:))),
-                item("Restriction Cloning…", #selector(W.restrictionCloning(_:))),
-                item("Golden Gate Assembly…", #selector(W.goldenGate(_:))),
-                item("Gibson Assembly…", #selector(W.gibson(_:))),
-                item("TA, GC and TOPO Cloning…", #selector(W.overhangCloning(_:))),
-                item("Overlap Extension PCR…", #selector(W.overlapExtension(_:))),
                 item("Insertion by PCR…", #selector(W.insertionByPcr(_:))),
-                item("Mutagenesis…", #selector(W.mutagenesis(_:))),
-                .separator(),
-                item("Cloning History", #selector(W.cloningHistory(_:))),
+                item("Gibson Assembly…", #selector(W.gibson(_:))),
+                exp(.separator()),
+                exp(item("Restriction Cloning…", #selector(W.restrictionCloning(_:)))),
+                exp(item("Golden Gate Assembly…", #selector(W.goldenGate(_:)))),
+                exp(item("TA, GC and TOPO Cloning…", #selector(W.overhangCloning(_:)))),
+                exp(item("Overlap Extension PCR…", #selector(W.overlapExtension(_:)))),
+                exp(item("Mutagenesis…", #selector(W.mutagenesis(_:)))),
+                exp(.separator()),
+                exp(item("Cloning History", #selector(W.cloningHistory(_:)))),
             ]),
-            menu("Align", [
+            exp(menu("Align", [
                 item("Align Read…", #selector(W.alignRead(_:))),
                 item("Show All Reads", #selector(W.showAllReads(_:))),
                 item("Compare with Another Sequence…", #selector(W.compareSequences(_:))),
                 .separator(),
                 item("Hide Aligned Reads", #selector(W.hideReads(_:))),
-            ]),
+            ])),
         ]
         let viewIndex = main.indexOfItem(withTitle: "View")
         var at = viewIndex >= 0 ? viewIndex : main.numberOfItems
@@ -118,10 +143,22 @@ enum ToolMenus {
             for (i, f) in frames.items.enumerated() { f.tag = [0, 3, 6][i] }
             let translate = NSMenuItem(title: "Translate", action: nil, keyEquivalent: "")
             translate.submenu = frames
-            view.insertItem(translate, at: 0)
-            view.insertItem(item("Map Display…", #selector(W.mapDisplay(_:))), at: 1)
-            view.insertItem(.separator(), at: 2)
+            view.insertItem(exp(translate), at: 0)
+            view.insertItem(exp(item("Map Display…", #selector(W.mapDisplay(_:)))), at: 1)
+            view.insertItem(exp(.separator()), at: 2)
         }
+        applyExperimental()
+    }
+}
+
+/// Target of the Experimental Tools menu item; the choice is kept in user defaults.
+final class ExperimentalSwitch: NSObject {
+    static let shared = ExperimentalSwitch()
+
+    @objc func toggle(_ sender: Any?) {
+        let defaults = UserDefaults.standard
+        defaults.set(!defaults.bool(forKey: ToolMenus.experimentalKey), forKey: ToolMenus.experimentalKey)
+        ToolMenus.applyExperimental()
     }
 }
 
