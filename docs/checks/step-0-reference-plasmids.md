@@ -7,7 +7,7 @@ anything that doesn't match.
 
 1. Open `samples/reference/pUC19-L09137.gb`.
    - [ ] The title reads 2,686 bp, circular.
-2. In the Enzymes sidebar, set the filter to **Up to 2 cuts**.
+2. In the Enzymes list (on the Mac, the Enzymes tab of the inspector on the right), set the filter to **Up to 2 cuts**.
    - [ ] EcoRI is listed at 396 and HindIII at 447.
 3. Cloning → Digest and Gel, choose **EcoRI**.
    - [ ] One fragment, 2,686 bp.
@@ -18,7 +18,7 @@ anything that doesn't match.
 
 5. Open `samples/reference/lambda-NC_001416.gb`.
    - [ ] The title reads 48,502 bp, linear.
-6. Set the Enzymes filter to **All cutters**, then Digest and Gel with **EcoRI**.
+6. Set the enzyme filter to **All cutters**, then Digest and Gel with **EcoRI**.
    - [ ] Six fragments: 21,226, 7,421, 5,804, 5,643, 4,878 and 3,530 bp.
 7. Digest and Gel with **HindIII**.
    - [ ] Seven fragments: 23,130, 9,416, 6,682, 4,361, 2,322, 2,027 and 564 bp.
