@@ -2,19 +2,23 @@
 import AppKit
 import RestrictoCore
 
-/// Features and Enzymes, switched by a segmented control at the top. Shown as
-/// the window's sidebar: vibrant on Ventura, floating glass on macOS 26.
-final class SidebarController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
+/// The window's right-hand panel: Enzymes, Features or Primers, picked from a
+/// vertical pill along its right edge. Vibrant on Ventura, glass on macOS 26.
+final class InspectorController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     private let document: CoreDocument
     private let tabs = NSTabView()
-    private let switcher = NSSegmentedControl(labels: ["Features", "Enzymes"], trackingMode: .selectOne,
-                                              target: nil, action: nil)
+    /// The pill's buttons, in tab order.
+    private var pillButtons: [NSButton] = []
     private let featureTable = NSTableView()
     private let enzymeTable = NSTableView()
+    private let primerTable = NSTableView()
     private let filter = NSPopUpButton(frame: .zero, pullsDown: false)
     private var features: [FeatureInfo] = []
     private var enzymes: [EnzymeInfo] = []
+    private var primers: [PrimerInfo] = []
     private var syncing = false
+    /// The tab new windows open on.
+    private static let tabKey = "InspectorTab"
 
     init(document: CoreDocument) {
         self.document = document
@@ -26,48 +30,81 @@ final class SidebarController: NSViewController, NSTableViewDataSource, NSTableV
     override func loadView() {
         tabs.tabViewType = .noTabsNoBorder
         tabs.drawsBackground = false
-        buildFeaturesTab()
         buildEnzymesTab()
-        switcher.selectedSegment = 0
-        switcher.segmentDistribution = .fillEqually
-        switcher.target = self
-        switcher.action = #selector(switchTab(_:))
+        buildFeaturesTab()
+        buildPrimersTab()
+        let pill = buildPill()
 
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 600))
-        for v in [switcher, tabs] as [NSView] {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 600))
+        for v in [tabs, pill] {
             v.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(v)
         }
         NSLayoutConstraint.activate([
-            switcher.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 8),
-            switcher.leadingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.leadingAnchor, constant: 10),
-            switcher.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor, constant: -10),
-            tabs.topAnchor.constraint(equalTo: switcher.bottomAnchor, constant: 8),
+            pill.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 8),
+            pill.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor, constant: -8),
+            tabs.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 4),
             tabs.leadingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.leadingAnchor),
-            tabs.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor),
+            tabs.trailingAnchor.constraint(equalTo: pill.leadingAnchor, constant: -6),
             tabs.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
         view = root
 
         document.observe { [weak self] what in
             guard let self = self else { return }
-            if what & Change.sequence != 0 { self.reloadFeatures() }
+            if what & Change.sequence != 0 { self.reloadFeatures(); self.reloadPrimers() }
             if what & (Change.sequence | Change.enzymes) != 0 { self.reloadEnzymes() }
             if what & Change.selection != 0 { self.syncSelection() }
         }
         reloadFeatures()
         reloadEnzymes()
+        reloadPrimers()
+        let saved = UserDefaults.standard.integer(forKey: Self.tabKey)
+        select(tab: saved >= 0 && saved < tabs.numberOfTabViewItems ? saved : 0)
     }
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        // The columns start wider than a narrow sidebar; fit them to it.
+        // The columns start wider than a narrow panel; fit them to it.
         featureTable.sizeToFit()
         enzymeTable.sizeToFit()
+        primerTable.sizeToFit()
     }
 
-    @objc private func switchTab(_ sender: NSSegmentedControl) {
-        tabs.selectTabViewItem(at: max(0, sender.selectedSegment))
+    /// The vertical pill: one icon button per tab, the current one tinted.
+    private func buildPill() -> NSView {
+        let entries = [("Enzymes", "scissors"), ("Features", "tag"), ("Primers", "arrow.right")]
+        pillButtons = entries.enumerated().map { (i, entry) -> NSButton in
+            let image = NSImage(systemSymbolName: entry.1, accessibilityDescription: entry.0)
+                ?? NSImage(size: NSSize(width: 16, height: 16))
+            let button = NSButton(image: image, target: self, action: #selector(pillClicked(_:)))
+            button.isBordered = false
+            button.tag = i
+            button.toolTip = entry.0
+            button.setAccessibilityLabel(entry.0)
+            button.imageScaling = .scaleProportionallyUpOrDown
+            button.translatesAutoresizingMaskIntoConstraints = false
+            button.widthAnchor.constraint(equalToConstant: 28).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 28).isActive = true
+            return button
+        }
+        let stack = NSStackView(views: pillButtons)
+        stack.orientation = .vertical
+        stack.spacing = 4
+        stack.edgeInsets = NSEdgeInsets(top: 6, left: 4, bottom: 6, right: 4)
+        return Glass.verticalCapsule(around: stack, width: 36)
+    }
+
+    @objc private func pillClicked(_ sender: NSButton) {
+        select(tab: sender.tag)
+        UserDefaults.standard.set(sender.tag, forKey: Self.tabKey)
+    }
+
+    private func select(tab: Int) {
+        tabs.selectTabViewItem(at: tab)
+        for (i, button) in pillButtons.enumerated() {
+            button.contentTintColor = i == tab ? .controlAccentColor : .secondaryLabelColor
+        }
     }
 
     private func makeTable(_ table: NSTableView, columns: [(String, String, CGFloat)]) -> NSScrollView {
@@ -80,7 +117,7 @@ final class SidebarController: NSViewController, NSTableViewDataSource, NSTableV
             column.resizingMask = width <= 40 ? [] : .autoresizingMask
             table.addTableColumn(column)
         }
-        // Fit the columns to the sidebar instead of overflowing it.
+        // Fit the columns to the panel instead of overflowing it.
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         table.style = .sourceList
         table.usesAlternatingRowBackgroundColors = false
@@ -92,6 +129,14 @@ final class SidebarController: NSViewController, NSTableViewDataSource, NSTableV
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
         return scroll
+    }
+
+    private func buildPrimersTab() {
+        let scroll = makeTable(primerTable, columns: [("name", "Primer", 120), ("location", "Binds", 110)])
+        let item = NSTabViewItem(identifier: "primers")
+        item.label = "Primers"
+        item.view = scroll
+        tabs.addTabViewItem(item)
     }
 
     private func buildFeaturesTab() {
@@ -142,6 +187,11 @@ final class SidebarController: NSViewController, NSTableViewDataSource, NSTableV
         featureTable.reloadData()
     }
 
+    private func reloadPrimers() {
+        primers = document.primers
+        primerTable.reloadData()
+    }
+
     private func reloadEnzymes() {
         enzymes = document.enzymes.filter { $0.cuts > 0 }
             .sorted { $0.name.lowercased() < $1.name.lowercased() }
@@ -174,11 +224,34 @@ final class SidebarController: NSViewController, NSTableViewDataSource, NSTableV
     // MARK: NSTableViewDataSource / Delegate
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        tableView === featureTable ? features.count : enzymes.count
+        if tableView === primerTable { return primers.count }
+        return tableView === featureTable ? features.count : enzymes.count
+    }
+
+    /// "start–end →" for a span on the sequence, 1-based, wrapping on a circle.
+    private func location(start: Int, length: Int, strand: Int32) -> String {
+        let n = document.length
+        var end = start + length
+        if end > n { end -= n }
+        let arrow = strand == Int32(OC_STRAND_FORWARD) ? " →" : strand == Int32(OC_STRAND_REVERSE) ? " ←" : ""
+        return "\(start + 1)–\(end)\(arrow)"
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let id = tableColumn?.identifier.rawValue ?? ""
+        if tableView === primerTable {
+            let p = primers[row]
+            if id == "name" {
+                let label = NSTextField(labelWithString: p.name)
+                label.lineBreakMode = .byTruncatingTail
+                label.toolTip = "\(p.name): 5′-\(p.bases)-3′"
+                return label
+            }
+            let text = p.length > 0 ? location(start: p.start, length: p.length, strand: p.strand) : "doesn't bind"
+            let label = NSTextField(labelWithString: text)
+            label.textColor = .secondaryLabelColor
+            return label
+        }
         if tableView === featureTable {
             let f = features[row]
             if id == "name" {
@@ -196,11 +269,7 @@ final class SidebarController: NSViewController, NSTableViewDataSource, NSTableV
                 stack.spacing = 6
                 return stack
             }
-            let n = document.length
-            var end = f.start + f.length
-            if end > n { end -= n }
-            let arrow = f.strand == Int32(OC_STRAND_FORWARD) ? " →" : f.strand == Int32(OC_STRAND_REVERSE) ? " ←" : ""
-            let label = NSTextField(labelWithString: "\(f.start + 1)–\(end)\(arrow)")
+            let label = NSTextField(labelWithString: location(start: f.start, length: f.length, strand: f.strand))
             label.textColor = .secondaryLabelColor
             return label
         }
@@ -221,7 +290,7 @@ final class SidebarController: NSViewController, NSTableViewDataSource, NSTableV
         case "site":
             let label = NSTextField(labelWithString: e.site)
             label.lineBreakMode = .byTruncatingTail
-            label.toolTip = e.site   // long sites truncate in a narrow sidebar
+            label.toolTip = e.site   // long sites truncate in a narrow panel
             label.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
             label.textColor = .secondaryLabelColor
             return label
@@ -237,6 +306,12 @@ final class SidebarController: NSViewController, NSTableViewDataSource, NSTableV
         guard !syncing, let table = notification.object as? NSTableView, table.selectedRow >= 0 else { return }
         if table === featureTable {
             document.activateFeature(features[table.selectedRow].index)
+            return
+        }
+        if table === primerTable {
+            // Select where the primer binds.
+            let p = primers[table.selectedRow]
+            if p.length > 0 { document.select(start: p.start, length: p.length) }
             return
         }
         // Enzyme: jump to its next visible site.

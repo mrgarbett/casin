@@ -1,8 +1,15 @@
 name: CI
 
 on:
+  # Branches with a PR are built by pull_request; push only builds main.
   push:
+    branches: [main]
   pull_request:
+
+# A new push to a PR cancels its run still in progress.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   fedora:
@@ -33,6 +40,8 @@ jobs:
           git archive --prefix=restricto-0.1.0/ -o ~/rpmbuild/SOURCES/restricto-0.1.0.tar.gz HEAD
           rpmbuild -ba packaging/fedora/restricto.spec
           cp ~/rpmbuild/RPMS/*/restricto-*.rpm .
+          ls -l restricto-*.rpm | tee -a "$GITHUB_STEP_SUMMARY"
+          rpm -qp --queryformat '%{NAME} installed: %{SIZE} bytes\n' restricto-*.rpm | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: fedora-build
@@ -59,6 +68,8 @@ jobs:
               --repo=build-flatpak/repo build-flatpak/app packaging/flatpak/io.github.mrgarbett.Restricto.yml
           flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
               build-flatpak/repo restricto.flatpak io.github.mrgarbett.Restricto
+          ls -l restricto.flatpak | tee -a "$GITHUB_STEP_SUMMARY"
+          du -sk build-flatpak/app/files | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Smoke test inside the sandbox
         run: |
           sudo apt-get install -y dbus-daemon fuse3
@@ -116,6 +127,8 @@ jobs:
           test -s build/macos/Restricto.app/Contents/Resources/Restricto.icns
           # AppKit picks the macOS 26 design from the SDK version in the binary.
           test "$(awk '$1 == "sdk" { print $2 }' vtool.txt)" = "$(xcrun --show-sdk-version)"
+      - name: App size
+        run: du -sk build/macos/Restricto.app | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Headless map render
         run: build/macos/Restricto.app/Contents/MacOS/Restricto --render-map demo-map-macos.png samples/pOC-demo.dna
       - name: Launch the window (twice, the second from the saved narrow frame)

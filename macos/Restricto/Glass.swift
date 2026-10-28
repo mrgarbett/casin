@@ -67,4 +67,43 @@ enum Glass {
         #endif
         return nil
     }
+
+    /// A rounded vertical strip around `content` (the inspector's tab pill):
+    /// glass on macOS 26, a faint filled box before. Sized from its content.
+    static func verticalCapsule(around content: NSView, width: CGFloat) -> NSView {
+        let container: NSView
+        #if compiler(>=6.2)
+        if #available(macOS 26, *) {
+            let glass = NSGlassEffectView()
+            glass.contentView = content
+            glass.cornerRadius = width / 2
+            container = glass
+        } else {
+            container = plainCapsule(around: content, width: width)
+        }
+        #else
+        container = plainCapsule(around: content, width: width)
+        #endif
+        container.translatesAutoresizingMaskIntoConstraints = false
+        content.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            content.topAnchor.constraint(equalTo: container.topAnchor),
+            content.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            container.widthAnchor.constraint(equalToConstant: width),
+        ])
+        return container
+    }
+
+    private static func plainCapsule(around content: NSView, width: CGFloat) -> NSView {
+        let box = NSBox()
+        box.boxType = .custom
+        box.borderWidth = 0
+        box.cornerRadius = width / 2
+        box.fillColor = NSColor.labelColor.withAlphaComponent(0.07)
+        box.contentViewMargins = .zero
+        box.contentView = content
+        return box
+    }
 }
