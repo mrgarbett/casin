@@ -35,6 +35,14 @@ SequenceView::SequenceView(Document *doc) : m_doc(doc)
     g_signal_connect(drag, "drag-end", G_CALLBACK(&SequenceView::dragEnd), this);
     gtk_widget_add_controller(m_area, GTK_EVENT_CONTROLLER(drag));
 
+    GtkEventController *move = gtk_event_controller_motion_new();
+    g_signal_connect(move, "motion", G_CALLBACK(&SequenceView::motion), this);
+    g_signal_connect(move, "leave", G_CALLBACK(&SequenceView::leave), this);
+    gtk_widget_add_controller(m_area, move);
+    GtkGesture *click = gtk_gesture_click_new();
+    g_signal_connect(click, "pressed", G_CALLBACK(&SequenceView::pressed), this);
+    gtk_widget_add_controller(m_area, GTK_EVENT_CONTROLLER(click));
+
     gtk_widget_set_focusable(m_area, TRUE);
     gtk_widget_set_focus_on_click(m_area, TRUE);
     GtkEventController *keys = gtk_event_controller_key_new();
@@ -105,6 +113,22 @@ void SequenceView::setFrames(int frames)
     }
 }
 
+void SequenceView::setShowEnzymes(bool show)
+{
+    if (show != m_enzymes) {
+        m_enzymes = show;
+        invalidate();
+    }
+}
+
+void SequenceView::setHiddenTypes(std::set<std::string> types)
+{
+    if (types != m_hiddenTypes) {
+        m_hiddenTypes = std::move(types);
+        invalidate();
+    }
+}
+
 double SequenceView::scrollY() const
 {
     return gtk_adjustment_get_value(m_adj);
@@ -117,6 +141,8 @@ void SequenceView::ensureLayout()
     view::SeqOptions options;
     options.frames = m_frames;
     options.groupTens = m_groupTens;
+    options.enzymes = m_enzymes;
+    options.hiddenTypes = m_hiddenTypes;
     m_layout = std::make_unique<view::SequenceLayout>(m_doc->sequence(), m_doc->visibleSites(),
                                                       m_dark ? view::Theme::darkTheme() : view::Theme::light(),
                                                       m_measure, m_w, m_complement, options, m_doc->reads());
@@ -125,7 +151,7 @@ void SequenceView::ensureLayout()
 
 void SequenceView::updateAdjustment()
 {
-    const double total = m_layout ? m_layout->totalHeight() + 20 : 0;
+    const double total = m_layout ? m_layout->totalHeight() + 20 + m_bottomInset : 0;
     const double page = std::max(1, m_h);
     const double value = std::min(gtk_adjustment_get_value(m_adj), std::max(0.0, total - page));
     gtk_adjustment_configure(m_adj, value, 0, std::max(total, page), 40, page * 0.9, page);
@@ -313,13 +339,53 @@ void SequenceView::dragUpdate(GtkGestureDrag *, double dx, double dy, gpointer p
     self->m_lastX = self->m_x0 + dx;
     self->m_lastY = self->m_y0 + dy;
     self->extendSelectionTo(self->m_lastX, std::clamp(self->m_lastY, 0.0, double(self->m_h)));
+    if (self->onSelectDrag)
+        self->onSelectDrag(self->m_lastX, self->m_lastY);
     if ((self->m_lastY < 0 || self->m_lastY > self->m_h) && !self->m_timer)
         self->m_timer = g_timeout_add(30, &SequenceView::autoScroll, self);
 }
 
 void SequenceView::dragEnd(GtkGestureDrag *, double, double, gpointer p)
 {
-    static_cast<SequenceView *>(p)->m_dragging = false;
+    auto *self = static_cast<SequenceView *>(p);
+    if (self->m_dragging && self->onSelectDrag)
+        self->onSelectDrag(-1, -1);
+    self->m_dragging = false;
+}
+
+void SequenceView::motion(GtkEventControllerMotion *, double x, double y, gpointer p)
+{
+    auto *self = static_cast<SequenceView *>(p);
+    if (self->onHoverBase && self->m_layout)
+        self->onHoverBase(self->m_layout->baseAt({x, y + self->scrollY()}));
+}
+
+void SequenceView::leave(GtkEventControllerMotion *, gpointer p)
+{
+    auto *self = static_cast<SequenceView *>(p);
+    if (self->onHoverBase)
+        self->onHoverBase(-1);
+}
+
+void SequenceView::pressed(GtkGestureClick *, int n, double x, double y, gpointer p)
+{
+    auto *self = static_cast<SequenceView *>(p);
+    if (n != 2 || !self->m_layout || !self->onEditFeature)
+        return;
+    const int feature = self->m_layout->featureAt({x, y + self->scrollY()});
+    if (feature >= 0)
+        self->onEditFeature(feature);
+}
+
+void SequenceView::setBottomInset(int px)
+{
+    m_bottomInset = px;
+    updateAdjustment();
+}
+
+void SequenceView::setTrailingInset(int px)
+{
+    gtk_widget_set_margin_end(m_box, px);
 }
 
 gboolean SequenceView::queryTooltip(GtkWidget *, int x, int y, gboolean, GtkTooltip *tip, gpointer p)

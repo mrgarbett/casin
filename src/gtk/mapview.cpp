@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "mapview.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace oc::gtk {
@@ -26,6 +27,13 @@ MapView::MapView(Document *doc) : m_doc(doc)
 
     gtk_widget_set_has_tooltip(m_area, TRUE);
     g_signal_connect(m_area, "query-tooltip", G_CALLBACK(&MapView::queryTooltip), this);
+    GtkEventController *move = gtk_event_controller_motion_new();
+    g_signal_connect(move, "motion", G_CALLBACK(&MapView::motion), this);
+    g_signal_connect(move, "leave", G_CALLBACK(&MapView::leave), this);
+    gtk_widget_add_controller(m_area, move);
+    GtkGesture *click = gtk_gesture_click_new();
+    g_signal_connect(click, "pressed", G_CALLBACK(&MapView::pressed), this);
+    gtk_widget_add_controller(m_area, GTK_EVENT_CONTROLLER(click));
 
     m_doc->onSequenceChanged([this] { invalidate(); });
     m_doc->onEnzymesChanged([this] { invalidate(); });
@@ -131,11 +139,43 @@ void MapView::dragUpdate(GtkGestureDrag *, double dx, double dy, gpointer p)
         const int pos = self->m_layout->positionAt(pt);
         self->m_doc->setSelection({std::min(pos, self->m_anchor), std::abs(pos - self->m_anchor)});
     }
+    if (self->onSelectDrag)
+        self->onSelectDrag(pt.x, pt.y);
 }
 
 void MapView::dragEnd(GtkGestureDrag *, double, double, gpointer p)
 {
-    static_cast<MapView *>(p)->m_selecting = false;
+    auto *self = static_cast<MapView *>(p);
+    if (self->m_selecting && self->onSelectDrag)
+        self->onSelectDrag(-1, -1);
+    self->m_selecting = false;
+}
+
+void MapView::motion(GtkEventControllerMotion *, double x, double y, gpointer p)
+{
+    auto *self = static_cast<MapView *>(p);
+    if (!self->onHoverBase || !self->m_layout || self->m_doc->isEmpty())
+        return;
+    const view::MapHit hit = self->m_layout->hitTest({x, y});
+    const int n = self->m_doc->sequence().length();
+    self->onHoverBase(hit.kind == view::MapHit::Sequence && n > 0 ? std::min(hit.position, n - 1) : -1);
+}
+
+void MapView::leave(GtkEventControllerMotion *, gpointer p)
+{
+    auto *self = static_cast<MapView *>(p);
+    if (self->onHoverBase)
+        self->onHoverBase(-1);
+}
+
+void MapView::pressed(GtkGestureClick *, int n, double x, double y, gpointer p)
+{
+    auto *self = static_cast<MapView *>(p);
+    if (n != 2 || !self->m_layout || !self->onEditFeature)
+        return;
+    const view::MapHit hit = self->m_layout->hitTest({x, y});
+    if (hit.kind == view::MapHit::Feature)
+        self->onEditFeature(hit.index);
 }
 
 gboolean MapView::queryTooltip(GtkWidget *, int x, int y, gboolean, GtkTooltip *tip, gpointer p)

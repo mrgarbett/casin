@@ -7,6 +7,7 @@
 //   restricto --screenshot out.png <file>      (needs a display, e.g. xvfb-run)
 //   restricto --version
 // Options for both: --size WxH  --enzymes 1|2|3|all  --select A-B (1-based)  --dark
+#include "shell.h"
 #include "window.h"
 
 #include "core/seqio.h"
@@ -226,9 +227,13 @@ void onStartup(GApplication *app, gpointer)
         {"win.copy-rc", {"<Control><Shift>c", nullptr}},
         {"win.find", {"<Control>f", nullptr}},
         {"win.close", {"<Control>w", nullptr}},
+        {"win.sidebar", {"F9", nullptr}},
+        {"win.show-panel", {"<Control><Alt>i", nullptr}},
+        {"win.fullscreen", {"F11", nullptr}},
     };
     for (const Accel &a : accels)
         gtk_application_set_accels_for_action(GTK_APPLICATION(app), a.action, a.keys);
+    gtk::Shell::loadStyles();
     if (g_options.dark)
         adw_style_manager_set_color_scheme(adw_style_manager_get_default(), ADW_COLOR_SCHEME_FORCE_DARK);
 }
@@ -254,6 +259,12 @@ void startScreenshot(GtkApplication *app, gtk::Window *w)
 
 void onActivate(GApplication *app, gpointer)
 {
+    if (g_options.screenshot.empty())
+        if (gtk::Shell *shell = gtk::Shell::active(GTK_APPLICATION(app)))
+            if (gtk::Window *current = shell->current()) {
+                current->present();
+                return;
+            }
     gtk::Window *w = gtk::Window::create(GTK_APPLICATION(app));
     if (!g_options.screenshot.empty()) {
         startScreenshot(GTK_APPLICATION(app), w);

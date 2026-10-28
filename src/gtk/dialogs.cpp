@@ -571,8 +571,7 @@ void Window::cloningDialog()
     // Insert sources: other windows first, then this one.
     std::vector<std::string> sourceNames;
     GtkApplication *app = gtk_window_get_application(gtkWindow());
-    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
-        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+    for (Window *w : Window::all(app)) {
         if (!w || w == this || w->isEmpty())
             continue;
         st->sources.push_back(w->document().sequence());
@@ -708,8 +707,7 @@ void Window::goldenGateDialog()
         if (e.cutsOutsideSite() && !e.cutsTwice && e.overhang() != 0)
             st->enzymes.push_back(e);
     GtkApplication *app = gtk_window_get_application(gtkWindow());
-    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
-        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+    for (Window *w : Window::all(app)) {
         if (w && w != this && !w->isEmpty())
             st->parts.push_back(w->document().sequence());
     }
@@ -882,8 +880,7 @@ void Window::gibsonDialog()
         return;
     }
     GtkApplication *app = gtk_window_get_application(gtkWindow());
-    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
-        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+    for (Window *w : Window::all(app)) {
         if (w && w != this && !w->isEmpty() && !w->document().sequence().circular)
             st->parts.push_back(w->document().sequence());
     }
@@ -1396,8 +1393,7 @@ void Window::taCloningDialog()
     st->vector = m_doc.sequence();
     std::vector<std::string> names;
     GtkApplication *app = gtk_window_get_application(gtkWindow());
-    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
-        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+    for (Window *w : Window::all(app)) {
         if (w && w != this && !w->isEmpty() && !w->document().sequence().circular) {
             st->inserts.push_back(w->document().sequence());
             names.push_back(st->inserts.back().name);
@@ -1490,8 +1486,7 @@ void Window::overlapExtensionDialog()
     st->window = this;
     st->parts.push_back(m_doc.sequence());
     GtkApplication *app = gtk_window_get_application(gtkWindow());
-    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
-        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+    for (Window *w : Window::all(app)) {
         if (w && w != this && !w->isEmpty() && !w->document().sequence().circular)
             st->parts.push_back(w->document().sequence());
     }
@@ -1738,8 +1733,7 @@ void Window::insertionDialog()
     st->site = m_doc.selection();
     std::vector<std::string> names;
     GtkApplication *app = gtk_window_get_application(gtkWindow());
-    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
-        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+    for (Window *w : Window::all(app)) {
         if (w && w != this && !w->isEmpty()) {
             const Sequence &s = w->document().sequence();
             const Span sel = w->document().selection();
@@ -1927,8 +1921,7 @@ void Window::alignDialog(bool compare)
     st->reference = m_doc.sequence();
     std::vector<std::string> names;
     GtkApplication *app = gtk_window_get_application(gtkWindow());
-    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
-        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+    for (Window *w : Window::all(app)) {
         if (w && w != this && !w->isEmpty() && (compare || !w->document().sequence().circular)) {
             st->reads.push_back(w->document().sequence());
             names.push_back(st->reads.back().name);

@@ -10,6 +10,7 @@ target_link_libraries(restricto_cairo PUBLIC restricto_view PkgConfig::PANGOCAIR
 add_executable(restricto
     main.cpp
     window.cpp
+    shell.cpp
     dialogs.cpp
     digestdialog.cpp
     mapview.cpp

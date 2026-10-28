@@ -6,7 +6,10 @@
 #include "view/seqlayout.h"
 
 #include <gtk/gtk.h>
+#include <functional>
 #include <memory>
+#include <set>
+#include <string>
 
 namespace oc::gtk {
 
@@ -23,11 +26,27 @@ public:
     bool showComplement() const { return m_complement; }
     // 0, 3 (forward) or 6 reading frames translated around the strands.
     void setFrames(int frames);
+    int frames() const { return m_frames; }
     // A small gap after every 10 bases.
     void setGroupTens(bool group);
+    bool groupTens() const { return m_groupTens; }
+    // As on the map: enzyme labels, and the feature types left out.
+    void setShowEnzymes(bool show);
+    void setHiddenTypes(std::set<std::string> types);
     void scrollToPosition(int pos);
     // Typing bases, Backspace, Delete and the arrow keys edit the document.
     void setEditable(bool editable) { m_editable = editable; }
+    // Room on the right for something floating over the view.
+    void setTrailingInset(int px);
+    // Room to scroll the last line clear of something floating at the bottom.
+    void setBottomInset(int px);
+
+    // The base under the mouse (-1 when none); the mouse, in widget
+    // coordinates, while a drag selects bases, and -1, -1 when it ends; a
+    // feature double-clicked.
+    std::function<void(int)> onHoverBase;
+    std::function<void(double, double)> onSelectDrag;
+    std::function<void(int)> onEditFeature;
 
 private:
     static void draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer self);
@@ -41,6 +60,9 @@ private:
     static gboolean keyPressed(GtkEventControllerKey *, guint keyval, guint keycode, GdkModifierType state,
                                gpointer self);
     static gboolean queryTooltip(GtkWidget *, int x, int y, gboolean kb, GtkTooltip *tip, gpointer self);
+    static void motion(GtkEventControllerMotion *, double x, double y, gpointer self);
+    static void leave(GtkEventControllerMotion *, gpointer self);
+    static void pressed(GtkGestureClick *, int n, double x, double y, gpointer self);
     void ensureLayout();
     void updateAdjustment();
     void extendSelectionTo(double viewX, double viewY);
@@ -56,6 +78,9 @@ private:
     bool m_complement = true;
     int m_frames = 0;
     bool m_groupTens = false;
+    bool m_enzymes = true;
+    int m_bottomInset = 0;
+    std::set<std::string> m_hiddenTypes;
     bool m_editable = false;
     // drag state
     bool m_dragging = false;
