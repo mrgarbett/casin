@@ -42,10 +42,26 @@ jobs:
             openclone-*.rpm
 
   macos:
-    name: macOS (Swift + AppKit)
-    runs-on: macos-14
+    # Two SDKs: macos-14 builds without the Liquid Glass code (older Xcode),
+    # macos-26 builds it in with Xcode 26. Both binaries target macOS 13.
+    name: macOS ${{ matrix.label }} (Swift + AppKit)
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            label: pre-26 SDK
+            artifact: macos-build
+          - runner: macos-26
+            label: Xcode 26 SDK
+            artifact: macos-build-xcode26
     steps:
       - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
       - name: Core tests
         run: |
           brew install ninja
@@ -54,11 +70,26 @@ jobs:
           ctest --test-dir build --output-on-failure
       - name: Build OpenClone.app
         run: scripts/build_macos_app.sh
+      - name: Check the deployment target is still Ventura
+        run: |
+          vtool -show-build build/macos/OpenClone.app/Contents/MacOS/OpenClone | tee vtool.txt
+          grep -Eq 'minos 13\.0' vtool.txt
+          # AppKit picks the macOS 26 design from the SDK version in the binary.
+          test "$(awk '$1 == "sdk" { print $2 }' vtool.txt)" = "$(xcrun --show-sdk-version)"
       - name: Headless map render
         run: build/macos/OpenClone.app/Contents/MacOS/OpenClone --render-map demo-map-macos.png samples/pOC-demo.dna
+      - name: Launch the window (twice, the second from the saved narrow frame)
+        timeout-minutes: 4
+        run: |
+          APP=build/macos/OpenClone.app/Contents/MacOS/OpenClone
+          "$APP" --ui-smoke ui-first-launch samples/pOC-demo.dna
+          "$APP" --ui-smoke ui-second-launch samples/pOC-demo.dna
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: macos-build
+          name: ${{ matrix.artifact }}
           path: |
             demo-map-macos.png
+            ui-first-launch
+            ui-second-launch
             build/macos/OpenClone.app

@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if launchFiles.isEmpty && NSDocumentController.shared.documents.isEmpty {
             NSDocumentController.shared.openDocument(nil)
         }
+        UISmokeTest.startIfRequested()
     }
 
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool { false }
@@ -94,6 +95,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item("Find…", #selector(DocumentWindowController.performFindPanelAction(_:)), "f"),
         ])
         submenu("View", [
+            item("Toggle Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)), "s", [.command, .control]),
+            .separator(),
             item("Show Complement Strand", #selector(DocumentWindowController.toggleComplementStrand(_:))),
             .separator(),
             item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]),

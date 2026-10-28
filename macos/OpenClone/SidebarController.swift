@@ -2,10 +2,13 @@
 import AppKit
 import OpenCloneCore
 
-/// Features and Enzymes tabs.
-final class SidebarController: NSObject, NSTableViewDataSource, NSTableViewDelegate {
-    let view: NSTabView
+/// Features and Enzymes, switched by a segmented control at the top. Shown as
+/// the window's sidebar: vibrant on Ventura, floating glass on macOS 26.
+final class SidebarController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     private let document: CoreDocument
+    private let tabs = NSTabView()
+    private let switcher = NSSegmentedControl(labels: ["Features", "Enzymes"], trackingMode: .selectOne,
+                                              target: nil, action: nil)
     private let featureTable = NSTableView()
     private let enzymeTable = NSTableView()
     private let filter = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -15,10 +18,37 @@ final class SidebarController: NSObject, NSTableViewDataSource, NSTableViewDeleg
 
     init(document: CoreDocument) {
         self.document = document
-        view = NSTabView()
-        super.init()
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func loadView() {
+        tabs.tabViewType = .noTabsNoBorder
+        tabs.drawsBackground = false
         buildFeaturesTab()
         buildEnzymesTab()
+        switcher.selectedSegment = 0
+        switcher.segmentDistribution = .fillEqually
+        switcher.target = self
+        switcher.action = #selector(switchTab(_:))
+
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 600))
+        for v in [switcher, tabs] as [NSView] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(v)
+        }
+        NSLayoutConstraint.activate([
+            switcher.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 8),
+            switcher.leadingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.leadingAnchor, constant: 10),
+            switcher.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor, constant: -10),
+            tabs.topAnchor.constraint(equalTo: switcher.bottomAnchor, constant: 8),
+            tabs.leadingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.leadingAnchor),
+            tabs.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor),
+            tabs.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
+        view = root
+
         document.observe { [weak self] what in
             guard let self = self else { return }
             if what & Change.sequence != 0 { self.reloadFeatures() }
@@ -29,13 +59,29 @@ final class SidebarController: NSObject, NSTableViewDataSource, NSTableViewDeleg
         reloadEnzymes()
     }
 
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        // The columns start wider than a narrow sidebar; fit them to it.
+        featureTable.sizeToFit()
+        enzymeTable.sizeToFit()
+    }
+
+    @objc private func switchTab(_ sender: NSSegmentedControl) {
+        tabs.selectTabViewItem(at: max(0, sender.selectedSegment))
+    }
+
     private func makeTable(_ table: NSTableView, columns: [(String, String, CGFloat)]) -> NSScrollView {
         for (id, title, width) in columns {
             let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
             column.title = title
             column.width = width
+            column.minWidth = min(width, 40)
+            // Checkbox and count columns keep their width; the others share the rest.
+            column.resizingMask = width <= 40 ? [] : .autoresizingMask
             table.addTableColumn(column)
         }
+        // Fit the columns to the sidebar instead of overflowing it.
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         table.style = .sourceList
         table.usesAlternatingRowBackgroundColors = false
         table.allowsMultipleSelection = false
@@ -53,7 +99,7 @@ final class SidebarController: NSObject, NSTableViewDataSource, NSTableViewDeleg
         let item = NSTabViewItem(identifier: "features")
         item.label = "Features"
         item.view = scroll
-        view.addTabViewItem(item)
+        tabs.addTabViewItem(item)
     }
 
     private func buildEnzymesTab() {
@@ -68,13 +114,27 @@ final class SidebarController: NSObject, NSTableViewDataSource, NSTableViewDeleg
         let stack = NSStackView(views: [filter, scroll, credit])
         stack.orientation = .vertical
         stack.alignment = .leading
+        stack.distribution = .fill
         stack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        // The table has no height of its own; let it take the spare space.
+        scroll.setContentHuggingPriority(.defaultLow - 1, for: .vertical)
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16).isActive = true
+        // NSTabView shrinks a stack view item to its fitting size, so give the
+        // tab a plain container and pin the stack inside it.
+        let container = NSView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: container.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
         let item = NSTabViewItem(identifier: "enzymes")
         item.label = "Enzymes"
-        item.view = stack
-        view.addTabViewItem(item)
+        item.view = container
+        tabs.addTabViewItem(item)
     }
 
     private func reloadFeatures() {
@@ -154,10 +214,14 @@ final class SidebarController: NSObject, NSTableViewDataSource, NSTableViewDeleg
             return check
         case "name":
             let label = NSTextField(labelWithString: e.name)
+            label.lineBreakMode = .byTruncatingTail
+            label.toolTip = e.name
             label.textColor = e.passesFilter ? .labelColor : .tertiaryLabelColor
             return label
         case "site":
             let label = NSTextField(labelWithString: e.site)
+            label.lineBreakMode = .byTruncatingTail
+            label.toolTip = e.site   // long sites truncate in a narrow sidebar
             label.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
             label.textColor = .secondaryLabelColor
             return label
