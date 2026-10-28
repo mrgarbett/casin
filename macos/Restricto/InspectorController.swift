@@ -74,7 +74,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     /// The vertical pill: one icon button per tab, the current one tinted.
     private func buildPill() -> NSView {
         let entries = [("Enzymes", "scissors"), ("Features", "tag"), ("Primers", "arrow.right")]
-        pillButtons = entries.enumerated().map { i, entry in
+        pillButtons = entries.enumerated().map { (i, entry) -> NSButton in
             let image = NSImage(systemSymbolName: entry.1, accessibilityDescription: entry.0)
                 ?? NSImage(size: NSSize(width: 16, height: 16))
             let button = NSButton(image: image, target: self, action: #selector(pillClicked(_:)))

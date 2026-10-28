@@ -276,7 +276,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private func makeToggles() -> NSStackView {
         let entries = [("Complement strand", "arrow.left.arrow.right"), ("Translation (3 forward frames)", "textformat"),
                        ("Restriction sites on the map", "scissors"), ("Features on the map", "tag")]
-        viewToggles = entries.enumerated().map { i, entry in
+        viewToggles = entries.enumerated().map { (i, entry) -> NSButton in
             let image = NSImage(systemSymbolName: entry.1, accessibilityDescription: entry.0)
                 ?? NSImage(size: NSSize(width: 14, height: 14))
             let button = NSButton(image: image, target: self, action: #selector(viewToggleClicked(_:)))

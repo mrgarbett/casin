@@ -36,7 +36,7 @@ final class FolderBrowserController: NSViewController, NSOutlineViewDataSource, 
             let keys: [URLResourceKey] = [.isDirectoryKey, .isPackageKey]
             let urls = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: keys,
                                                                      options: [.skipsHiddenFiles])) ?? []
-            let nodes = urls.compactMap { u -> Node? in
+            let nodes = urls.compactMap { (u: URL) -> Node? in
                 let values = try? u.resourceValues(forKeys: Set(keys))
                 if values?.isDirectory == true && values?.isPackage != true { return Node(url: u, isFolder: true) }
                 guard FolderBrowserController.sequenceExtensions.contains(u.pathExtension.lowercased()) else {
