@@ -5,9 +5,10 @@ Use `samples/reference/pUC19-L09137.gb`. Mac first, then Fedora.
 ## Primer check
 
 1. Check the primer `GTAAAACGACGGCCAGT` (M13 forward).
-   - [ ] Tm reads 52.8 °C, length 17, no warnings about dimers or hairpins.
+   - [ ] Tm reads 52.8 °C and length 17.
+   - [ ] Two warnings and only these: short (17 nt), and no G or C at the 3′ end. Nothing about dimers or hairpins.
 2. Check `CAGGAAACAGCTATGAC` (M13 reverse).
-   - [ ] Tm reads 47.2 °C.
+   - [ ] Tm reads 47.2 °C, with warnings for short (17 nt) and low Tm.
 
 ## Adding primers by sequence
 
