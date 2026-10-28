@@ -3,7 +3,9 @@
 // Usage: view_tests <samples-dir>
 #include "core/abif.h"
 #include "core/enzymes.h"
+#include "core/genbank.h"
 #include "core/seqio.h"
+#include "core/snapgene.h"
 #include "view/document.h"
 #include "view/gellayout.h"
 #include "view/maplayout.h"
@@ -87,6 +89,36 @@ static void testUndo(const Sequence &seq)
     CHECK_EQ(doc.addPrimerFromSelection("", Strand::Reverse), int(seq.primers.size()));
     CHECK(doc.sequence().primers.back().bases == reverseComplement(doc.sequence().bases.substr(100, 20)));
     CHECK(histories > 8);
+}
+
+// The Edit Feature dialog sets a colour with replaceFeature: one undo step,
+// kept by GenBank and .dna.
+static void testFeatureColor(const Sequence &seq)
+{
+    Document doc;
+    doc.setSequence(seq);
+    CHECK(!doc.sequence().features.empty());
+    if (doc.sequence().features.empty())
+        return;
+    Feature f = doc.sequence().features[0];
+    const std::string before = f.color;
+    f.color = "#813d9c";
+    doc.replaceFeature(0, f);
+    CHECK_EQ(doc.sequence().features[0].color, std::string("#813d9c"));
+    for (const std::string &file : {writeGenBank(doc.sequence()), writeSnapGene(doc.sequence())}) {
+        Sequence r;
+        CHECK(readGenBank(file, &r) || readSnapGene(file, &r));
+        CHECK(!r.features.empty() && r.features[0].color == "#813d9c");
+    }
+    doc.undo();
+    CHECK_EQ(doc.sequence().features[0].color, before);
+    CHECK(!doc.canUndo());
+    // Back to the type's default.
+    f.color.clear();
+    doc.replaceFeature(0, f);
+    Sequence r;
+    CHECK(readGenBank(writeGenBank(doc.sequence()), &r));
+    CHECK(!r.features.empty() && r.features[0].color.empty());
 }
 
 int main(int argc, char **argv)
@@ -260,6 +292,7 @@ int main(int argc, char **argv)
         CHECK_EQ(printPages(seq, sites, {}, tm, ps).size(), pages.size() - 1);
     }
     testUndo(seq);
+    testFeatureColor(seq);
     {
         GelLayout gel({{"Ladder", {10000, 1000, 100}, {1000}, true, false}, {"Cut", {3000, 500}, {}, false, false}},
                       theme, tm, 500, 400);

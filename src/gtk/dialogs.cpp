@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <cmath>
 #include <filesystem>
 #include <cstdio>
 #include <map>
@@ -121,8 +122,31 @@ struct FeatureForm {
     Feature original;
     bool multiPart;
     GtkWidget *name, *type, *strand, *start, *end, *note;
+    GtkWidget *colorRow, *colorButton, *colorReset;
+    std::string color;   // "#rrggbb"; empty = the type's default
+    bool settingColor = false;
     AdwDialog *dialog;
 };
+
+std::string hexColor(const GdkRGBA &c)
+{
+    auto byte = [](float v) { return int(std::lround(std::clamp(v, 0.0f, 1.0f) * 255)); };
+    char buf[8];
+    std::snprintf(buf, sizeof buf, "#%02x%02x%02x", byte(c.red), byte(c.green), byte(c.blue));
+    return buf;
+}
+
+// Shows the chosen colour, or the type's default when none is set.
+void showFeatureColor(FeatureForm *st)
+{
+    const view::Color c = view::FeatureStyle::fill(comboText(st->type), st->color);
+    const GdkRGBA rgba{float(c.r), float(c.g), float(c.b), 1.0f};
+    st->settingColor = true;
+    gtk_color_dialog_button_set_rgba(GTK_COLOR_DIALOG_BUTTON(st->colorButton), &rgba);
+    st->settingColor = false;
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->colorRow), st->color.empty() ? "Type default" : st->color.c_str());
+    gtk_widget_set_sensitive(st->colorReset, !st->color.empty());
+}
 
 } // namespace
 
@@ -190,6 +214,41 @@ void Window::featureDialog(int index)
     GtkWidget *notes = addGroup(f);
     st->note = entryRow(notes, "Note", st->original.qualifier("note"));
 
+    st->color = st->original.color;
+    st->colorRow = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->colorRow), "Colour");
+    st->colorReset = gtk_button_new_with_label("Default");
+    gtk_widget_add_css_class(st->colorReset, "flat");
+    gtk_widget_set_valign(st->colorReset, GTK_ALIGN_CENTER);
+    gtk_widget_set_tooltip_text(st->colorReset, "Use the colour of the feature's type");
+    GtkColorDialog *picker = gtk_color_dialog_new();
+    gtk_color_dialog_set_with_alpha(picker, FALSE);
+    st->colorButton = gtk_color_dialog_button_new(picker);   // takes the dialog
+    gtk_widget_set_valign(st->colorButton, GTK_ALIGN_CENTER);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(st->colorRow), st->colorReset);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(st->colorRow), st->colorButton);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(notes), st->colorRow);
+    showFeatureColor(st);
+    g_signal_connect(st->colorButton, "notify::rgba", G_CALLBACK((+[](GObject *b, GParamSpec *, gpointer p) {
+                         auto *st = static_cast<FeatureForm *>(p);
+                         if (st->settingColor)
+                             return;
+                         st->color = hexColor(*gtk_color_dialog_button_get_rgba(GTK_COLOR_DIALOG_BUTTON(b)));
+                         showFeatureColor(st);
+                     })),
+                     st);
+    g_signal_connect(st->colorReset, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<FeatureForm *>(p);
+                         st->color.clear();
+                         showFeatureColor(st);
+                     })),
+                     st);
+    // While no colour is set, the swatch follows the chosen type.
+    g_signal_connect(st->type, "notify::selected", G_CALLBACK((+[](GObject *, GParamSpec *, gpointer p) {
+                         showFeatureColor(static_cast<FeatureForm *>(p));
+                     })),
+                     st);
+
     if (st->index >= 0) {
         GtkWidget *dg = addGroup(f);
         GtkWidget *del = gtk_button_new_with_label("Delete Feature");
@@ -211,6 +270,7 @@ void Window::featureDialog(int index)
                          const int n = seq.length();
                          Feature out = st->original;
                          out.type = comboText(st->type);
+                         out.color = st->color;
                          const std::string strand = comboText(st->strand);
                          out.strand = strand == "Reverse" ? Strand::Reverse
                                     : strand == "None"    ? Strand::None
