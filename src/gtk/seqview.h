@@ -23,6 +23,8 @@ public:
     bool showComplement() const { return m_complement; }
     // 0, 3 (forward) or 6 reading frames translated around the strands.
     void setFrames(int frames);
+    // A small gap after every 10 bases.
+    void setGroupTens(bool group);
     void scrollToPosition(int pos);
     // Typing bases, Backspace, Delete and the arrow keys edit the document.
     void setEditable(bool editable) { m_editable = editable; }
@@ -53,6 +55,7 @@ private:
     bool m_dark = false;
     bool m_complement = true;
     int m_frames = 0;
+    bool m_groupTens = false;
     bool m_editable = false;
     // drag state
     bool m_dragging = false;

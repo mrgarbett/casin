@@ -105,6 +105,14 @@ private:
     static void actComplement(GSimpleAction *, GVariant *, gpointer self);
     static void actFrames(GSimpleAction *, GVariant *, gpointer self);
     static void actClearReads(GSimpleAction *, GVariant *, gpointer self);
+    static void actGroupTens(GSimpleAction *, GVariant *, gpointer self);
+    static void actRevert(GSimpleAction *, GVariant *, gpointer self);
+    static void actCopyMap(GSimpleAction *, GVariant *, gpointer self);
+    static void actGoTo(GSimpleAction *, GVariant *, gpointer self);
+    static void actRename(GSimpleAction *, GVariant *, gpointer self);
+    static void actAnnotate(GSimpleAction *, GVariant *, gpointer self);
+    static void actDeletePrimer(GSimpleAction *, GVariant *, gpointer self);
+    static void actCheckPrimer(GSimpleAction *, GVariant *, gpointer self);
     void copyText(const std::string &text, const char *what);
     void saveDialog(const std::string &title, const std::string &suggested, int kind, bool closeAfter = false);
     // Saves to the document's own path when its format keeps everything;
@@ -136,6 +144,12 @@ private:
     void overlapExtensionDialog();
     void proteinDialog();
     void insertionDialog();
+    void renameDialog();
+    void goToDialog();
+    void deletePrimerDialog();
+    void checkPrimerDialog();
+    void copyMapImage();
+    void revert();
     void pasteText(const std::string &text);
 
     Document m_doc;

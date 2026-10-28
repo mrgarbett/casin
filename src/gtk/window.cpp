@@ -170,6 +170,14 @@ void Window::buildUi(GtkApplication *app)
         {"show-complement", nullptr, nullptr, "true", &Window::actComplement, {0, 0, 0}},
         {"frames", nullptr, "s", "'0'", &Window::actFrames, {0, 0, 0}},
         {"clear-reads", &Window::actClearReads, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"group-tens", nullptr, nullptr, "false", &Window::actGroupTens, {0, 0, 0}},
+        {"revert", &Window::actRevert, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"copy-map", &Window::actCopyMap, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"go-to", &Window::actGoTo, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"rename", &Window::actRename, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"annotate", &Window::actAnnotate, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"delete-primer", &Window::actDeletePrimer, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"check-primer", &Window::actCheckPrimer, nullptr, nullptr, nullptr, {0, 0, 0}},
     };
     g_action_map_add_action_entries(G_ACTION_MAP(m_window), entries, G_N_ELEMENTS(entries), this);
     g_signal_connect(m_window, "close-request", G_CALLBACK(&Window::onCloseRequest), this);
@@ -916,6 +924,110 @@ void Window::actClearReads(GSimpleAction *, GVariant *, gpointer p)
     static_cast<Window *>(p)->m_doc.clearReads();
 }
 
+void Window::actGroupTens(GSimpleAction *a, GVariant *state, gpointer p)
+{
+    g_simple_action_set_state(a, state);
+    static_cast<Window *>(p)->m_seq->setGroupTens(g_variant_get_boolean(state));
+}
+
+void Window::actRevert(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->revert();
+}
+
+void Window::actCopyMap(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->copyMapImage();
+}
+
+void Window::actGoTo(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->goToDialog();
+}
+
+void Window::actRename(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->renameDialog();
+}
+
+void Window::actAnnotate(GSimpleAction *, GVariant *, gpointer p)
+{
+    auto *self = static_cast<Window *>(p);
+    const size_t before = self->m_doc.sequence().features.size();
+    const int added = self->m_doc.annotateCommonFeatures();
+    if (added == 0) {
+        self->toast("No common elements found that aren't annotated already");
+        return;
+    }
+    std::string names;
+    const auto &features = self->m_doc.sequence().features;
+    for (size_t i = before; i < features.size(); ++i)
+        names += (i == before ? "" : ", ") + features[i].name;
+    self->toast("Added " + std::to_string(added) + (added == 1 ? " feature: " : " features: ") + names);
+}
+
+void Window::actDeletePrimer(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->deletePrimerDialog();
+}
+
+void Window::actCheckPrimer(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->checkPrimerDialog();
+}
+
+void Window::revert()
+{
+    const std::string path = m_doc.path();
+    if (path.empty() || !m_doc.isModified())
+        return;
+    AdwDialog *d = adw_alert_dialog_new("Revert to the saved file?",
+                                        ("Your changes to " + baseName(path) + " since it was last saved will be lost.").c_str());
+    adw_alert_dialog_add_responses(ADW_ALERT_DIALOG(d), "cancel", "Cancel", "revert", "Revert", nullptr);
+    adw_alert_dialog_set_response_appearance(ADW_ALERT_DIALOG(d), "revert", ADW_RESPONSE_DESTRUCTIVE);
+    adw_alert_dialog_set_close_response(ADW_ALERT_DIALOG(d), "cancel");
+    g_signal_connect(d, "response", G_CALLBACK((+[](AdwAlertDialog *, const char *response, gpointer p) {
+                         auto *self = static_cast<Window *>(p);
+                         if (std::string(response) != "revert")
+                             return;
+                         const std::string path = self->m_doc.path();
+                         std::string error;
+                         if (self->load(path, &error))
+                             self->toast("Reverted to " + baseName(path));
+                         else
+                             self->showError("Could not revert", error);
+                     })),
+                     this);
+    adw_dialog_present(d, m_window);
+}
+
+// The map as on Export Map, light, at 2x, as an image on the clipboard.
+void Window::copyMapImage()
+{
+    if (m_doc.isEmpty())
+        return;
+    const int w = 900, h = 760, scale = 2;
+    view::PangoTextMeasurer tm;
+    view::MapLayout layout(m_doc.sequence(), m_doc.visibleSites(), view::Theme::light(), tm, w, h, m_map->options());
+    view::MapState st;
+    cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w * scale, h * scale);
+    cairo_t *cr = cairo_create(surface);
+    cairo_scale(cr, scale, scale);
+    cairo_set_source_rgb(cr, 1, 1, 1);
+    cairo_paint(cr);
+    view::drawScene(cr, layout.render(st));
+    cairo_destroy(cr);
+    cairo_surface_flush(surface);
+    const int stride = cairo_image_surface_get_stride(surface);
+    GBytes *bytes = g_bytes_new(cairo_image_surface_get_data(surface), size_t(stride) * size_t(h * scale));
+    cairo_surface_destroy(surface);
+    GdkTexture *texture = gdk_memory_texture_new(w * scale, h * scale, GDK_MEMORY_DEFAULT, bytes, size_t(stride));
+    g_bytes_unref(bytes);
+    gdk_clipboard_set_texture(gtk_widget_get_clipboard(m_window), texture);
+    g_object_unref(texture);
+    toast("Copied the map image");
+}
+
 void Window::actSave(GSimpleAction *, GVariant *, gpointer p)
 {
     static_cast<Window *>(p)->save();
@@ -1066,6 +1178,8 @@ void Window::rebuildMenu()
         if (exp)
             g_menu_append(m, label, action);
     };
+    // The same items, names and grouping as the Mac menu bar (Tools.swift):
+    // File, Edit, Sequence (Features, Primers), Cloning, Align, View.
     GMenu *menu = g_menu_new();
     GMenu *fileSection = g_menu_new();
     g_menu_append(fileSection, "New Sequence…", "app.new");
@@ -1073,6 +1187,7 @@ void Window::rebuildMenu()
     addExp(fileSection, "Search a Folder…", "win.search-folder");
     g_menu_append(fileSection, "Save", "win.save");
     g_menu_append(fileSection, "Save As…", "win.save-as");
+    g_menu_append(fileSection, "Revert to Saved", "win.revert");
     g_menu_append(fileSection, "Export FASTA…", "win.export-fasta");
     g_menu_append(fileSection, "Export Map…", "win.export-map");
     addExp(fileSection, "Print…", "win.print");
@@ -1081,62 +1196,89 @@ void Window::rebuildMenu()
     g_menu_append(editSection, "Cut", "win.cut");
     g_menu_append(editSection, "Copy", "win.copy");
     g_menu_append(editSection, "Copy Reverse Complement", "win.copy-rc");
+    g_menu_append(editSection, "Copy Map Image", "win.copy-map");
     g_menu_append(editSection, "Paste", "win.paste");
     g_menu_append(editSection, "Select All", "win.select-all");
     g_menu_append(editSection, "Find…", "win.find");
+    g_menu_append(editSection, "Go to Position…", "win.go-to");
     g_menu_append_section(menu, nullptr, G_MENU_MODEL(editSection));
-    GMenu *seqSection = g_menu_new();
-    g_menu_append(seqSection, "Reverse Complement Sequence", "win.reverse-complement");
-    g_menu_append(seqSection, "Set Origin at Selection", "win.set-origin");
-    g_menu_append(seqSection, "Circular", "win.circular");
-    addExp(seqSection, "Choose Enzymes…", "win.choose-enzymes");
-    g_menu_append(seqSection, "Digest and Gel…", "win.digest");
+    GMenu *toolSection = g_menu_new();
+    GMenu *seqMenu = g_menu_new();
+    g_menu_append(seqMenu, "Reverse Complement", "win.reverse-complement");
+    g_menu_append(seqMenu, "Set Origin at Selection", "win.set-origin");
+    g_menu_append(seqMenu, "Circular", "win.circular");
+    g_menu_append(seqMenu, "Rename…", "win.rename");
     GMenu *featureMenu = g_menu_new();
-    g_menu_append(featureMenu, "Add Feature…", "win.add-feature");
-    g_menu_append(featureMenu, "Edit Feature…", "win.edit-feature");
-    g_menu_append(featureMenu, "Delete Feature", "win.delete-feature");
-    addExp(featureMenu, "Find ORFs…", "win.orfs");
-    addExp(featureMenu, "Protein Properties…", "win.protein");
-    g_menu_append_submenu(seqSection, "Features", G_MENU_MODEL(featureMenu));
+    GMenu *featureEdit = g_menu_new();
+    g_menu_append(featureEdit, "Add Feature…", "win.add-feature");
+    g_menu_append(featureEdit, "Edit Feature…", "win.edit-feature");
+    g_menu_append(featureEdit, "Delete Feature", "win.delete-feature");
+    g_menu_append_section(featureMenu, nullptr, G_MENU_MODEL(featureEdit));
+    GMenu *featureFind = g_menu_new();
+    g_menu_append(featureFind, "Annotate Common Features", "win.annotate");
+    addExp(featureFind, "Find ORFs…", "win.orfs");
+    addExp(featureFind, "Protein Properties…", "win.protein");
+    g_menu_append_section(featureMenu, nullptr, G_MENU_MODEL(featureFind));
     GMenu *primerMenu = g_menu_new();
-    g_menu_append(primerMenu, "Add Primer…", "win.add-primer");
-    g_menu_append(primerMenu, "Design Primers for Selection…", "win.design-primers");
-    g_menu_append_submenu(seqSection, "Primers", G_MENU_MODEL(primerMenu));
+    GMenu *primerEdit = g_menu_new();
+    g_menu_append(primerEdit, "Add Primer…", "win.add-primer");
+    g_menu_append(primerEdit, "Add Primer by Sequence…", "win.primer-by-sequence");
+    g_menu_append(primerEdit, "Delete Primer…", "win.delete-primer");
+    g_menu_append_section(primerMenu, nullptr, G_MENU_MODEL(primerEdit));
+    GMenu *primerTools = g_menu_new();
+    g_menu_append(primerTools, "Design Primers…", "win.design-primers");
+    g_menu_append(primerTools, "Check a Primer…", "win.check-primer");
+    g_menu_append_section(primerMenu, nullptr, G_MENU_MODEL(primerTools));
+    GMenu *seqSub = g_menu_new();
+    g_menu_append_submenu(seqSub, "Features", G_MENU_MODEL(featureMenu));
+    g_menu_append_submenu(seqSub, "Primers", G_MENU_MODEL(primerMenu));
+    g_menu_append_section(seqMenu, nullptr, G_MENU_MODEL(seqSub));
+    g_menu_append_submenu(toolSection, "Sequence", G_MENU_MODEL(seqMenu));
     GMenu *cloneMenu = g_menu_new();
-    g_menu_append(cloneMenu, "PCR Product…", "win.pcr");
-    addExp(cloneMenu, "Restriction Cloning…", "win.clone");
-    addExp(cloneMenu, "Golden Gate Assembly…", "win.golden-gate");
-    g_menu_append(cloneMenu, "Gibson Assembly…", "win.gibson");
-    addExp(cloneMenu, "TA, GC and TOPO Cloning…", "win.ta-cloning");
-    addExp(cloneMenu, "Overlap Extension PCR…", "win.overlap-extension");
-    g_menu_append(cloneMenu, "Insertion by PCR…", "win.insertion");
-    addExp(cloneMenu, "Mutagenesis…", "win.mutagenesis");
-    addExp(cloneMenu, "Cloning History…", "win.history");
-    g_menu_append_submenu(seqSection, "Cloning", G_MENU_MODEL(cloneMenu));
-    GMenu *verifyMenu = g_menu_new();
-    g_menu_append(verifyMenu, "Align Read…", "win.align");
-    g_menu_append(verifyMenu, "Compare with Another Sequence…", "win.compare");
-    g_menu_append(verifyMenu, "Hide Aligned Reads", "win.clear-reads");
+    GMenu *cloneDigest = g_menu_new();
+    g_menu_append(cloneDigest, "Digest and Gel…", "win.digest");
+    addExp(cloneDigest, "Choose Enzymes…", "win.choose-enzymes");
+    g_menu_append_section(cloneMenu, nullptr, G_MENU_MODEL(cloneDigest));
+    GMenu *cloneCore = g_menu_new();
+    g_menu_append(cloneCore, "PCR Product…", "win.pcr");
+    g_menu_append(cloneCore, "Insertion by PCR…", "win.insertion");
+    g_menu_append(cloneCore, "Gibson Assembly…", "win.gibson");
+    g_menu_append_section(cloneMenu, nullptr, G_MENU_MODEL(cloneCore));
+    GMenu *cloneExp = g_menu_new();
+    addExp(cloneExp, "Restriction Cloning…", "win.clone");
+    addExp(cloneExp, "Golden Gate Assembly…", "win.golden-gate");
+    addExp(cloneExp, "TA, GC and TOPO Cloning…", "win.ta-cloning");
+    addExp(cloneExp, "Overlap Extension PCR…", "win.overlap-extension");
+    addExp(cloneExp, "Mutagenesis…", "win.mutagenesis");
+    addExp(cloneExp, "Cloning History", "win.history");
+    g_menu_append_section(cloneMenu, nullptr, G_MENU_MODEL(cloneExp));
+    g_menu_append_submenu(toolSection, "Cloning", G_MENU_MODEL(cloneMenu));
+    GMenu *alignMenu = g_menu_new();
+    g_menu_append(alignMenu, "Align Read…", "win.align");
+    g_menu_append(alignMenu, "Compare with Another Sequence…", "win.compare");
+    g_menu_append(alignMenu, "Hide Aligned Reads", "win.clear-reads");
     if (exp)
-        g_menu_append_submenu(seqSection, "Align and Compare", G_MENU_MODEL(verifyMenu));
-    g_menu_append_section(menu, nullptr, G_MENU_MODEL(seqSection));
+        g_menu_append_submenu(toolSection, "Align", G_MENU_MODEL(alignMenu));
+    g_menu_append_section(menu, nullptr, G_MENU_MODEL(toolSection));
     GMenu *viewMenu = g_menu_new();
+    GMenu *framesMenu = g_menu_new();
+    g_menu_append(framesMenu, "No Translation", "win.frames::0");
+    g_menu_append(framesMenu, "Forward ORFs", "win.frames::3");
+    g_menu_append(framesMenu, "ORFs on Both Strands", "win.frames::6");
+    if (exp)
+        g_menu_append_submenu(viewMenu, "Translate", G_MENU_MODEL(framesMenu));
     addExp(viewMenu, "Map Display…", "win.map-options");
     g_menu_append(viewMenu, "Show Complement Strand", "win.show-complement");
-    GMenu *framesMenu = g_menu_new();
-    g_menu_append(framesMenu, "None", "win.frames::0");
-    g_menu_append(framesMenu, "Forward Frames", "win.frames::3");
-    g_menu_append(framesMenu, "All Six Frames", "win.frames::6");
-    if (exp)
-        g_menu_append_submenu(viewMenu, "Translate Frames", G_MENU_MODEL(framesMenu));
+    g_menu_append(viewMenu, "Group Bases in Tens", "win.group-tens");
     GMenu *appSection = g_menu_new();
     g_menu_append_submenu(appSection, "View", G_MENU_MODEL(viewMenu));
     g_menu_append(appSection, "Experimental Tools", "app.experimental");
     g_menu_append(appSection, "About Restricto", "app.about");
     g_menu_append_section(menu, nullptr, G_MENU_MODEL(appSection));
     gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(m_menuButton), G_MENU_MODEL(menu));
-    for (GMenu *m : {fileSection, editSection, seqSection, featureMenu, primerMenu, cloneMenu, verifyMenu, viewMenu,
-                     framesMenu, appSection, menu})
+    for (GMenu *m : {fileSection, editSection, toolSection, seqMenu, featureMenu, featureEdit, featureFind,
+                     primerMenu, primerEdit, primerTools, seqSub, cloneMenu, cloneDigest, cloneCore, cloneExp,
+                     alignMenu, viewMenu, framesMenu, appSection, menu})
         g_object_unref(m);
 }
 
@@ -1151,7 +1293,8 @@ void Window::updateActions()
     const bool sel = m_doc.hasSelection() && m_doc.selection().length > 0;
     enable("undo", m_doc.canUndo());
     enable("redo", m_doc.canRedo());
-    for (const char *name : {"save", "save-as", "export-fasta", "export-map", "print", "paste", "select-all",
+    for (const char *name : {"save", "save-as", "export-fasta", "export-map", "copy-map", "go-to", "rename",
+                             "annotate", "print", "paste", "select-all",
                              "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "ta-cloning", "overlap-extension", "insertion", "choose-enzymes", "primer-by-sequence", "history", "align", "compare", "orfs", "protein", "map-options"})
         enable(name, has);
     enable("cut", sel);
@@ -1163,6 +1306,8 @@ void Window::updateActions()
     enable("delete-feature", m_doc.activeFeature() >= 0);
     enable("set-origin", has && m_doc.sequence().circular && m_doc.hasSelection());
     enable("clear-reads", !m_doc.reads().empty());
+    enable("revert", !m_doc.path().empty() && m_doc.isModified());
+    enable("delete-primer", !m_doc.sequence().primers.empty());
     GAction *circ = g_action_map_lookup_action(G_ACTION_MAP(m_window), "circular");
     if (circ)
         g_simple_action_set_state(G_SIMPLE_ACTION(circ), g_variant_new_boolean(m_doc.sequence().circular));

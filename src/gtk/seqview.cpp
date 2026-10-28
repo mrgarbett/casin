@@ -89,6 +89,14 @@ void SequenceView::setShowComplement(bool show)
     }
 }
 
+void SequenceView::setGroupTens(bool group)
+{
+    if (group != m_groupTens) {
+        m_groupTens = group;
+        invalidate();
+    }
+}
+
 void SequenceView::setFrames(int frames)
 {
     if (frames != m_frames) {
@@ -106,9 +114,12 @@ void SequenceView::ensureLayout()
 {
     if (m_layout || m_w <= 0)
         return;
+    view::SeqOptions options;
+    options.frames = m_frames;
+    options.groupTens = m_groupTens;
     m_layout = std::make_unique<view::SequenceLayout>(m_doc->sequence(), m_doc->visibleSites(),
                                                       m_dark ? view::Theme::darkTheme() : view::Theme::light(),
-                                                      m_measure, m_w, m_complement, m_frames, m_doc->reads());
+                                                      m_measure, m_w, m_complement, options, m_doc->reads());
     updateAdjustment();
 }
 

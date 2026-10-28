@@ -13,10 +13,12 @@
 #include "view/style.h"
 
 #include <algorithm>
+#include <cctype>
 #include <climits>
 #include <cmath>
 #include <filesystem>
 #include <cstdio>
+#include <cstdlib>
 #include <map>
 
 namespace oc::gtk {
@@ -2204,6 +2206,180 @@ void showNewSequenceDialog(GtkApplication *app, GtkWindow *parent)
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<NewForm *>(p); });
     adw_dialog_present(f.dialog, GTK_WIDGET(parent));
+    gtk_widget_grab_focus(st->bases);
+}
+
+// ---- the Mac's Sequence and Edit menu items ---------------------------------------
+
+namespace {
+struct TextForm {
+    Window *window;
+    Document *doc;
+    GtkWidget *entry;
+    AdwDialog *dialog;
+};
+} // namespace
+
+void Window::renameDialog()
+{
+    if (m_doc.isEmpty())
+        return;
+    auto *st = new TextForm{this, &m_doc, nullptr, nullptr};
+    Form f = makeForm("Rename Sequence", "Rename");
+    st->dialog = f.dialog;
+    st->entry = entryRow(addGroup(f), "Name", m_doc.sequence().name);
+    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<TextForm *>(p);
+                         const std::string name = trim(text(st->entry));
+                         if (!name.empty() && name != st->doc->sequence().name)
+                             st->doc->rename(name);
+                         adw_dialog_close(st->dialog);
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<TextForm *>(p); });
+    adw_dialog_present(f.dialog, m_window);
+    gtk_widget_grab_focus(st->entry);
+}
+
+void Window::goToDialog()
+{
+    const int n = m_doc.sequence().length();
+    if (n == 0)
+        return;
+    auto *st = new TextForm{this, &m_doc, nullptr, nullptr};
+    Form f = makeForm("Go to Position", "Go");
+    st->dialog = f.dialog;
+    GtkWidget *g = addGroup(f);
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(g),
+                                          ("A base number from 1 to " + view::withThousands(n) + ".").c_str());
+    st->entry = entryRow(g, "Base", std::to_string(m_doc.hasSelection() ? m_doc.selection().start + 1 : 1));
+    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<TextForm *>(p);
+                         std::string digits;
+                         for (char c : text(st->entry))
+                             if (std::isdigit(static_cast<unsigned char>(c)))
+                                 digits.push_back(c);
+                         const long base = digits.empty() || digits.size() > 9 ? 0 : std::atol(digits.c_str());
+                         if (base < 1 || base > st->doc->sequence().length()) {
+                             st->window->toast("Type a base number from 1 to "
+                                               + view::withThousands(st->doc->sequence().length()));
+                             return;
+                         }
+                         st->doc->setSelection({int(base) - 1, 0});
+                         adw_dialog_close(st->dialog);
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<TextForm *>(p); });
+    adw_dialog_present(f.dialog, m_window);
+    gtk_widget_grab_focus(st->entry);
+}
+
+namespace {
+struct DeletePrimerForm {
+    Document *doc;
+    GtkWidget *pick;
+    AdwDialog *dialog;
+};
+} // namespace
+
+void Window::deletePrimerDialog()
+{
+    const Sequence &seq = m_doc.sequence();
+    if (seq.primers.empty()) {
+        toast("This sequence has no primers");
+        return;
+    }
+    std::vector<std::string> labels;
+    for (const Primer &pr : seq.primers) {
+        std::string site = "doesn't bind";
+        if (pr.binding.length() > 0)
+            site = view::withThousands(pr.binding.start + 1) + "–" + view::withThousands(pr.binding.end)
+                 + (pr.strand == Strand::Reverse ? " ←" : " →");
+        labels.push_back(pr.name + " · " + site);
+    }
+    std::vector<const char *> items;
+    for (const std::string &l : labels)
+        items.push_back(l.c_str());
+    items.push_back(nullptr);
+    auto *st = new DeletePrimerForm{&m_doc, nullptr, nullptr};
+    Form f = makeForm("Delete Primer", "Delete");
+    gtk_widget_remove_css_class(f.ok, "suggested-action");
+    gtk_widget_add_css_class(f.ok, "destructive-action");
+    st->dialog = f.dialog;
+    st->pick = comboRow(addGroup(f), "Primer", items.data(), 0);
+    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<DeletePrimerForm *>(p);
+                         const guint i = adw_combo_row_get_selected(ADW_COMBO_ROW(st->pick));
+                         if (i < st->doc->sequence().primers.size())
+                             st->doc->removePrimer(int(i));
+                         adw_dialog_close(st->dialog);
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st,
+                           [](gpointer p) { delete static_cast<DeletePrimerForm *>(p); });
+    adw_dialog_present(f.dialog, m_window);
+}
+
+namespace {
+struct CheckPrimerForm {
+    GtkWidget *bases;
+    GtkWidget *summary;
+    std::vector<GtkWidget *> rows;   // length, GC, Tm, clamp, run, self-dimer, hairpin
+};
+
+void showPrimerCheck(CheckPrimerForm *st)
+{
+    const std::string bases = cleanBases(text(st->bases));
+    const PrimerCheck c = checkPrimer(bases);
+    char buf[64];
+    std::vector<std::string> values;
+    values.push_back(std::to_string(c.length) + " nt");
+    std::snprintf(buf, sizeof buf, "%.0f%%", c.gc * 100);
+    values.push_back(bases.empty() ? "—" : buf);
+    std::snprintf(buf, sizeof buf, "%.1f °C", c.tm);
+    values.push_back(std::isnan(c.tm) || bases.empty() ? "—" : buf);
+    values.push_back(std::to_string(c.clampGC) + " of the last 5");
+    values.push_back(std::to_string(c.longestRun));
+    values.push_back(std::to_string(c.selfDimer) + " bp (" + std::to_string(c.selfDimer3) + " at the 3′ end)");
+    values.push_back(std::to_string(c.hairpinStem) + " bp");
+    for (size_t i = 0; i < st->rows.size() && i < values.size(); ++i)
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(st->rows[i]), values[i].c_str());
+    std::string warnings;
+    for (const std::string &w : c.warnings)
+        warnings += (warnings.empty() ? "" : "\n") + w;
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->summary),
+                                bases.empty() ? "Type or paste a primer." : warnings.empty() ? "Looks fine." : warnings.c_str());
+}
+} // namespace
+
+void Window::checkPrimerDialog()
+{
+    auto *st = new CheckPrimerForm{};
+    Form f = makeForm("Check a Primer", "Done", false);
+    adw_dialog_set_content_height(f.dialog, 560);
+    g_signal_connect_swapped(f.ok, "clicked", G_CALLBACK(adw_dialog_close), f.dialog);
+    const bool sel = m_doc.hasSelection() && m_doc.selection().length > 0;
+    st->bases = entryRow(addGroup(f), "Bases, 5′ to 3′", sel ? m_doc.selectedBases() : "");
+    GtkWidget *g = addGroup(f);
+    st->summary = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->summary), "Result");
+    adw_action_row_set_subtitle_lines(ADW_ACTION_ROW(st->summary), 0);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(g), st->summary);
+    GtkWidget *details = addGroup(f);
+    for (const char *title : {"Length", "GC", "Tm", "3′ GC clamp", "Longest run", "Self-dimer", "Hairpin stem"}) {
+        GtkWidget *row = adw_action_row_new();
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), title);
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(details), row);
+        st->rows.push_back(row);
+    }
+    showPrimerCheck(st);
+    g_signal_connect(st->bases, "changed", G_CALLBACK((+[](GtkEditable *, gpointer p) {
+                         showPrimerCheck(static_cast<CheckPrimerForm *>(p));
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st,
+                           [](gpointer p) { delete static_cast<CheckPrimerForm *>(p); });
+    adw_dialog_present(f.dialog, m_window);
     gtk_widget_grab_focus(st->bases);
 }
 
