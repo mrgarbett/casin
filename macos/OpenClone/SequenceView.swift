@@ -148,6 +148,11 @@ final class SequenceView: NSView {
         oc_document_delete_selection(document.handle)
     }
 
+    override func selectAll(_ sender: Any?) {
+        guard !document.isEmpty else { NSSound.beep(); return }
+        document.select(start: 0, length: document.length)
+    }
+
     // MARK: Mouse
 
     override func mouseDown(with event: NSEvent) {
