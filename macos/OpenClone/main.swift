@@ -8,6 +8,7 @@
 //   OpenClone --render-map out.png <file>      (.pdf works too)
 import AppKit
 import OpenCloneCore
+import UniformTypeIdentifiers
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let launchFiles: [String]
@@ -44,7 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "Melting temperature: SantaLucia (1998) unified nearest-neighbor parameters.")
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "OpenClone",
-            .applicationVersion: "0.1.0",
+            .applicationVersion: String(cString: oc_version()),
             .credits: credits,
         ])
     }
@@ -100,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .separator(),
             item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]),
         ])
+        ToolMenus.install(in: main)
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"))
         windowMenu.addItem(item("Zoom", #selector(NSWindow.performZoom(_:))))
@@ -108,6 +110,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         main.addItem(windowItem)
         NSApp.windowsMenu = windowMenu
         return main
+    }
+}
+
+/// Another installed app (ApE, SnapGene, ...) may export its own UTI for .gb or
+/// .dna; Launch Services then prefers it over our imported types and the default
+/// controller refuses the file. Fall back to our types by filename extension.
+final class DocumentController: NSDocumentController {
+    override func typeForContents(of url: URL) throws -> String {
+        let type = try super.typeForContents(of: url)
+        if documentClass(forType: type) != nil { return type }
+        let ext = url.pathExtension.lowercased()
+        for ours in ["io.github.openclone.genbank", "io.github.openclone.snapgene-dna", "io.github.openclone.fasta"] {
+            if let ut = UTType(ours), ut.tags[.filenameExtension]?.contains(ext) == true { return ours }
+        }
+        return type
     }
 }
 
@@ -145,6 +162,7 @@ for arg in arguments {
 }
 
 let app = NSApplication.shared
+_ = DocumentController()   // the first instance becomes NSDocumentController.shared
 let delegate = AppDelegate(launchFiles: files)
 app.delegate = delegate
 app.setActivationPolicy(.regular)

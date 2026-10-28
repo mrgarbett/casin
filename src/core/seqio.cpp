@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "seqio.h"
+#include "abif.h"
+#include "embl.h"
 #include "fasta.h"
 #include "genbank.h"
 #include "snapgene.h"
@@ -19,6 +21,10 @@ FileFormat formatFromExtension(const std::string &path)
         return FileFormat::Fasta;
     if (ext == "dna")
         return FileFormat::SnapGene;
+    if (ext == "ab1" || ext == "abi" || ext == "ab")
+        return FileFormat::Abif;
+    if (ext == "embl" || ext == "emb")
+        return FileFormat::Embl;
     return FileFormat::Unknown;
 }
 
@@ -26,11 +32,15 @@ FileFormat sniffFormat(const std::string &content)
 {
     if (looksLikeSnapGene(content))
         return FileFormat::SnapGene;
+    if (looksLikeAbif(content))
+        return FileFormat::Abif;
     size_t i = 0;
     while (i < content.size() && std::isspace(static_cast<unsigned char>(content[i])))
         ++i;
     if (content.compare(i, 5, "LOCUS") == 0)
         return FileFormat::GenBank;
+    if (looksLikeEmbl(content))
+        return FileFormat::Embl;
     if (i < content.size() && content[i] == '>')
         return FileFormat::Fasta;
     // A bare sequence: mostly IUPAC letters.
@@ -55,7 +65,7 @@ FileFormat detectFormat(const std::string &path, const std::string &content)
     FileFormat sniffed = sniffFormat(content);
     if (f == FileFormat::Unknown)
         return sniffed;
-    if (f != FileFormat::SnapGene && sniffed == FileFormat::SnapGene)
+    if ((f != FileFormat::SnapGene && sniffed == FileFormat::SnapGene) || sniffed == FileFormat::Abif)
         return sniffed;
     if (f == FileFormat::SnapGene && !looksLikeSnapGene(content) && sniffed != FileFormat::Unknown)
         return sniffed;
@@ -100,6 +110,20 @@ bool parseSequence(const std::string &content, FileFormat format, Sequence *out,
     case FileFormat::GenBank: return readGenBank(content, out, error);
     case FileFormat::Fasta: return readFasta(content, out, error);
     case FileFormat::SnapGene: return readSnapGene(content, out, error);
+    case FileFormat::Embl: return readEmbl(content, out, error);
+    case FileFormat::Abif: {
+        Trace t;
+        if (!readAbif(content, &t, error))
+            return false;
+        Sequence s;
+        s.name = t.name;
+        s.bases = t.bases;
+        const Span good = goodRegion(t);
+        s.description = "Sanger read, " + std::to_string(t.bases.size()) + " bases; good quality "
+                      + std::to_string(good.start + 1) + "-" + std::to_string(good.start + good.length);
+        *out = s;
+        return true;
+    }
     default:
         if (error)
             *error = "unrecognized file format";
@@ -107,16 +131,36 @@ bool parseSequence(const std::string &content, FileFormat format, Sequence *out,
     }
 }
 
-bool loadSequenceFile(const std::string &path, Sequence *out, std::string *error)
+bool loadSequenceFile(const std::string &path, Sequence *out, std::string *error, FileFormat *format)
+{
+    return loadSequenceFile(path, out, nullptr, error, format);
+}
+
+bool loadSequenceFile(const std::string &path, Sequence *out, std::vector<Sequence> *more, std::string *error,
+                      FileFormat *format)
 {
     std::string content;
     if (!readFile(path, &content, error))
         return false;
     Sequence seq;
-    if (!parseSequence(content, detectFormat(path, content), &seq, error))
+    const FileFormat f = detectFormat(path, content);
+    if (!parseSequence(content, f, &seq, error))
         return false;
+    if (format)
+        *format = f;
     if (trim(seq.name).empty())
         seq.name = fileBaseName(path);
+    if (more && (f == FileFormat::GenBank || f == FileFormat::Embl)) {
+        const std::vector<std::string> records = splitRecords(content);
+        for (size_t i = 1; i < records.size(); ++i) {
+            Sequence extra;
+            if (parseSequence(records[i], f, &extra, nullptr) && !extra.bases.empty()) {
+                if (trim(extra.name).empty())
+                    extra.name = fileBaseName(path) + " " + std::to_string(i + 1);
+                more->push_back(extra);
+            }
+        }
+    }
     *out = seq;
     return true;
 }
@@ -126,9 +170,11 @@ bool saveSequenceFile(const std::string &path, const Sequence &seq, FileFormat f
     switch (format) {
     case FileFormat::GenBank: return writeFile(path, writeGenBank(seq), error);
     case FileFormat::Fasta: return writeFile(path, writeFasta(seq), error);
+    case FileFormat::SnapGene: return writeFile(path, writeSnapGene(seq), error);
+    case FileFormat::Embl: return writeFile(path, writeEmbl(seq), error);
     default:
         if (error)
-            *error = "can only save GenBank or FASTA";
+            *error = "unknown file format";
         return false;
     }
 }

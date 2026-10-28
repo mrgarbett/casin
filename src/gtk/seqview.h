@@ -21,7 +21,11 @@ public:
     void setDark(bool dark);
     void setShowComplement(bool show);
     bool showComplement() const { return m_complement; }
+    // 0, 3 (forward) or 6 reading frames translated around the strands.
+    void setFrames(int frames);
     void scrollToPosition(int pos);
+    // Typing bases, Backspace, Delete and the arrow keys edit the document.
+    void setEditable(bool editable) { m_editable = editable; }
 
 private:
     static void draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer self);
@@ -32,6 +36,8 @@ private:
     static void dragUpdate(GtkGestureDrag *, double dx, double dy, gpointer self);
     static void dragEnd(GtkGestureDrag *, double dx, double dy, gpointer self);
     static gboolean autoScroll(gpointer self);
+    static gboolean keyPressed(GtkEventControllerKey *, guint keyval, guint keycode, GdkModifierType state,
+                               gpointer self);
     static gboolean queryTooltip(GtkWidget *, int x, int y, gboolean kb, GtkTooltip *tip, gpointer self);
     void ensureLayout();
     void updateAdjustment();
@@ -46,6 +52,8 @@ private:
     int m_w = 0, m_h = 0;
     bool m_dark = false;
     bool m_complement = true;
+    int m_frames = 0;
+    bool m_editable = false;
     // drag state
     bool m_dragging = false;
     int m_anchor = 0;

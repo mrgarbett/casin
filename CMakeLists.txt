@@ -22,12 +22,24 @@ set(OPENCLONE_FRONTEND ${_default_frontend} CACHE STRING "gtk, appkit or none")
 # ---- core: plain C++17, no dependencies ---------------------------------------
 add_library(openclone_core STATIC
     src/core/sequence.cpp
+    src/core/edit.cpp
+    src/core/digest.cpp
+    src/core/primercheck.cpp
+    src/core/cloning.cpp
+    src/core/abif.cpp
+    src/core/align.cpp
+    src/core/orf.cpp
+    src/core/protein.cpp
+    src/core/embl.cpp
+    src/core/enzymesets.cpp
     src/core/genbank.cpp
     src/core/fasta.cpp
     src/core/xml.cpp
     src/core/snapgene.cpp
     src/core/enzymes.cpp
+    src/core/suppliers.cpp
     src/core/tm.cpp
+    src/core/search.cpp
     src/core/seqio.cpp)
 target_include_directories(openclone_core PUBLIC src)
 
@@ -37,6 +49,9 @@ add_library(openclone_view STATIC
     src/view/style.cpp
     src/view/maplayout.cpp
     src/view/seqlayout.cpp
+    src/view/gellayout.cpp
+    src/view/tracelayout.cpp
+    src/view/printlayout.cpp
     src/view/document.cpp)
 target_link_libraries(openclone_view PUBLIC openclone_core)
 
