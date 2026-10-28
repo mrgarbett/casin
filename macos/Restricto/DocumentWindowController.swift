@@ -20,6 +20,9 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private let inspector: InspectorController
     private var inspectorItem: NSSplitViewItem?
     private let status = NSTextField(labelWithString: "")
+    /// View toggles beside the status: complement strand, translation, and
+    /// enzymes and features on the map.
+    private var viewToggles: [NSButton] = []
     private let searchField = NSSearchField()
     /// Keeps the glass status inside the sequence pane. A constant, updated on
     /// resize, so a longer status can't push the map/sequence divider.
@@ -59,7 +62,10 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         // whatever the system-wide "Prefer tabs" setting says.
         window.tabbingMode = .preferred
         window.tabbingIdentifier = "RestrictoDocument"
-        core.observe { [weak self] _ in self?.updateTexts() }
+        core.observe { [weak self] _ in
+            self?.updateTexts()
+            self?.refreshToggles()
+        }
         updateTexts()
         window.center()
     }
@@ -130,7 +136,9 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             pillMaxWidth?.isActive = true
         } else {
             // Ventura to Sequoia: content below the toolbar, flat status line under it.
-            let stack = NSStackView(views: [split, status])
+            let statusRow = NSStackView(views: [makeToggles(), status])
+            statusRow.spacing = 10
+            let stack = NSStackView(views: [split, statusRow])
             stack.orientation = .vertical
             stack.spacing = 4
             stack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 6, right: 0)
@@ -144,8 +152,8 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
                 stack.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
                 stack.bottomAnchor.constraint(equalTo: root.bottomAnchor),
                 split.widthAnchor.constraint(equalTo: stack.widthAnchor),
-                status.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 12),
-                status.trailingAnchor.constraint(lessThanOrEqualTo: stack.trailingAnchor, constant: -12),
+                statusRow.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 8),
+                statusRow.trailingAnchor.constraint(lessThanOrEqualTo: stack.trailingAnchor, constant: -12),
             ])
         }
 
@@ -241,25 +249,68 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
 
     /// The status line inside a glass capsule, or nil before macOS 26.
     private func floatingStatus() -> NSView? {
+        guard Glass.isAvailable else { return nil }
         let inner = NSView()
-        status.translatesAutoresizingMaskIntoConstraints = false
-        inner.addSubview(status)
+        let toggles = makeToggles()
+        for v in [toggles, status] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            inner.addSubview(v)
+        }
         NSLayoutConstraint.activate([
-            status.leadingAnchor.constraint(equalTo: inner.leadingAnchor, constant: 14),
+            toggles.leadingAnchor.constraint(equalTo: inner.leadingAnchor, constant: 8),
+            toggles.centerYAnchor.constraint(equalTo: inner.centerYAnchor),
+            status.leadingAnchor.constraint(equalTo: toggles.trailingAnchor, constant: 10),
             status.trailingAnchor.constraint(equalTo: inner.trailingAnchor, constant: -14),
             status.centerYAnchor.constraint(equalTo: inner.centerYAnchor),
         ])
-        guard let pill = Glass.capsule(around: inner, height: 30) else {
-            status.removeFromSuperview()
-            status.translatesAutoresizingMaskIntoConstraints = true
-            return nil
-        }
+        guard let pill = Glass.capsule(around: inner, height: 30) else { return nil }
         // The capsule hugs the text, so the text must hold it open; the pill's
         // max-width constraint still truncates it in a narrow window.
         status.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         // Secondary grey washes out over the sequence text behind the glass.
         status.textColor = .labelColor
         return pill
+    }
+
+    /// Small icon toggles for the status pill (or the status row before macOS 26).
+    private func makeToggles() -> NSStackView {
+        let entries = [("Complement strand", "arrow.left.arrow.right"), ("Translation (3 forward frames)", "textformat"),
+                       ("Restriction sites on the map", "scissors"), ("Features on the map", "tag")]
+        viewToggles = entries.enumerated().map { i, entry in
+            let image = NSImage(systemSymbolName: entry.1, accessibilityDescription: entry.0)
+                ?? NSImage(size: NSSize(width: 14, height: 14))
+            let button = NSButton(image: image, target: self, action: #selector(viewToggleClicked(_:)))
+            button.isBordered = false
+            button.tag = i
+            button.toolTip = entry.0
+            button.setAccessibilityLabel(entry.0)
+            return button
+        }
+        let stack = NSStackView(views: viewToggles)
+        stack.spacing = 8
+        stack.setContentCompressionResistancePriority(.required, for: .horizontal)
+        refreshToggles()
+        return stack
+    }
+
+    @objc private func viewToggleClicked(_ sender: NSButton) {
+        switch sender.tag {
+        case 0: sequenceView.showComplement.toggle()
+        case 1: core.frames = core.frames == 0 ? 3 : 0
+        case 2: core.mapShowsEnzymes.toggle()
+        default:
+            // Hide every feature type on the map, or show them all again.
+            core.mapHiddenTypes = core.mapHiddenTypes.isEmpty ? Set(core.features.map { $0.type }) : []
+        }
+        refreshToggles()
+    }
+
+    /// Tints each toggle that is on; menus and forms change the same options.
+    private func refreshToggles() {
+        let on = [sequenceView.showComplement, core.frames != 0, core.mapShowsEnzymes, core.mapHiddenTypes.isEmpty]
+        for (button, isOn) in zip(viewToggles, on) {
+            button.contentTintColor = isOn ? .controlAccentColor : .tertiaryLabelColor
+        }
     }
 
     private func buildToolbar() {
@@ -294,8 +345,8 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private let inspectorToolbarItem = NSToolbarItem.Identifier("inspector")
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace, mapItem, layoutItem, complementItem, exportItem,
-         searchItem, inspectorToolbarItem]
+        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace, mapItem, layoutItem, exportItem, searchItem,
+         inspectorToolbarItem]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -380,6 +431,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
 
     @objc func toggleComplementStrand(_ sender: Any?) {
         sequenceView.showComplement.toggle()
+        refreshToggles()
     }
 
     /// Shows or hides the right-hand panel. (NSSplitViewController has its own
