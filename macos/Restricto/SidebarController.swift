@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
-import OpenCloneCore
+import RestrictoCore
 
 /// Features and Enzymes, switched by a segmented control at the top. Shown as
 /// the window's sidebar: vibrant on Ventura, floating glass on macOS 26.

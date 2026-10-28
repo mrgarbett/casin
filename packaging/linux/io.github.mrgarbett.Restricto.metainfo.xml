@@ -1,23 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github.openclone.OpenClone</id>
-  <name>OpenClone</name>
+  <id>io.github.mrgarbett.Restricto</id>
+  <name>Restricto</name>
   <summary>View plasmid maps and DNA sequences</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
   <description>
-    <p>OpenClone is an open-source plasmid viewer. It opens GenBank, FASTA and SnapGene .dna files and shows a
+    <p>Restricto is an open-source plasmid viewer. It opens GenBank, FASTA and SnapGene .dna files and shows a
     circular or linear map with features and restriction sites next to a double-strand sequence view.</p>
     <p>Restriction enzyme data comes from REBASE.</p>
   </description>
-  <launchable type="desktop-id">io.github.openclone.OpenClone.desktop</launchable>
+  <launchable type="desktop-id">io.github.mrgarbett.Restricto.desktop</launchable>
   <url type="homepage">https://github.com/mrgarbett/casin</url>
-  <developer id="io.github.openclone">
-    <name>OpenClone contributors</name>
+  <developer id="io.github.mrgarbett">
+    <name>Restricto contributors</name>
   </developer>
   <content_rating type="oars-1.1"/>
   <provides>
-    <binary>openclone</binary>
+    <binary>restricto</binary>
   </provides>
   <releases>
     <release version="0.1.0~alpha" date="2026-10-27" type="development"/>

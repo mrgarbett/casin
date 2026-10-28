@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// OpenClone for macOS: Swift + AppKit over the shared C++ core.
+// Restricto for macOS: Swift + AppKit over the shared C++ core.
 //
 // Finder "Open With" and double-click arrive through NSDocumentController,
 // which uses the document types in Info.plist (see scripts/build_macos_app.sh).
 //
 // Headless check (no window):
-//   OpenClone --render-map out.png <file>      (.pdf works too)
+//   Restricto --render-map out.png <file>      (.pdf works too)
 import AppKit
-import OpenCloneCore
+import RestrictoCore
 import UniformTypeIdentifiers
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -53,7 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "Restriction enzyme data: REBASE, the Restriction Enzyme Database (rebase.neb.com).\n" +
             "Melting temperature: SantaLucia (1998) unified nearest-neighbor parameters.")
         NSApp.orderFrontStandardAboutPanel(options: [
-            .applicationName: "OpenClone",
+            .applicationName: "Restricto",
             .applicationVersion: String(cString: oc_version()),
             .credits: credits,
         ])
@@ -76,16 +76,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return i
         }
 
-        let about = item("About OpenClone", #selector(showAbout(_:)))
+        let about = item("About Restricto", #selector(showAbout(_:)))
         about.target = self
-        submenu("OpenClone", [
+        submenu("Restricto", [
             about,
             .separator(),
-            item("Hide OpenClone", #selector(NSApplication.hide(_:)), "h"),
+            item("Hide Restricto", #selector(NSApplication.hide(_:)), "h"),
             item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option]),
             item("Show All", #selector(NSApplication.unhideAllApplications(_:))),
             .separator(),
-            item("Quit OpenClone", #selector(NSApplication.terminate(_:)), "q"),
+            item("Quit Restricto", #selector(NSApplication.terminate(_:)), "q"),
         ])
         submenu("File", [
             item("Open…", #selector(NSDocumentController.openDocument(_:)), "o"),
@@ -124,16 +124,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 /// Another installed app (ApE, SnapGene, MacVector, ...) may export its own UTI
 /// for .gb or .dna; Launch Services then prefers it over our imported types.
-/// Info.plist lists those UTIs too so Finder offers OpenClone, but documents
+/// Info.plist lists those UTIs too so Finder offers Restricto, but documents
 /// always take our type by filename extension, so that Save picks the right
 /// format (SequenceDocument.write switches on our type names).
 final class DocumentController: NSDocumentController {
     override func typeForContents(of url: URL) throws -> String {
         let type = try super.typeForContents(of: url)
-        if type.hasPrefix("io.github.openclone.") { return type }
+        if type.hasPrefix("io.github.mrgarbett.restricto.") { return type }
         let ext = url.pathExtension.lowercased()
-        for ours in ["io.github.openclone.genbank", "io.github.openclone.snapgene-dna", "io.github.openclone.fasta",
-                     "io.github.openclone.embl"] {
+        for ours in ["io.github.mrgarbett.restricto.genbank", "io.github.mrgarbett.restricto.snapgene-dna", "io.github.mrgarbett.restricto.fasta",
+                     "io.github.mrgarbett.restricto.embl"] {
             if let ut = UTType(ours), ut.tags[.filenameExtension]?.contains(ext) == true { return ours }
         }
         return type
@@ -144,7 +144,7 @@ final class DocumentController: NSDocumentController {
 
 func renderMapHeadless(_ args: [String]) -> Int32 {
     guard args.count >= 2 else {
-        FileHandle.standardError.write("usage: OpenClone --render-map out.png <file>\n".data(using: .utf8)!)
+        FileHandle.standardError.write("usage: Restricto --render-map out.png <file>\n".data(using: .utf8)!)
         return 2
     }
     let doc = CoreDocument()
@@ -154,7 +154,7 @@ func renderMapHeadless(_ args: [String]) -> Int32 {
         print("wrote \(args[0])")
         return 0
     } catch {
-        FileHandle.standardError.write("OpenClone: \(error.localizedDescription)\n".data(using: .utf8)!)
+        FileHandle.standardError.write("Restricto: \(error.localizedDescription)\n".data(using: .utf8)!)
         return 1
     }
 }

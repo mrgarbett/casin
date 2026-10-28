@@ -23,23 +23,23 @@ jobs:
           ctest --test-dir build --output-on-failure
       - name: Render the demo map and a window screenshot
         run: |
-          ./build/src/gtk/openclone --render-map demo-map.png --enzymes all samples/pOC-demo.dna
-          xvfb-run -a env GSK_RENDERER=cairo ./build/src/gtk/openclone \
+          ./build/src/gtk/restricto --render-map demo-map.png --enzymes all samples/pOC-demo.dna
+          xvfb-run -a env GSK_RENDERER=cairo ./build/src/gtk/restricto \
               --screenshot window.png --size 1440x900 --select 170-892 samples/pOC-demo.dna
       - name: Build the RPM
         run: |
           git config --global --add safe.directory "$PWD"
           rpmdev-setuptree
-          git archive --prefix=openclone-0.1.0/ -o ~/rpmbuild/SOURCES/openclone-0.1.0.tar.gz HEAD
-          rpmbuild -ba packaging/fedora/openclone.spec
-          cp ~/rpmbuild/RPMS/*/openclone-*.rpm .
+          git archive --prefix=restricto-0.1.0/ -o ~/rpmbuild/SOURCES/restricto-0.1.0.tar.gz HEAD
+          rpmbuild -ba packaging/fedora/restricto.spec
+          cp ~/rpmbuild/RPMS/*/restricto-*.rpm .
       - uses: actions/upload-artifact@v4
         with:
           name: fedora-build
           path: |
             demo-map.png
             window.png
-            openclone-*.rpm
+            restricto-*.rpm
 
   flatpak:
     name: Flatpak (GNOME runtime)
@@ -56,21 +56,21 @@ jobs:
       - name: Build the Flatpak bundle
         run: |
           flatpak-builder --user --install-deps-from=flathub --force-clean --disable-rofiles-fuse \
-              --repo=build-flatpak/repo build-flatpak/app packaging/flatpak/io.github.openclone.OpenClone.yml
+              --repo=build-flatpak/repo build-flatpak/app packaging/flatpak/io.github.mrgarbett.Restricto.yml
           flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
-              build-flatpak/repo openclone.flatpak io.github.openclone.OpenClone
+              build-flatpak/repo restricto.flatpak io.github.mrgarbett.Restricto
       - name: Smoke test inside the sandbox
         run: |
           sudo apt-get install -y dbus-daemon fuse3
-          flatpak install --user -y --noninteractive ./openclone.flatpak
-          out="$HOME/.var/app/io.github.openclone.OpenClone/demo-map.png"
+          flatpak install --user -y --noninteractive ./restricto.flatpak
+          out="$HOME/.var/app/io.github.mrgarbett.Restricto/demo-map.png"
           mkdir -p "$(dirname "$out")"
           # The document portal needs a session bus.
-          dbus-run-session -- flatpak run --file-forwarding io.github.openclone.OpenClone \
+          dbus-run-session -- flatpak run --file-forwarding io.github.mrgarbett.Restricto \
               --render-map "$out" @@ "$PWD/samples/pOC-demo.dna" @@
           test -s "$out"
           # Without forwarding the host file is invisible; the error must say what to do.
-          if flatpak run io.github.openclone.OpenClone --render-map "$out" "$PWD/samples/pOC-demo.dna" 2>err.txt; then
+          if flatpak run io.github.mrgarbett.Restricto --render-map "$out" "$PWD/samples/pOC-demo.dna" 2>err.txt; then
               echo "expected the unforwarded run to fail"; exit 1
           fi
           cat err.txt
@@ -78,7 +78,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: flatpak-bundle
-          path: openclone.flatpak
+          path: restricto.flatpak
 
   macos:
     # Two SDKs: macos-14 builds without the Liquid Glass code (older Xcode),
@@ -104,23 +104,24 @@ jobs:
       - name: Core tests
         run: |
           brew install ninja
-          cmake -S . -B build -G Ninja -DOPENCLONE_FRONTEND=none
+          cmake -S . -B build -G Ninja -DRESTRICTO_FRONTEND=none
           cmake --build build
           ctest --test-dir build --output-on-failure
-      - name: Build OpenClone.app
+      - name: Build Restricto.app
         run: scripts/build_macos_app.sh
       - name: Check the deployment target is still Ventura
         run: |
-          vtool -show-build build/macos/OpenClone.app/Contents/MacOS/OpenClone | tee vtool.txt
+          vtool -show-build build/macos/Restricto.app/Contents/MacOS/Restricto | tee vtool.txt
           grep -Eq 'minos 13\.0' vtool.txt
+          test -s build/macos/Restricto.app/Contents/Resources/Restricto.icns
           # AppKit picks the macOS 26 design from the SDK version in the binary.
           test "$(awk '$1 == "sdk" { print $2 }' vtool.txt)" = "$(xcrun --show-sdk-version)"
       - name: Headless map render
-        run: build/macos/OpenClone.app/Contents/MacOS/OpenClone --render-map demo-map-macos.png samples/pOC-demo.dna
+        run: build/macos/Restricto.app/Contents/MacOS/Restricto --render-map demo-map-macos.png samples/pOC-demo.dna
       - name: Launch the window (twice, the second from the saved narrow frame)
         timeout-minutes: 4
         run: |
-          APP=build/macos/OpenClone.app/Contents/MacOS/OpenClone
+          APP=build/macos/Restricto.app/Contents/MacOS/Restricto
           "$APP" --ui-smoke ui-first-launch samples/pOC-demo.dna
           "$APP" --ui-smoke ui-second-launch samples/pOC-demo.dna
       - uses: actions/upload-artifact@v4
@@ -131,4 +132,4 @@ jobs:
             demo-map-macos.png
             ui-first-launch
             ui-second-launch
-            build/macos/OpenClone.app
+            build/macos/Restricto.app

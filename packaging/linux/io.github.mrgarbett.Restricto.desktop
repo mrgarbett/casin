@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
-Name=OpenClone
+Name=Restricto
 GenericName=Plasmid Viewer
 Comment=View plasmid maps and DNA sequences (GenBank, FASTA, SnapGene .dna)
-Exec=openclone %F
-Icon=io.github.openclone.OpenClone
+Exec=restricto %F
+Icon=io.github.mrgarbett.Restricto
 Terminal=false
 Categories=Science;Biology;Education;GTK;
 Keywords=plasmid;DNA;sequence;GenBank;FASTA;cloning;restriction;

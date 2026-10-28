@@ -1,4 +1,4 @@
-Name:           openclone
+Name:           restricto
 Version:        0.1.0
 Release:        0.1.alpha%{?dist}
 Summary:        Open-source plasmid map and DNA sequence viewer
@@ -18,7 +18,7 @@ BuildRequires:  desktop-file-utils
 BuildRequires:  libappstream-glib
 
 %description
-OpenClone views plasmids and other DNA sequences. It opens GenBank, FASTA and
+Restricto views plasmids and other DNA sequences. It opens GenBank, FASTA and
 SnapGene .dna files and shows a circular or linear map with features and
 restriction sites next to a double-strand sequence view with translations.
 Restriction enzyme data comes from REBASE.
@@ -27,30 +27,30 @@ Restriction enzyme data comes from REBASE.
 %autosetup -n %{name}-%{version}
 
 %build
-%cmake -G Ninja -DOPENCLONE_FRONTEND=gtk
+%cmake -G Ninja -DRESTRICTO_FRONTEND=gtk
 %cmake_build
 
 %install
 %cmake_install
 
 %check
-desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.openclone.OpenClone.desktop
-appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/io.github.openclone.OpenClone.metainfo.xml
+desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mrgarbett.Restricto.desktop
+appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/io.github.mrgarbett.Restricto.metainfo.xml
 %ctest
 
 %files
 %license README.md
 %doc README.md docs/REBASE.md
-%{_bindir}/openclone
-%{_datadir}/applications/io.github.openclone.OpenClone.desktop
-%{_datadir}/icons/hicolor/scalable/apps/io.github.openclone.OpenClone.svg
-%{_datadir}/mime/packages/io.github.openclone.OpenClone.xml
-%{_metainfodir}/io.github.openclone.OpenClone.metainfo.xml
+%{_bindir}/restricto
+%{_datadir}/applications/io.github.mrgarbett.Restricto.desktop
+%{_datadir}/icons/hicolor/scalable/apps/io.github.mrgarbett.Restricto.svg
+%{_datadir}/mime/packages/io.github.mrgarbett.Restricto.xml
+%{_metainfodir}/io.github.mrgarbett.Restricto.metainfo.xml
 
 %changelog
-* Tue Oct 27 2026 OpenClone contributors - 0.1.0-0.1.alpha
+* Tue Oct 27 2026 Restricto contributors - 0.1.0-0.1.alpha
 - Alpha: editing and saving, cloning simulation, primer design, read alignment
   and Sanger traces, printing, EMBL, enzyme sets, protein properties
 
-* Tue Oct 27 2026 OpenClone contributors - 0.1.0-1
+* Tue Oct 27 2026 Restricto contributors - 0.1.0-1
 - First milestone: viewer for GenBank, FASTA and .dna files

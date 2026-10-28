@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
-import OpenCloneCore
+import RestrictoCore
 import UniformTypeIdentifiers
 
 /// The window for one document: a Features/Enzymes sidebar, then map |
@@ -41,7 +41,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         buildToolbar()
         window.setContentSize(NSSize(width: 1320, height: 820))
         window.minSize = NSSize(width: 900, height: 480)
-        window.setFrameAutosaveName("OpenCloneDocumentWindow")
+        window.setFrameAutosaveName("RestrictoDocumentWindow")
         core.observe { [weak self] _ in self?.updateTexts() }
         updateTexts()
         window.center()
@@ -138,7 +138,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
 
         let splitController = NSSplitViewController()
         Self.discardBrokenSidebarFrames()
-        splitController.splitView.autosaveName = "OpenCloneSidebar"
+        splitController.splitView.autosaveName = "RestrictoSidebar"
         splitController.addSplitViewItem(sidebarItem)
         splitController.addSplitViewItem(detailItem)
         window.contentViewController = splitController
@@ -165,7 +165,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     /// sidebar billions of points wide, which then broke every launch. Forget
     /// saved frames wider than any screen so the split view starts fresh.
     private static func discardBrokenSidebarFrames() {
-        let key = "NSSplitView Subview Frames OpenCloneSidebar"
+        let key = "NSSplitView Subview Frames RestrictoSidebar"
         guard let frames = UserDefaults.standard.stringArray(forKey: key) else { return }
         let broken = frames.contains { frame in
             let parts = frame.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
@@ -213,7 +213,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     }
 
     private func buildToolbar() {
-        let toolbar = NSToolbar(identifier: "OpenCloneToolbar")
+        let toolbar = NSToolbar(identifier: "RestrictoToolbar")
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
         window?.toolbar = toolbar

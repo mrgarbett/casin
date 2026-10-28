@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// OpenClone for Linux: GTK4 + libadwaita frontend.
+// Restricto for Linux: GTK4 + libadwaita frontend.
 //
 // Headless checks:
-//   openclone --render-map out.png <file>      (no display needed; .svg/.pdf work too)
-//   openclone --print-pdf out.pdf <file>       (the printed pages, A4)
-//   openclone --screenshot out.png <file>      (needs a display, e.g. xvfb-run)
-//   openclone --version
+//   restricto --render-map out.png <file>      (no display needed; .svg/.pdf work too)
+//   restricto --print-pdf out.pdf <file>       (the printed pages, A4)
+//   restricto --screenshot out.png <file>      (needs a display, e.g. xvfb-run)
+//   restricto --version
 // Options for both: --size WxH  --enzymes 1|2|3|all  --select A-B (1-based)  --dark
 #include "window.h"
 
@@ -26,7 +26,7 @@ using namespace oc;
 
 namespace {
 
-const char *kAppId = "io.github.openclone.OpenClone";
+const char *kAppId = "io.github.mrgarbett.Restricto";
 
 struct Options {
     std::string renderMap, screenshot, printPdf;
@@ -97,13 +97,13 @@ void applyOptions(Document &doc, const Options &o)
 int renderMap(const Options &o)
 {
     if (o.files.size() != 1) {
-        std::fprintf(stderr, "usage: openclone --render-map out.png <file>\n");
+        std::fprintf(stderr, "usage: restricto --render-map out.png <file>\n");
         return 2;
     }
     Sequence seq;
     std::string err;
     if (!loadSequenceFile(o.files[0], &seq, &err)) {
-        std::fprintf(stderr, "openclone: %s\n", gtk::withSandboxHint(o.files[0], err).c_str());
+        std::fprintf(stderr, "restricto: %s\n", gtk::withSandboxHint(o.files[0], err).c_str());
         return 1;
     }
     Document doc;
@@ -116,7 +116,7 @@ int renderMap(const Options &o)
     st.hasSelection = doc.hasSelection();
     st.selection = doc.selection();
     if (!view::exportScene(layout.render(st), o.renderMap, &err)) {
-        std::fprintf(stderr, "openclone: %s\n", err.c_str());
+        std::fprintf(stderr, "restricto: %s\n", err.c_str());
         return 1;
     }
     std::printf("wrote %s (%d sites shown)\n", o.renderMap.c_str(), int(doc.visibleSites().size()));
@@ -128,7 +128,7 @@ int printPdf(const Options &o)
     Sequence seq;
     std::string err;
     if (o.files.size() != 1 || !loadSequenceFile(o.files[0], &seq, &err)) {
-        std::fprintf(stderr, "openclone: %s\n", err.empty() ? "usage: openclone --print-pdf out.pdf <file>" : err.c_str());
+        std::fprintf(stderr, "restricto: %s\n", err.empty() ? "usage: restricto --print-pdf out.pdf <file>" : err.c_str());
         return o.files.size() != 1 ? 2 : 1;
     }
     Document doc;
@@ -137,7 +137,7 @@ int printPdf(const Options &o)
     view::PangoTextMeasurer tm;
     const std::vector<view::Scene> pages = view::printPages(doc.sequence(), doc.visibleSites(), doc.reads(), tm, {});
     if (!view::exportPdfPages(pages, o.printPdf, 595, 842, 36, &err)) {
-        std::fprintf(stderr, "openclone: %s\n", err.c_str());
+        std::fprintf(stderr, "restricto: %s\n", err.c_str());
         return 1;
     }
     std::printf("wrote %s (%d pages)\n", o.printPdf.c_str(), int(pages.size()));
@@ -171,9 +171,9 @@ void actQuit(GSimpleAction *, GVariant *, gpointer app)
 void actAbout(GSimpleAction *, GVariant *, gpointer app)
 {
     AdwDialog *about = adw_about_dialog_new();
-    adw_about_dialog_set_application_name(ADW_ABOUT_DIALOG(about), "OpenClone");
+    adw_about_dialog_set_application_name(ADW_ABOUT_DIALOG(about), "Restricto");
     adw_about_dialog_set_application_icon(ADW_ABOUT_DIALOG(about), kAppId);
-    adw_about_dialog_set_version(ADW_ABOUT_DIALOG(about), OPENCLONE_VERSION);
+    adw_about_dialog_set_version(ADW_ABOUT_DIALOG(about), RESTRICTO_VERSION);
     adw_about_dialog_set_comments(ADW_ABOUT_DIALOG(about),
                                   "An open-source plasmid viewer. Opens GenBank, FASTA and SnapGene .dna files.");
     adw_about_dialog_set_license_type(ADW_ABOUT_DIALOG(about), GTK_LICENSE_GPL_3_0);
@@ -235,7 +235,7 @@ void screenshotDone(bool ok, gpointer app)
     if (ok)
         std::printf("wrote %s\n", g_options.screenshot.c_str());
     else
-        std::fprintf(stderr, "openclone: screenshot failed\n");
+        std::fprintf(stderr, "restricto: screenshot failed\n");
     g_exitCode = ok ? 0 : 1;
     g_application_quit(G_APPLICATION(app));
 }
@@ -274,7 +274,7 @@ void onOpen(GApplication *app, GFile **files, int n, const char *, gpointer)
         if (paths.empty() || !w->load(paths[0], &err)) {
             if (!paths.empty())
                 err = gtk::withSandboxHint(paths[0], err);
-            std::fprintf(stderr, "openclone: %s\n", err.c_str());
+            std::fprintf(stderr, "restricto: %s\n", err.c_str());
             g_exitCode = 1;
             g_application_quit(app);
             return;
@@ -291,12 +291,12 @@ int main(int argc, char **argv)
 {
     for (int i = 1; i < argc; ++i)
         if (std::string(argv[i]) == "--version") {
-            std::printf("openclone %s\n", OPENCLONE_VERSION);
+            std::printf("restricto %s\n", RESTRICTO_VERSION);
             return 0;
         }
     std::string error;
     if (!parseOptions(argc, argv, &g_options, &error)) {
-        std::fprintf(stderr, "openclone: %s\n", error.c_str());
+        std::fprintf(stderr, "restricto: %s\n", error.c_str());
         return 2;
     }
     if (!g_options.renderMap.empty())

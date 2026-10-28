@@ -1,6 +1,6 @@
 # Restriction enzyme data
 
-OpenClone's enzyme table (`src/core/enzymes.cpp`) comes from **REBASE**, the
+Restricto's enzyme table (`src/core/enzymes.cpp`) comes from **REBASE**, the
 Restriction Enzyme Database:
 
 > Roberts, R.J., Vincze, T., Posfai, J., Macelis, D. REBASE in 2023: a database for

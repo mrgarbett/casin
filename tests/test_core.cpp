@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Headless tests for openclone_core. Usage: core_tests <samples-dir>
+// Headless tests for restricto_core. Usage: core_tests <samples-dir>
 #include "core/abif.h"
 #include "core/align.h"
 #include "core/embl.h"

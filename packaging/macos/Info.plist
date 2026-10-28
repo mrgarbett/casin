@@ -2,11 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>OpenClone</string>
-    <key>CFBundleDisplayName</key><string>OpenClone</string>
-    <key>CFBundleIdentifier</key><string>io.github.openclone.OpenClone</string>
-    <key>CFBundleExecutable</key><string>OpenClone</string>
-    <key>CFBundleIconFile</key><string>OpenClone</string>
+    <key>CFBundleName</key><string>Restricto</string>
+    <key>CFBundleDisplayName</key><string>Restricto</string>
+    <key>CFBundleIdentifier</key><string>io.github.mrgarbett.Restricto</string>
+    <key>CFBundleExecutable</key><string>Restricto</string>
+    <key>CFBundleIconFile</key><string>Restricto</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleVersion</key><string>1</string>
@@ -14,14 +14,14 @@
     <key>LSApplicationCategoryType</key><string>public.app-category.education</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
-    <key>NSHumanReadableCopyright</key><string>OpenClone contributors. GPL-3.0-or-later.</string>
+    <key>NSHumanReadableCopyright</key><string>Restricto contributors. GPL-3.0-or-later.</string>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
             <key>CFBundleTypeName</key><string>GenBank Sequence</string>
             <key>CFBundleTypeRole</key><string>Editor</string>
             <key>LSHandlerRank</key><string>Alternate</string>
-            <key>LSItemContentTypes</key><array><string>io.github.openclone.genbank</string><string>biosequence.genbank</string>
+            <key>LSItemContentTypes</key><array><string>io.github.mrgarbett.restricto.genbank</string><string>biosequence.genbank</string>
                 <string>biosequence.genbank.extended</string><string>edu.utah.biology.jorgensen.ape</string></array>
             <key>NSDocumentClass</key><string>SequenceDocument</string>
         </dict>
@@ -29,14 +29,14 @@
             <key>CFBundleTypeName</key><string>SnapGene DNA File</string>
             <key>CFBundleTypeRole</key><string>Editor</string>
             <key>LSHandlerRank</key><string>Alternate</string>
-            <key>LSItemContentTypes</key><array><string>io.github.openclone.snapgene-dna</string><string>com.gslbiotech.dna</string></array>
+            <key>LSItemContentTypes</key><array><string>io.github.mrgarbett.restricto.snapgene-dna</string><string>com.gslbiotech.dna</string></array>
             <key>NSDocumentClass</key><string>SequenceDocument</string>
         </dict>
         <dict>
             <key>CFBundleTypeName</key><string>FASTA Sequence</string>
             <key>CFBundleTypeRole</key><string>Editor</string>
             <key>LSHandlerRank</key><string>Alternate</string>
-            <key>LSItemContentTypes</key><array><string>io.github.openclone.fasta</string><string>biosequence.fasta</string>
+            <key>LSItemContentTypes</key><array><string>io.github.mrgarbett.restricto.fasta</string><string>biosequence.fasta</string>
                 <string>biosequence.fasta.multi</string></array>
             <key>NSDocumentClass</key><string>SequenceDocument</string>
         </dict>
@@ -44,14 +44,14 @@
             <key>CFBundleTypeName</key><string>EMBL Sequence</string>
             <key>CFBundleTypeRole</key><string>Editor</string>
             <key>LSHandlerRank</key><string>Alternate</string>
-            <key>LSItemContentTypes</key><array><string>io.github.openclone.embl</string><string>biosequence.embl</string></array>
+            <key>LSItemContentTypes</key><array><string>io.github.mrgarbett.restricto.embl</string><string>biosequence.embl</string></array>
             <key>NSDocumentClass</key><string>SequenceDocument</string>
         </dict>
     </array>
     <key>UTImportedTypeDeclarations</key>
     <array>
         <dict>
-            <key>UTTypeIdentifier</key><string>io.github.openclone.genbank</string>
+            <key>UTTypeIdentifier</key><string>io.github.mrgarbett.restricto.genbank</string>
             <key>UTTypeDescription</key><string>GenBank Sequence</string>
             <key>UTTypeConformsTo</key><array><string>public.plain-text</string></array>
             <key>UTTypeTagSpecification</key>
@@ -59,14 +59,14 @@
                 <array><string>gb</string><string>gbk</string><string>genbank</string><string>gbff</string><string>ape</string></array></dict>
         </dict>
         <dict>
-            <key>UTTypeIdentifier</key><string>io.github.openclone.snapgene-dna</string>
+            <key>UTTypeIdentifier</key><string>io.github.mrgarbett.restricto.snapgene-dna</string>
             <key>UTTypeDescription</key><string>SnapGene DNA File</string>
             <key>UTTypeConformsTo</key><array><string>public.data</string></array>
             <key>UTTypeTagSpecification</key>
             <dict><key>public.filename-extension</key><array><string>dna</string></array></dict>
         </dict>
         <dict>
-            <key>UTTypeIdentifier</key><string>io.github.openclone.fasta</string>
+            <key>UTTypeIdentifier</key><string>io.github.mrgarbett.restricto.fasta</string>
             <key>UTTypeDescription</key><string>FASTA Sequence</string>
             <key>UTTypeConformsTo</key><array><string>public.plain-text</string></array>
             <key>UTTypeTagSpecification</key>
@@ -74,7 +74,7 @@
                 <array><string>fasta</string><string>fa</string><string>fna</string><string>fas</string><string>seq</string></array></dict>
         </dict>
         <dict>
-            <key>UTTypeIdentifier</key><string>io.github.openclone.embl</string>
+            <key>UTTypeIdentifier</key><string>io.github.mrgarbett.restricto.embl</string>
             <key>UTTypeDescription</key><string>EMBL Sequence</string>
             <key>UTTypeConformsTo</key><array><string>public.plain-text</string></array>
             <key>UTTypeTagSpecification</key>

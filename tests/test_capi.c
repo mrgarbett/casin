@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
  * Exercises the C API from C, the way the Swift app uses it.
  * Usage: capi_tests <samples-dir> */
-#include "openclone.h"
+#include "restricto.h"
 
 #include <stdio.h>
 #include <string.h>
