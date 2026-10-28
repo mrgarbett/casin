@@ -75,13 +75,13 @@ enum UISmokeTest {
                 controller?.toggleMapStacked(nil)
                 controller?.toggleInspectorPanel(nil)
             }),
-            ("9e-find-open", { controller?.performFindPanelAction(nil) }),
-            ("9e-find-closed", { controller?.performFindPanelAction(nil) }),
+            ("9e-find-open", { controller?.toggleFindBar(nil) }),
+            ("9e-find-closed", { controller?.toggleFindBar(nil) }),
             ("9e-find-opens-hidden-panel", {
                 controller?.toggleInspectorPanel(nil)
-                controller?.performFindPanelAction(nil)
+                controller?.toggleFindBar(nil)
             }),
-            ("9e-find-closed-again", { controller?.performFindPanelAction(nil) }),
+            ("9e-find-closed-again", { controller?.toggleFindBar(nil) }),
             ("9g-selection-split-status", {
                 (controller?.document as? SequenceDocument)?.core.select(start: 99, length: 30)
             }),
