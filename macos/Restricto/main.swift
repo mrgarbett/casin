@@ -35,14 +35,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // AppKit asks this only when nothing was opened: a plain launch or a Dock
     // click with no windows, not a Finder double-click, whose document is
-    // still loading when didFinishLaunching runs. Show the Open panel then.
+    // still loading when didFinishLaunching runs. AppKit then opens an empty,
+    // untitled main window (the folder sidebar lists files to open), which
+    // the first file opened replaces while it is still untouched.
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
         launchFiles.isEmpty || launched
-    }
-
-    func applicationOpenUntitledFile(_ sender: NSApplication) -> Bool {
-        NSDocumentController.shared.openDocument(nil)
-        return true
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -145,6 +142,21 @@ final class DocumentController: NSDocumentController {
             if let ut = UTType(ours), ut.tags[.filenameExtension]?.contains(ext) == true { return ours }
         }
         return type
+    }
+
+    /// A file opened from anywhere (sidebar, Finder, Open, a drop) replaces the
+    /// empty window the app starts with, while that window is still untouched.
+    /// AppKit's own transient-document swap doesn't happen once windows are tabbed.
+    override func openDocument(withContentsOf url: URL, display displayDocument: Bool,
+                               completionHandler: @escaping (NSDocument?, Bool, Error?) -> Void) {
+        let empty = documents.filter {
+            guard let seq = $0 as? SequenceDocument else { return false }
+            return seq.fileURL == nil && !seq.isDocumentEdited && seq.core.isEmpty
+        }
+        super.openDocument(withContentsOf: url, display: displayDocument) { document, wasOpen, error in
+            if document != nil { empty.forEach { $0.close() } }
+            completionHandler(document, wasOpen, error)
+        }
     }
 }
 

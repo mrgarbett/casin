@@ -4,11 +4,13 @@
 import AppKit
 import RestrictoCore
 
-func drawScene(_ scene: OpaquePointer, in ctx: CGContext) {
+/// `trailing` widens the background fill that far right of the scene, for a
+/// view that keeps an inset free on its right.
+func drawScene(_ scene: OpaquePointer, in ctx: CGContext, trailing: CGFloat = 0) {
     let background = oc_scene_background(scene)
     if background.a > 0 {
         ctx.setFillColor(background.cgColor)
-        ctx.fill(CGRect(x: 0, y: 0, width: oc_scene_width(scene), height: oc_scene_height(scene)))
+        ctx.fill(CGRect(x: 0, y: 0, width: oc_scene_width(scene) + trailing, height: oc_scene_height(scene)))
     }
     ctx.setLineJoin(.round)
     let count = Int(oc_scene_item_count(scene))

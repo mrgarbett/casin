@@ -245,6 +245,12 @@ int main(int argc, char **argv)
     const int pi = oc_document_add_primer_sequence(doc, "by-seq", pb, NULL);
     OCPrimerInfo pinf;
     CHECK(pi == before && oc_document_primer(doc, pi, &pinf) && pinf.start == 500 && pinf.length == 22);
+    /* A tail typed in lowercase keeps its case. */
+    char tailed[64];
+    snprintf(tailed, sizeof tailed, "gaattc%s", pb);
+    const int ti = oc_document_add_primer_sequence(doc, "tailed", tailed, NULL);
+    CHECK(ti >= 0 && oc_document_primer(doc, ti, &pinf) && strncmp(pinf.bases, "gaattc", 6) == 0
+          && pinf.length == 22);
     oc_string_free(pb);
     CHECK(oc_document_add_primer_sequence(doc, "short", "ACGT", NULL) == -1);
     char *hits = oc_search_folder(argv[1], "GAATTC");

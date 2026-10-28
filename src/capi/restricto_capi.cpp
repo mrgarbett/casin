@@ -121,6 +121,7 @@ struct OCMapLayout {
 
 struct OCSeqLayout {
     std::unique_ptr<view::SequenceLayout> layout;
+    int hoverCodon = -1;
 };
 
 struct OCScene {
@@ -396,10 +397,10 @@ void oc_document_remove_primer(OCDocument *doc, int index) { doc->doc.removePrim
 
 int oc_document_add_primer_sequence(OCDocument *doc, const char *name, const char *bases, char **error)
 {
-    std::string b;
-    for (const char *p = bases ? bases : ""; *p; ++p)
-        if (std::isalpha(static_cast<unsigned char>(*p)))
-            b += char(std::toupper(static_cast<unsigned char>(*p)));
+    // A primer typed in mixed case keeps it (lowercase can mark a tail);
+    // the binding search is on uppercase.
+    const std::string typed = cleanPrimerBases(bases ? bases : "");
+    const std::string b = cleanBases(typed);
     const std::vector<PrimerSite> sites = findPrimerSites(doc->doc.sequence(), b);
     if (b.size() < 15 || sites.empty()) {
         failWith(error, b.size() < 15 ? "a primer needs at least 15 bases" : "the primer doesn't bind this sequence");
@@ -407,7 +408,7 @@ int oc_document_add_primer_sequence(OCDocument *doc, const char *name, const cha
     }
     Primer p;
     p.name = name && *name ? name : "primer";
-    p.bases = b;
+    p.bases = typed;
     p.binding = sites.front().binding;
     p.strand = sites.front().strand;
     doc->doc.addPrimers({p}, "Add Primer");
@@ -931,13 +932,17 @@ OCScene *oc_seq_layout_render(const OCSeqLayout *layout, const OCDocument *doc, 
     st.selection = doc->doc.selection();
     st.activeFeature = doc->doc.activeFeature();
     st.activeSite = doc->doc.activeSite();
+    st.hoverCodon = layout->hoverCodon;
     return new OCScene{layout->layout->render(scroll_y, view_height, st)};
 }
+
+void oc_seq_layout_set_hover_codon(OCSeqLayout *l, int codon_start) { l->hoverCodon = codon_start; }
 
 int oc_seq_layout_position_at(const OCSeqLayout *l, double x, double y) { return l->layout->positionAt({x, y}); }
 int oc_seq_layout_feature_at(const OCSeqLayout *l, double x, double y) { return l->layout->featureAt({x, y}); }
 int oc_seq_layout_site_at(const OCSeqLayout *l, double x, double y) { return l->layout->siteAt({x, y}); }
 int oc_seq_layout_primer_at(const OCSeqLayout *l, double x, double y) { return l->layout->primerAt({x, y}); }
+int oc_seq_layout_codon_at(const OCSeqLayout *l, double x, double y) { return l->layout->codonAt({x, y}); }
 double oc_seq_layout_line_top(const OCSeqLayout *l, int position) { return l->layout->lineTopFor(position); }
 double oc_seq_layout_line_height(const OCSeqLayout *l, int position) { return l->layout->lineHeightFor(position); }
 char *oc_seq_layout_tooltip(const OCSeqLayout *l, double x, double y) { return dupString(l->layout->tooltipAt({x, y})); }

@@ -108,7 +108,7 @@ void parsePrimers(const std::string &xmlText, Sequence &seq)
     for (const xml::Element *pe : root->childrenNamed("Primer")) {
         Primer p;
         p.name = pe->attr("name");
-        p.bases = cleanBases(pe->attr("sequence"));
+        p.bases = cleanPrimerBases(pe->attr("sequence"));
         const xml::Element *site = pe->child("BindingSite");
         if (!site)
             continue;

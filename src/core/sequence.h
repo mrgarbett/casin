@@ -101,6 +101,9 @@ char translateCodon(const char *codon);
 double gcFraction(const std::string &bases);         // S counts as GC; N etc. excluded
 // Uppercase, U -> T, drops whitespace, digits and anything that isn't IUPAC.
 std::string cleanBases(const std::string &raw);
+// Like cleanBases, but a primer typed in mixed case keeps it (u -> t): the
+// lowercase marks something, such as a tail. All one case comes out uppercase.
+std::string cleanPrimerBases(const std::string &raw);
 bool isIupacBase(char c);
 
 // label, gene, product, locus_tag, standard_name, note, then the type.

@@ -65,6 +65,8 @@ static void testBasics()
     CHECK_EQ(translateCodon("TAR"), '*');
     CHECK_EQ(translateCodon("ATG"), 'M');
     CHECK_EQ(cleanBases("acg u\n12 N-x"), std::string("ACGTN"));
+    CHECK_EQ(cleanPrimerBases("acg U\n12 N-x"), std::string("acgTN"));
+    CHECK_EQ(cleanPrimerBases("gaattc acgt"), std::string("GAATTCACGT"));
     CHECK(std::fabs(gcFraction("GGCCAATT") - 0.5) < 1e-9);
     CHECK_EQ(defaultFeatureName("CDS", {{"note", "n"}, {"gene", "bla"}}), std::string("bla"));
     CHECK_EQ(defaultFeatureName("CDS", {{"product", "p"}, {"label", "L"}}), std::string("L"));
@@ -800,6 +802,13 @@ static void testPcr()
     CHECK(sameRanges(p.features[0].ranges, {{11, 31}}));
     CHECK_EQ(p.primers.size(), size_t(2));
     CHECK(!pcrProduct(t, r, f, &p, &err));
+    // Tails typed in lowercase stay so on the primers, not in the product.
+    Primer lf = f, lr = r;
+    lf.bases = "gaattcTTTGGGCCC";
+    lr.bases = "ggatccAAAGGGTTTCCC";
+    CHECK(pcrProduct(t, lf, lr, &p, &err));
+    CHECK(startsWith(p.bases, "GAATTCTTTGGG"));
+    CHECK(endsWith(p.bases, "GGATCC"));
 }
 
 static void testPrimerChecks()

@@ -179,12 +179,39 @@ int main(int argc, char **argv)
             }
         CHECK(letters.find("MK*") != std::string::npos);
         CHECK(ends);
+        // Clicking an amino acid finds its codon.
+        int hit = -1;
+        for (double y = 0; y < six.totalHeight() && hit < 0; y += 1)
+            for (double x = 0; x < 300 && hit < 0; x += 2)
+                hit = six.codonAt({x, y});
+        CHECK(hit == 0 || hit == 3 || hit == 6);
+        // Hovering it outlines the codon: one more shape on that line.
+        SeqViewState hovering;
+        hovering.hoverCodon = hit;
+        CHECK(six.render(0, 400, hovering).items.size() == six.render(0, 400, {}).items.size() + 1);
         // Too short for the default minimum: no frame rows at all.
         CHECK(SequenceLayout(orf, none, theme, tm, 900, true, 6).totalHeight() == plain.totalHeight());
         // Grouping in tens widens a line; hiding enzymes drops their label rows.
         SeqOptions grouped;
         grouped.groupTens = true;
         CHECK(SequenceLayout(seq, sites, theme, tm, 900, true, grouped).basesPerLine() <= sl.basesPerLine());
+        // A primer with a 5' tail: its bases are drawn as typed.
+        Sequence withPrimer = seq;
+        withPrimer.primers.push_back({"tailed", "gaattc" + withPrimer.bases.substr(100, 20), {100, 120}, Strand::Forward});
+        std::string drawn;
+        for (const Item &it : SequenceLayout(withPrimer, sites, theme, tm, 900, true).render(0, 2000, {}).items)
+            if (auto *t = std::get_if<TextItem>(&it))
+                if (t->text.size() == 1)
+                    drawn += t->text;
+        CHECK(drawn.find("gaattc") != std::string::npos);
+        // A tail typed in uppercase stays uppercase.
+        withPrimer.primers.back().bases = "GAATTC" + withPrimer.bases.substr(100, 20);
+        drawn.clear();
+        for (const Item &it : SequenceLayout(withPrimer, sites, theme, tm, 900, true).render(0, 2000, {}).items)
+            if (auto *t = std::get_if<TextItem>(&it))
+                if (t->text.size() == 1)
+                    drawn += t->text;
+        CHECK(drawn.find("gaattc") == std::string::npos);
         SeqOptions bare;
         bare.enzymes = bare.features = bare.primers = false;
         CHECK(SequenceLayout(seq, sites, theme, tm, 900, true, bare).totalHeight() < sl.totalHeight());
