@@ -86,8 +86,9 @@ public:
     // For a new sequence that has never been saved.
     void markUnsaved();
 
-    // Replaces the selection (or inserts at the caret) with `text`, cleaned to
-    // IUPAC bases. Returns false when nothing in `text` is DNA.
+    // Replaces the selection (or inserts at the caret) with `text`: A, C, G and
+    // T in either case (lowercase stays lowercase), skipping spaces and digits.
+    // Returns false, changing nothing, for any other letter or no bases at all.
     bool typeBases(const std::string &text);
     // The selection with the features and primers inside it.
     Sequence selectedFragment() const;
@@ -105,6 +106,9 @@ public:
     int addFeature(const Feature &f);
     void replaceFeature(int index, const Feature &f);
     void removeFeature(int index);
+    // Adds features for the common elements found (see findCommonFeatures) as
+    // one undo step. Returns how many were added.
+    int annotateCommonFeatures();
     // Adds a primer that binds the selection on the given strand.
     int addPrimerFromSelection(const std::string &name, Strand strand);
     // Adds primers as one undo step, e.g. a designed pair.

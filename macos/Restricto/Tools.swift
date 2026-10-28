@@ -78,6 +78,11 @@ enum ToolMenus {
                        item("Paste", #selector(SequenceView.paste(_:)), "v"),
                        item("Delete", #selector(SequenceView.delete(_:))),
                        .separator()]
+            // After Copy and Copy Reverse Complement.
+            let copyRC = edit.indexOfItem(withTitle: "Copy Reverse Complement")
+            edit.insertItem(item("Copy Map Image", #selector(W.copyMapImage(_:)), "c", [.command, .option]),
+                            at: copyRC >= 0 ? copyRC + 1 : edit.numberOfItems)
+            edit.addItem(item("Go to Position…", #selector(W.goToPosition(_:)), "l"))
             for (i, it) in top.enumerated() { edit.insertItem(it, at: i) }
         }
         // Lean on purpose: three tool menus, with features and primers as
@@ -91,7 +96,10 @@ enum ToolMenus {
                 .separator(),
                 menu("Features", [
                     item("Add Feature…", #selector(W.addFeature(_:)), "k"),
+                    item("Edit Feature…", #selector(W.editFeature(_:)), "k", [.command, .shift]),
                     item("Delete Feature", #selector(W.deleteFeature(_:))),
+                    .separator(),
+                    item("Annotate Common Features", #selector(W.annotateCommonFeatures(_:))),
                     exp(.separator()),
                     exp(item("Find ORFs…", #selector(W.findOrfs(_:)))),
                     exp(item("Protein Properties…", #selector(W.proteinProperties(_:)))),
@@ -404,6 +412,92 @@ extension DocumentWindowController {
                                             Int32(strands[strand.indexOfSelectedItem]), Int32(d.selectionStart),
                                             Int32(d.selectionLength))
             if i >= 0 { d.activateFeature(Int(i)) }
+        }
+    }
+
+    /// Edits the active feature: name, type, strand, colour, and with bases
+    /// selected, its location.
+    @objc func editFeature(_ sender: Any?) {
+        guard let d = doc, d.activeFeature >= 0 else {
+            tell("Edit Feature", "Click a feature on the map, the sequence or the panel first.")
+            return
+        }
+        editFeature(at: d.activeFeature)
+    }
+
+    func editFeature(at index: Int) {
+        guard let d = doc, let f = d.features.first(where: { $0.index == index }) else { return }
+        let n = d.length
+        var end = f.start + f.length
+        if end > n { end -= n }
+        let form = Form("Edit Feature", "\(f.name) on \(f.start + 1)–\(end).")
+        let name = form.text("Name", f.name)
+        var types = ["misc_feature", "CDS", "gene", "promoter", "terminator", "RBS", "rep_origin", "primer_bind",
+                     "protein_bind", "polyA_signal", "enhancer", "LTR", "sig_peptide", "mobile_element"]
+        if !types.contains(f.type) { types.insert(f.type, at: 0) }
+        let type = form.popup("Type", types, selected: types.firstIndex(of: f.type) ?? 0)
+        let strands = [OC_STRAND_FORWARD, OC_STRAND_REVERSE, OC_STRAND_NONE].map { Int32($0) }
+        let strand = form.popup("Strand", ["Forward", "Reverse", "None"],
+                                selected: strands.firstIndex(of: f.strand) ?? 2)
+        let well = form.color("Colour", f.color)
+        let selection = d.hasSelection && d.selectionLength > 0
+            && (d.selectionStart != f.start || d.selectionLength != f.length)
+        let move = selection ? form.check("Location", "Move to the selection (\(d.selectionStart + 1)–"
+                                          + "\((d.selectionStart + d.selectionLength - 1) % n + 1))") : nil
+        let oldColor = hexColor(f.color)
+        form.run(in: window, ok: "Save") {
+            well.deactivate()
+            NSColorPanel.shared.orderOut(nil)
+            let start = move?.state == .on ? d.selectionStart : f.start
+            let length = move?.state == .on ? d.selectionLength : f.length
+            oc_document_update_feature(d.handle, Int32(index), name.stringValue, types[type.indexOfSelectedItem],
+                                       strands[strand.indexOfSelectedItem], Int32(start), Int32(length))
+            let color = hexColor(well.color)
+            if color != oldColor { oc_document_set_feature_color(d.handle, Int32(index), color) }
+            d.activateFeature(index)
+        }
+    }
+
+    private func hexColor(_ color: NSColor) -> String {
+        let c = color.usingColorSpace(.sRGB) ?? color
+        func byte(_ v: CGFloat) -> Int { Int((min(1, max(0, v)) * 255).rounded()) }
+        return String(format: "#%02x%02x%02x", byte(c.redComponent), byte(c.greenComponent), byte(c.blueComponent))
+    }
+
+    /// Finds common plasmid elements (promoters, origins, resistance genes,
+    /// primer sites) and adds them as features, in one undo step.
+    @objc func annotateCommonFeatures(_ sender: Any?) {
+        guard let d = doc, !d.isEmpty else { return }
+        let before = Set(d.features.map { $0.index })
+        let added = d.annotateCommonFeatures()
+        if added == 0 {
+            tell("Annotate Common Features", "No common elements were found that aren't annotated already.")
+            return
+        }
+        let names = d.features.filter { !before.contains($0.index) }.map { $0.name }
+        tell("Annotate Common Features", "Added \(added) feature\(added == 1 ? "" : "s"): "
+             + names.joined(separator: ", ") + ". Undo (⌘Z) takes them all off again.")
+    }
+
+    /// ⌘L: puts the caret at a base number and shows it.
+    @objc func goToPosition(_ sender: Any?) {
+        guard let d = doc, !d.isEmpty else { return }
+        let form = Form("Go to Position", "A base number from 1 to \(d.length.formatted()).")
+        let field = form.text("Base", d.hasSelection ? "\(d.selectionStart + 1)" : "1", width: 120)
+        form.run(in: window, ok: "Go") { [weak self] in
+            let digits = field.stringValue.filter { $0.isNumber }
+            guard let base = Int(digits), base >= 1, base <= d.length else { NSSound.beep(); return }
+            self?.revealSequence()
+            d.select(start: base - 1, length: 0)
+        }
+    }
+
+    @objc func copyMapImage(_ sender: Any?) {
+        guard let d = doc, !d.isEmpty else { return }
+        do {
+            try copyMapImageToPasteboard(document: d, size: CGSize(width: 900, height: 760))
+        } catch {
+            if let window = window { NSAlert(error: error).beginSheetModal(for: window) }
         }
     }
 

@@ -27,8 +27,9 @@ bool readFasta(const std::string &data, Sequence *out, std::string *error)
         }
         if (!line.empty() && line[0] == ';')
             continue;   // old-style comment
-        seq.bases += cleanBases(line);
+        seq.bases += cleanBasesKeepingCase(line);
     }
+    seq.setBasesFromText(seq.bases);
     if (seq.bases.empty() && !sawHeader) {
         if (error)
             *error = "no sequence found";
@@ -47,8 +48,9 @@ std::string writeFasta(const Sequence &seq)
     if (!seq.description.empty())
         out += " " + seq.description;
     out += "\n";
-    for (size_t i = 0; i < seq.bases.size(); i += 70)
-        out += seq.bases.substr(i, 70) + "\n";
+    const std::string shown = seq.shownBases();
+    for (size_t i = 0; i < shown.size(); i += 70)
+        out += shown.substr(i, 70) + "\n";
     return out;
 }
 

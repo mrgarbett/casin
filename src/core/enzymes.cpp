@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <set>
 
 namespace oc {
 
@@ -251,6 +252,48 @@ std::vector<PatternMatch> findPattern(const Sequence &seq, const std::string &pa
             out.push_back({p, L, Strand::Reverse});
     }
     return out;
+}
+
+int methylationBlock(const Sequence &seq, const CutSite &site)
+{
+    // Enzymes in commonEnzymes() whose cutting Dam or Dcm methylation blocks
+    // or impairs (always, or when the motif overlaps their site).
+    static const std::set<std::string> damSensitive = {"BclI", "BspHI", "ClaI", "NruI", "XbaI"};
+    static const std::set<std::string> dcmSensitive = {"Acc65I", "ApaI", "BsaI", "MscI", "StuI"};
+    if (!site.enzyme)
+        return MethylNone;
+    const bool dam = damSensitive.count(site.enzyme->name) > 0;
+    const bool dcm = dcmSensitive.count(site.enzyme->name) > 0;
+    const int n = seq.length();
+    if ((!dam && !dcm) || n == 0)
+        return MethylNone;
+    const int a = site.matchStart, len = site.enzyme->siteLength();
+    auto at = [&](int p) -> char {
+        if (seq.circular)
+            return seq.bases[size_t(((p % n) + n) % n)];
+        return p >= 0 && p < n ? seq.bases[size_t(p)] : 'N';
+    };
+    auto inSite = [&](int p) { return p >= a && p < a + len; };
+    int block = MethylNone;
+    // Every motif that could put a methylated base inside the site starts at
+    // most 4 bases before it.
+    for (int m = a - 4; m < a + len; ++m) {
+        if (dam && at(m) == 'G' && at(m + 1) == 'A' && at(m + 2) == 'T' && at(m + 3) == 'C'
+            && (inSite(m + 1) || inSite(m + 2)))
+            block |= MethylDam;   // the A on the top strand, and the A opposite the T
+        const char w = at(m + 2);
+        if (dcm && at(m) == 'C' && at(m + 1) == 'C' && (w == 'A' || w == 'T') && at(m + 3) == 'G'
+            && at(m + 4) == 'G' && (inSite(m + 1) || inSite(m + 3)))
+            block |= MethylDcm;   // the inner C, and the inner C opposite the G
+    }
+    return block;
+}
+
+std::string methylationName(int block)
+{
+    if (block == (MethylDam | MethylDcm))
+        return "Dam and Dcm";
+    return block == MethylDam ? "Dam" : block == MethylDcm ? "Dcm" : "";
 }
 
 } // namespace oc

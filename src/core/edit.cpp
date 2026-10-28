@@ -38,6 +38,8 @@ void deleteRange(Sequence &seq, int d0, int d1)
         return;
     auto map = [&](int p) { return p <= d0 ? p : p >= d1 ? p - len : d0; };
     seq.bases.erase(size_t(d0), size_t(len));
+    if (!seq.lower.empty())
+        seq.lower.erase(seq.lower.begin() + d0, seq.lower.begin() + d1);
     for (Feature &f : seq.features) {
         std::vector<Range> kept;
         for (const Range &r : f.ranges) {
@@ -73,6 +75,9 @@ Sequence extractFragment(const Sequence &seq, Span span)
     span.length = std::min(span.length, n);
     span.start = seq.circular ? ((span.start % n) + n) % n : std::clamp(span.start, 0, n);
     frag.bases = seq.slice(span);
+    if (!seq.lower.empty())
+        for (int i = 0; i < int(frag.bases.size()); ++i)
+            frag.lower.push_back(seq.lower[size_t((span.start + i) % n)]);
     // The span as up to two pieces of the sequence, with their offsets in the fragment.
     struct Piece {
         Range r;
@@ -116,7 +121,7 @@ Sequence extractFragment(const Sequence &seq, Span span)
 
 int insertFragment(Sequence &seq, Span span, const Sequence &fragment)
 {
-    const int pos = replaceBases(seq, span, fragment.bases);
+    const int pos = replaceBases(seq, span, fragment.shownBases());
     for (Feature f : fragment.features) {
         for (Range &r : f.ranges)
             r = {r.start + pos, r.end + pos};
@@ -188,7 +193,20 @@ void insertBases(Sequence &seq, int pos, const std::string &bases)
     pos = std::clamp(pos, 0, n);
     if (k == 0)
         return;
-    seq.bases.insert(size_t(pos), bases);
+    // Lowercase letters are stored uppercase and marked.
+    std::string upper = bases;
+    std::vector<bool> marks(size_t(k), false);
+    bool anyLower = false;
+    for (int i = 0; i < k; ++i)
+        if (upper[size_t(i)] >= 'a' && upper[size_t(i)] <= 'z') {
+            upper[size_t(i)] = char(upper[size_t(i)] - 32);
+            marks[size_t(i)] = anyLower = true;
+        }
+    seq.bases.insert(size_t(pos), upper);
+    if (anyLower && seq.lower.empty())
+        seq.lower.assign(size_t(n), false);
+    if (!seq.lower.empty())
+        seq.lower.insert(seq.lower.begin() + pos, marks.begin(), marks.end());
     for (Feature &f : seq.features) {
         const bool wraps = seq.circular && crossesOrigin(f, n);
         for (Range &r : f.ranges) {
@@ -248,6 +266,7 @@ void reverseComplementSequence(Sequence &seq)
 {
     const int n = seq.length();
     seq.bases = reverseComplement(seq.bases);
+    std::reverse(seq.lower.begin(), seq.lower.end());
     auto flip = [](Strand s) {
         return s == Strand::Forward ? Strand::Reverse : s == Strand::Reverse ? Strand::Forward : s;
     };
@@ -272,6 +291,8 @@ void rotateOrigin(Sequence &seq, int origin)
     if (origin == 0)
         return;
     seq.bases = seq.bases.substr(size_t(origin)) + seq.bases.substr(0, size_t(origin));
+    if (!seq.lower.empty())
+        std::rotate(seq.lower.begin(), seq.lower.begin() + origin, seq.lower.end());
     for (Feature &f : seq.features) {
         std::vector<Range> out;
         for (const Range &r : f.ranges) {

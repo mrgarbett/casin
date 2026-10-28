@@ -6,7 +6,9 @@ set -eu
 cd "$(dirname "$0")/.."
 
 swift build -c release --product Restricto
-BIN="$(swift build -c release --show-bin-path)/Restricto"
+swift build -c release --product RestrictoQuickLook
+BIN_DIR="$(swift build -c release --show-bin-path)"
+BIN="$BIN_DIR/Restricto"
 
 APP=build/macos/Restricto.app
 rm -rf "$APP"
@@ -23,6 +25,16 @@ if [ -n "$SDK_VERSION" ] && command -v vtool >/dev/null 2>&1; then
 fi
 cp packaging/macos/Info.plist "$APP/Contents/Info.plist"
 
+# The Quick Look preview (Space on a sequence file in Finder), stamped like the app.
+APPEX="$APP/Contents/PlugIns/RestrictoQuickLook.appex"
+mkdir -p "$APPEX/Contents/MacOS"
+cp packaging/macos/QuickLook-Info.plist "$APPEX/Contents/Info.plist"
+cp "$BIN_DIR/RestrictoQuickLook" "$APPEX/Contents/MacOS/RestrictoQuickLook"
+if [ -n "$SDK_VERSION" ] && command -v vtool >/dev/null 2>&1; then
+    vtool -set-build-version macos 13.0 "$SDK_VERSION" -replace \
+        -output "$APPEX/Contents/MacOS/RestrictoQuickLook" "$BIN_DIR/RestrictoQuickLook" 2>/dev/null || true
+fi
+
 # App icon from the 1024 px artwork (already inset to the macOS icon grid);
 # sips scales it and iconutil builds the .icns.
 ICONSET=build/macos/Restricto.iconset
@@ -34,7 +46,9 @@ for s in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Restricto.icns"
 
-# Ad-hoc signature so Gatekeeper lets a local build run.
+# Ad-hoc signatures so Gatekeeper lets a local build run; the extension first,
+# sandboxed, as app extensions must be.
+codesign --force --sign - --entitlements packaging/macos/QuickLook.entitlements "$APPEX" >/dev/null 2>&1 || true
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true
 # Make Launch Services pick up the document types.
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" 2>/dev/null || true

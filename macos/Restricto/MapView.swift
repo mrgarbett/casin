@@ -13,6 +13,14 @@ final class MapView: NSView {
     private var anchor = 0
     private var lastAngle = 0.0
     private var accumulated = 0.0
+    /// Told the base under the mouse on the backbone, and -1 when it leaves.
+    var onHoverBase: ((Int) -> Void)?
+    /// Called with a feature's index when it is double-clicked.
+    var onEditFeature: ((Int) -> Void)?
+    /// While the size keeps changing (a side panel sliding open), the old
+    /// layout is drawn, centred, and the new one waits until the size settles.
+    private var lastSizeChange = Date.distantPast
+    private var pendingRelayout: DispatchWorkItem?
 
     init(document: CoreDocument) {
         self.document = document
@@ -61,6 +69,18 @@ final class MapView: NSView {
 
     private func ensureLayout() -> OpaquePointer? {
         let dark = isDarkAppearance
+        if let current = layout, layoutDark == dark, layoutSize != mapSize {
+            let now = Date()
+            let changing = now.timeIntervalSince(lastSizeChange) < 0.25
+            lastSizeChange = now
+            if changing {
+                pendingRelayout?.cancel()
+                let work = DispatchWorkItem { [weak self] in self?.invalidateLayout() }
+                pendingRelayout = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
+                return current
+            }
+        }
         if layout == nil || layoutSize != mapSize || layoutDark != dark {
             if let old = layout { oc_map_layout_free(old) }
             layout = newMapLayout(document, size: mapSize, dark: dark)
@@ -74,6 +94,16 @@ final class MapView: NSView {
         guard let ctx = NSGraphicsContext.current?.cgContext, let layout = ensureLayout(),
               let scene = oc_map_layout_render(layout, document.handle) else { return }
         defer { oc_scene_free(scene) }
+        if layoutSize != mapSize {
+            // An old layout while the size settles: fill the view, centre the map.
+            let background = oc_scene_background(scene)
+            if background.a > 0 {
+                ctx.setFillColor(background.cgColor)
+                ctx.fill(bounds)
+            }
+            ctx.translateBy(x: ((mapSize.width - layoutSize.width) / 2).rounded(),
+                            y: ((mapSize.height - layoutSize.height) / 2).rounded())
+        }
         drawScene(scene, in: ctx, trailing: trailingInset)
     }
 
@@ -88,6 +118,7 @@ final class MapView: NSView {
         switch kind {
         case Int32(OC_HIT_FEATURE):
             document.activateFeature(Int(index))
+            if event.clickCount == 2 { onEditFeature?(Int(index)) }
         case Int32(OC_HIT_SITE):
             document.activateSite(Int(index))
         case Int32(OC_HIT_SEQUENCE):
@@ -135,7 +166,8 @@ final class MapView: NSView {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+        addTrackingArea(NSTrackingArea(rect: bounds,
+                                       options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
                                        owner: self, userInfo: nil))
     }
 
@@ -144,5 +176,13 @@ final class MapView: NSView {
         let p = mapPoint(event)
         let tip = takeString(oc_map_layout_tooltip(layout, p.x, p.y))
         toolTip = tip.isEmpty ? nil : tip
+        // On the backbone: the base there, for the status.
+        var kind: Int32 = 0, index: Int32 = 0, position: Int32 = 0
+        oc_map_layout_hit(layout, p.x, p.y, &kind, &index, &position)
+        if kind == Int32(OC_HIT_SEQUENCE) { onHoverBase?(Int(position) % max(1, document.length)) }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onHoverBase?(-1)
     }
 }

@@ -11,14 +11,16 @@ import UniformTypeIdentifiers
 ///
 /// Ventura through Sequoia get the classic layout: a vibrant sidebar and a flat
 /// status line under the content. macOS 26 adds Liquid Glass (see Glass.swift):
-/// the sidebar floats as glass with the map and sequence running underneath it,
-/// and the status line becomes a glass capsule floating over the sequence.
+/// the status line becomes glass capsules floating over the middle, which split
+/// in two while there is a position or selection to show.
 final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSMenuItemValidation {
     private let core: CoreDocument
     private let mapView: MapView
     private let sequenceView: SequenceView
-    /// The sequence view's scroll view; it moves between the middle and the panel.
+    /// The sequence view's scroll view, inside the pane that moves between the
+    /// middle and the panel with the find bar over its bottom.
     private let sequenceScroll = NSScrollView()
+    private let sequencePane = NSView()
     private let browser = FolderBrowserController()
     private let inspector: InspectorController
     private var inspectorItem: NSSplitViewItem?
@@ -31,8 +33,21 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     /// enzymes and features on the map.
     private var viewToggles: [NSButton] = []
     private let searchField = NSSearchField()
-    /// The find bar (⌘F), hidden until asked for.
+    /// The find bar (⌘F) at the bottom of the sequence, hidden until asked for,
+    /// and its bottom edge, raised over the floating status where that covers
+    /// the sequence.
     private var findBar: NSView?
+    private var findBarBottom: NSLayoutConstraint?
+    private var findBarCentre: NSLayoutConstraint?
+    /// The status's second capsule (macOS 26): the caret or selection, and the
+    /// base under the mouse. Hidden while there is nothing to show.
+    private var infoCapsule: NSView?
+    /// The base under the mouse in the sequence or on the map, or -1.
+    private var hoverBase = -1
+    /// A message (from Find) shown in the status until the selection changes.
+    private var statusMessage: String?
+    /// The document name, edited dot and subtitle, centred in the toolbar.
+    private let titleView = DocumentTitleView()
     /// Keeps the glass status inside the sequence pane. A constant, updated on
     /// resize, so a longer status can't push the map/sequence divider.
     private var pillMaxWidth: NSLayoutConstraint?
@@ -54,10 +69,6 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private var mapStacked = UserDefaults.standard.bool(forKey: DocumentWindowController.mapStackedKey)
     private var mapHidden = UserDefaults.standard.bool(forKey: DocumentWindowController.mapHiddenKey)
     private var didFirstShow = false
-    /// The view that mirrors content under the side panels (macOS 26), and the
-    /// safe-area insets (left, right) its content was last placed for.
-    private var backgroundExtension: NSView?
-    private var placedInsets: (CGFloat, CGFloat) = (-1, -1)
 
     init(document: SequenceDocument) {
         core = document.core
@@ -78,7 +89,8 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         // whatever the system-wide "Prefer tabs" setting says.
         window.tabbingMode = .preferred
         window.tabbingIdentifier = "RestrictoDocument"
-        core.observe { [weak self] _ in
+        core.observe { [weak self] what in
+            if what & Change.selection != 0 { self?.statusMessage = nil }
             self?.updateTexts()
             self?.refreshToggles()
         }
@@ -105,15 +117,32 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             DispatchQueue.main.async { self?.updatePillMaxWidth() }
         }
 
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        sequencePane.addSubview(scroll)
+        NSLayoutConstraint.activate([
+            scroll.leadingAnchor.constraint(equalTo: sequencePane.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: sequencePane.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: sequencePane.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: sequencePane.bottomAnchor),
+        ])
+        let pane = sequencePane
         split.isVertical = true
         split.addArrangedSubview(mapView)
-        split.addArrangedSubview(scroll)
+        split.addArrangedSubview(pane)
         split.setHoldingPriority(.defaultLow, forSubviewAt: 0)
         split.setHoldingPriority(.defaultLow - 1, forSubviewAt: 1)
         minWidths = [mapView.widthAnchor.constraint(greaterThanOrEqualToConstant: 260),
-                     scroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 320)]
+                     pane.widthAnchor.constraint(greaterThanOrEqualToConstant: 320)]
         minHeights = [mapView.heightAnchor.constraint(greaterThanOrEqualToConstant: 180),
-                      scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 180)]
+                      pane.heightAnchor.constraint(greaterThanOrEqualToConstant: 180)]
+        // The base under the mouse goes in the status.
+        let hover: (Int) -> Void = { [weak self] base in
+            guard let self = self, base != self.hoverBase else { return }
+            self.hoverBase = base
+            self.updateStatus()
+        }
+        sequenceView.onHoverBase = hover
+        mapView.onHoverBase = hover
 
         status.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         status.textColor = .secondaryLabelColor
@@ -125,22 +154,20 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         detail.view = root
         detailRoot = root
         if let pill = floatingStatus() {
-            // macOS 26: content fills the pane (mirrored under the sidebar and
-            // toolbar); the status floats over the bottom of the sequence.
-            let content = Glass.extendingBackground(of: split)
-            if content !== split { backgroundExtension = content }
+            // macOS 26: content fills the pane below the toolbar; the status
+            // floats over the bottom of the sequence (or of the map).
+            let content = split
             for v in [content, pill] {
                 v.translatesAutoresizingMaskIntoConstraints = false
                 root.addSubview(v)
             }
             floatsStatus = true
             scroll.automaticallyAdjustsContentInsets = false
-            // Centred in the visible middle (the safe area leaves out the
-            // sidebar the content runs under), so it sits centred below the map.
+            // Centred in the middle, so it sits centred below the map.
             NSLayoutConstraint.activate([
                 content.leadingAnchor.constraint(equalTo: root.leadingAnchor),
                 content.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-                content.topAnchor.constraint(equalTo: root.topAnchor),
+                content.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
                 content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             ])
             // Shifted as the map is, which leaves room for the panel's pill on
@@ -202,7 +229,12 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             panelPill.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor, constant: -8),
         ])
         mapView.trailingInset = Self.panelPillRoom
-        buildFindBar(in: root)
+        buildFindBar(in: sequencePane)
+        // Double-clicking a feature (map, sequence or panel list) edits it.
+        let edit: (Int) -> Void = { [weak self] index in self?.editFeature(at: index) }
+        inspector.onEditFeature = edit
+        sequenceView.onEditFeature = edit
+        mapView.onEditFeature = edit
         inspector.onPick = { [weak self] _, wasShowing in
             guard let item = self?.inspectorItem else { return }
             // A hidden panel opens on the pane picked; picking the pane already
@@ -215,11 +247,12 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             (self?.document as? NSDocument)?.fileURL?.deletingLastPathComponent()
         }
         let sidebarItem = NSSplitViewItem(sidebarWithViewController: browser)
-        sidebarItem.minimumThickness = 200
-        sidebarItem.maximumThickness = 380
+        // Wide enough for the window buttons, the sidebar button and the
+        // undo/redo/save/export pill above it.
+        sidebarItem.minimumThickness = 270
+        sidebarItem.maximumThickness = 400
         sidebarItem.canCollapse = true
         let detailItem = NSSplitViewItem(viewController: detail)
-        Glass.extendUnderSidebar(detailItem)
         self.detailItem = detailItem
         let inspectorItem = NSSplitViewItem(inspectorWithViewController: inspector)
         inspectorItem.minimumThickness = 280
@@ -240,23 +273,6 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         NotificationCenter.default.addObserver(forName: NSSplitView.didResizeSubviewsNotification,
                                                object: splitController.splitView, queue: .main) { [weak self] _ in
             DispatchQueue.main.async { self?.refreshToolbarToggles() }
-        }
-
-        // The background extension places its content inside the safe area only
-        // when it lays out, which a sidebar collapsing or opening doesn't cause.
-        // Ask for that layout afterwards (not from inside this layout pass), and
-        // only when the inset really changed.
-        if backgroundExtension != nil {
-            NotificationCenter.default.addObserver(forName: NSSplitView.didResizeSubviewsNotification,
-                                                   object: splitController.splitView, queue: .main) { [weak self] _ in
-                DispatchQueue.main.async {
-                    guard let self = self, let view = self.backgroundExtension else { return }
-                    let insets = (view.safeAreaInsets.left, view.safeAreaInsets.right)
-                    guard insets != self.placedInsets else { return }
-                    self.placedInsets = insets
-                    view.needsLayout = true
-                }
-            }
         }
     }
 
@@ -307,16 +323,16 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         split.isVertical = !mapStacked
         mapView.isHidden = mapHidden
         if sequenceInPanel {
-            if sequenceScroll.superview === split {
-                split.removeArrangedSubview(sequenceScroll)
-                sequenceScroll.removeFromSuperview()
+            if sequencePane.superview === split {
+                split.removeArrangedSubview(sequencePane)
+                sequencePane.removeFromSuperview()
             }
-            inspector.hostSequence(sequenceScroll)
+            inspector.hostSequence(sequencePane)
             NSLayoutConstraint.activate([minWidths[0]])
         } else {
             inspector.hostSequence(nil)
-            if sequenceScroll.superview !== split {
-                split.addArrangedSubview(sequenceScroll)
+            if sequencePane.superview !== split {
+                split.addArrangedSubview(sequencePane)
                 split.setHoldingPriority(.defaultLow - 1, forSubviewAt: 1)
             }
             let mins = mapStacked ? minHeights : minWidths
@@ -325,9 +341,8 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         // The floating status sits under the map when the map is stacked over
         // the sequence, else at the bottom, where the sequence scrolls clear of it.
         let statusUnderMap = mapStacked && !mapHidden
-        sequenceScroll.contentInsets = NSEdgeInsets(top: 0, left: 0,
-                                                    bottom: floatsStatus && !sequenceInPanel && !statusUnderMap ? 52 : 0,
-                                                    right: 0)
+        let statusOverSequence = floatsStatus && !sequenceInPanel && !statusUnderMap
+        sequenceScroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: statusOverSequence ? 52 : 0, right: 0)
         if let pill = statusPill, let root = detailRoot {
             pillBottom?.isActive = false
             pillBottom = statusUnderMap
@@ -335,8 +350,12 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
                 : pill.bottomAnchor.constraint(equalTo: root.safeAreaLayoutGuide.bottomAnchor, constant: -12)
             pillBottom?.isActive = true
         }
+        // The find bar sits at the bottom of the sequence, above the status
+        // where the status floats over it.
+        findBarBottom?.constant = statusOverSequence ? -52 : -12
         // In the middle without the map, the sequence leaves room for the pill.
         sequenceView.trailingInset = !sequenceInPanel && mapHidden ? Self.panelPillRoom : 0
+        findBarCentre?.constant = -sequenceView.trailingInset / 2
         // A panel holding the sequence may grow as wide as the user likes, but
         // not over the middle: the split view (not the constraints inside the
         // middle) has to keep room for the map, or for the sequence when the
@@ -372,8 +391,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         inspector.select(pane)
     }
 
-    /// The widest the status pill may be: the visible middle (the root's safe
-    /// area leaves out the sidebar it runs under) less the panel pill's room
+    /// The widest the status pill may be: the middle less the panel pill's room
     /// and a margin. Called after layout, never from inside it, and the
     /// constant changes only when the width really did.
     private func updatePillMaxWidth() {
@@ -382,29 +400,46 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         if abs(limit.constant - width) >= 1 { limit.constant = width }
     }
 
-    /// The status line inside a glass capsule, or nil before macOS 26.
+    /// The status as glass capsules, or nil before macOS 26: the view toggles
+    /// in one, and beside it, while there is something to show, a second with
+    /// the caret or selection (positions, length, GC, Tm) and the base under
+    /// the mouse. The two sit in a glass container, so the second splits off
+    /// the first when it appears and merges back into it when it goes.
     private func floatingStatus() -> NSView? {
         guard Glass.isAvailable else { return nil }
-        let inner = NSView()
+        let togglesInner = NSView()
         let toggles = makeToggles()
-        for v in [toggles, status] {
-            v.translatesAutoresizingMaskIntoConstraints = false
-            inner.addSubview(v)
-        }
+        toggles.translatesAutoresizingMaskIntoConstraints = false
+        togglesInner.addSubview(toggles)
         NSLayoutConstraint.activate([
-            toggles.leadingAnchor.constraint(equalTo: inner.leadingAnchor, constant: 8),
-            toggles.centerYAnchor.constraint(equalTo: inner.centerYAnchor),
-            status.leadingAnchor.constraint(equalTo: toggles.trailingAnchor, constant: 10),
-            status.trailingAnchor.constraint(equalTo: inner.trailingAnchor, constant: -14),
-            status.centerYAnchor.constraint(equalTo: inner.centerYAnchor),
+            toggles.leadingAnchor.constraint(equalTo: togglesInner.leadingAnchor, constant: 12),
+            toggles.trailingAnchor.constraint(equalTo: togglesInner.trailingAnchor, constant: -12),
+            toggles.centerYAnchor.constraint(equalTo: togglesInner.centerYAnchor),
         ])
-        guard let pill = Glass.capsule(around: inner, height: 30) else { return nil }
+        let infoInner = NSView()
+        status.translatesAutoresizingMaskIntoConstraints = false
+        infoInner.addSubview(status)
+        NSLayoutConstraint.activate([
+            status.leadingAnchor.constraint(equalTo: infoInner.leadingAnchor, constant: 14),
+            status.trailingAnchor.constraint(equalTo: infoInner.trailingAnchor, constant: -14),
+            status.centerYAnchor.constraint(equalTo: infoInner.centerYAnchor),
+        ])
+        guard let togglesCapsule = Glass.capsule(around: togglesInner, height: 30),
+              let info = Glass.capsule(around: infoInner, height: 30) else { return nil }
+        info.isHidden = true
+        infoCapsule = info
+        let row = NSStackView(views: [togglesCapsule, info])
+        row.orientation = .horizontal
+        // Two pills apart; while the second slides out of the first, the glass
+        // stretches between them until they are further apart than `spacing`.
+        row.spacing = 10
+        togglesCapsule.setContentCompressionResistancePriority(.required, for: .horizontal)
         // The capsule hugs the text, so the text must hold it open; the pill's
         // max-width constraint still truncates it in a narrow window.
         status.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         // Secondary grey washes out over the sequence text behind the glass.
         status.textColor = .labelColor
-        return pill
+        return Glass.mergingContainer(around: row, spacing: 8) ?? row
     }
 
     /// Small icon toggles for the status pill (or the status row before macOS 26).
@@ -454,6 +489,9 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         let toolbar = NSToolbar(identifier: "RestrictoToolbar")
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
+        // The title is drawn by the centred title item, with its dot.
+        toolbar.centeredItemIdentifiers = [titleItem]
+        window?.titleVisibility = .hidden
         window?.toolbar = toolbar
         window?.toolbarStyle = .unified
         searchField.placeholderString = "Find bases (both strands)"
@@ -463,7 +501,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     }
 
     /// NSDocument calls this when its unsaved-changes state flips: a small red
-    /// dot beside the window title, and just left of the file name in the tab
+    /// dot beside the centred title, and just left of the file name in the tab
     /// (shown with two or more documents). A tab's accessory view sits at its
     /// far edge, away from the centred name, so that dot goes in the tab title.
     override func setDocumentEdited(_ dirtyFlag: Bool) {
@@ -476,23 +514,8 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         updateTabTitle()
     }
 
-    /// The title's dot: shown only while the document has unsaved changes.
-    private func updateUnsavedDot() {
-        guard let item = unsavedToolbarItem else { return }
-        let edited = (document as? NSDocument)?.isDocumentEdited ?? false
-        // A hidden item takes no room (macOS 15 SDK and later); otherwise the
-        // dot only fades.
-        #if compiler(>=6.0)
-        if #available(macOS 15, *) {
-            item.isHidden = !edited
-            return
-        }
-        #endif
-        item.view?.alphaValue = edited ? 1 : 0
-    }
-
     private func updateTabTitle() {
-        updateUnsavedDot()
+        updateTitle()
         guard let tab = window?.tab else { return }
         guard let doc = document as? NSDocument, doc.isDocumentEdited else {
             tab.attributedTitle = nil
@@ -506,101 +529,72 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         tab.attributedTitle = title
     }
 
-    private func updateTexts() {
-        status.stringValue = core.selectionText
-        // The title stays the document's file name (NSDocument's, with the
-        // proxy icon); the sequence name can differ, so it goes in the subtitle.
-        if core.isEmpty {
-            window?.subtitle = "Open a file from the sidebar, or drop one here"
-            return
-        }
-        var parts = ["\(core.length.formatted()) bp", core.isCircular ? "circular" : "linear"]
-        let fileName = (document as? NSDocument)?.fileURL?.deletingPathExtension().lastPathComponent
-        if !core.name.isEmpty && core.name != fileName { parts.insert(core.name, at: 0) }
-        window?.subtitle = parts.joined(separator: " · ")
-    }
-
     // MARK: Toolbar
 
-    private let undoItem = NSToolbarItem.Identifier("undo")
-    private let redoItem = NSToolbarItem.Identifier("redo")
-    private let saveItem = NSToolbarItem.Identifier("save")
+    /// Undo, redo, save and export, as one pill beside the sidebar button.
+    private let actionsItem = NSToolbarItem.Identifier("actions")
+    private let titleItem = NSToolbarItem.Identifier("title")
     private let complementItem = NSToolbarItem.Identifier("complement")
-    private let exportItem = NSToolbarItem.Identifier("exportMap")
     private let mapItem = NSToolbarItem.Identifier("map")
     private let layoutItem = NSToolbarItem.Identifier("mapLayout")
     private let inspectorToolbarItem = NSToolbarItem.Identifier("inspector")
-    /// A red dot just right of the window title while there are unsaved changes.
-    private let unsavedItem = NSToolbarItem.Identifier("unsaved")
-    private var unsavedToolbarItem: NSToolbarItem?
 
     /// Toggles in the toolbar, with their symbols: each turns accent blue while on.
     private var toolbarToggles: [NSToolbarItem.Identifier: (item: NSToolbarItem, symbol: String)] = [:]
     private var toolbarToggleShown: [NSToolbarItem.Identifier: Bool] = [:]
 
-    // Undo, redo, save and export sit beside the title; Find opens at the
-    // bottom of the middle (⌘F).
+    /// The Export menu: the map as an image, the sequence as GenBank or FASTA.
+    private lazy var exportMenu: NSMenu = {
+        let menu = NSMenu()
+        for (title, action) in [("Map Image (PNG or PDF)…", #selector(exportMap(_:))),
+                                ("GenBank…", #selector(saveAsGenBank(_:))),
+                                ("FASTA…", #selector(exportFasta(_:)))] {
+            let entry = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            entry.target = self
+            menu.addItem(entry)
+        }
+        return menu
+    }()
+
+    // The actions pill sits with the sidebar button (in the sidebar's part of
+    // the toolbar while it is open), the title in the centre, the view toggles
+    // at the right. Find opens on the sequence (⌘F).
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, unsavedItem, undoItem, redoItem, saveItem, exportItem,
-         .flexibleSpace, mapItem, layoutItem, inspectorToolbarItem]
+        [.toggleSidebar, actionsItem, .sidebarTrackingSeparator, .flexibleSpace, titleItem, .flexibleSpace,
+         mapItem, layoutItem, inspectorToolbarItem]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, unsavedItem, undoItem, redoItem, saveItem, exportItem,
-         .flexibleSpace, .space, mapItem, layoutItem, complementItem, inspectorToolbarItem]
+        [.toggleSidebar, actionsItem, .sidebarTrackingSeparator, titleItem, .flexibleSpace, .space,
+         mapItem, layoutItem, complementItem, inspectorToolbarItem]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         switch id {
-        case unsavedItem:
-            // The title sits at the start of the toolbar's middle section, so
-            // the first item there is just right of it.
+        case titleItem:
             let item = NSToolbarItem(itemIdentifier: id)
-            let holder = NSView(frame: NSRect(x: 0, y: 0, width: 12, height: 12))
-            let dot = UnsavedDot(diameter: 8)
-            holder.addSubview(dot)
-            NSLayoutConstraint.activate([
-                dot.centerXAnchor.constraint(equalTo: holder.centerXAnchor),
-                dot.centerYAnchor.constraint(equalTo: holder.centerYAnchor),
-                holder.widthAnchor.constraint(equalToConstant: 12),
-                holder.heightAnchor.constraint(equalToConstant: 12),
-            ])
-            item.view = holder
+            item.view = titleView
+            item.label = "Title"
             item.isBordered = false
-            item.label = "Unsaved"
-            item.toolTip = "Unsaved changes"
-            unsavedToolbarItem = item
-            updateUnsavedDot()
+            updateTitle()
             return item
-        case undoItem:
-            return button(id, label: "Undo", help: "Undo the last edit (⌘Z)", symbol: "arrow.uturn.backward",
-                          action: #selector(undoEdit(_:)))
-        case redoItem:
-            return button(id, label: "Redo", help: "Redo (⇧⌘Z)", symbol: "arrow.uturn.forward",
-                          action: #selector(redoEdit(_:)))
-        case saveItem:
-            let item = button(id, label: "Save", help: "Save (⌘S)", symbol: "square.and.arrow.down",
-                              action: #selector(NSDocument.save(_:)))
-            item.target = nil   // the document, through the responder chain
-            return item
-        case exportItem:
-            let item = NSMenuToolbarItem(itemIdentifier: id)
-            item.label = "Export"
-            item.paletteLabel = "Export"
-            item.toolTip = "Export the map, or the sequence as GenBank or FASTA"
-            item.image = NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: "Export")
-            item.showsIndicator = false
-            let menu = NSMenu()
-            for (title, action) in [("Map Image (PNG or PDF)…", #selector(exportMap(_:))),
-                                    ("GenBank…", #selector(saveAsGenBank(_:))),
-                                    ("FASTA…", #selector(exportFasta(_:)))] {
-                let entry = NSMenuItem(title: title, action: action, keyEquivalent: "")
-                entry.target = self
-                menu.addItem(entry)
+        case actionsItem:
+            let entries = [("Undo", "arrow.uturn.backward", "Undo the last edit (⌘Z)"),
+                           ("Redo", "arrow.uturn.forward", "Redo (⇧⌘Z)"),
+                           ("Save", "square.and.arrow.down", "Save (⌘S)"),
+                           ("Export", "square.and.arrow.up", "Export the map, or the sequence as GenBank or FASTA")]
+            let images = entries.map {
+                NSImage(systemSymbolName: $0.1, accessibilityDescription: $0.0) ?? NSImage(size: NSSize(width: 16, height: 16))
             }
-            item.menu = menu
-            return item
+            let group = NSToolbarItemGroup(itemIdentifier: id, images: images, selectionMode: .momentary,
+                                           labels: entries.map { $0.0 }, target: self,
+                                           action: #selector(actionsClicked(_:)))
+            group.controlRepresentation = .expanded
+            group.label = "Actions"
+            group.paletteLabel = "Undo, Redo, Save, Export"
+            for (sub, entry) in zip(group.subitems, entries) { sub.toolTip = entry.2 }
+            return group
         case inspectorToolbarItem:
             return toggle(id, label: "Panel", help: "Show or hide the right panel",
                           symbol: "sidebar.right", action: #selector(toggleInspectorPanel(_:)))
@@ -615,6 +609,16 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
                           symbol: "arrow.left.arrow.right", action: #selector(toggleComplementStrand(_:)))
         default:
             return nil
+        }
+    }
+
+    @objc private func actionsClicked(_ sender: NSToolbarItemGroup) {
+        switch sender.selectedIndex {
+        case 0: undoEdit(sender)
+        case 1: redoEdit(sender)
+        case 2: (document as? NSDocument)?.save(sender)
+        case 3: exportMenu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+        default: break
         }
     }
 
@@ -667,14 +671,16 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         let result = core.findNext(query)
         if result.match < 0 {
             NSSound.beep()
-            status.stringValue = "Find takes DNA bases (IUPAC codes such as N and R work too)"
+            statusMessage = "Find takes DNA bases (IUPAC codes such as N and R work too)"
         } else if result.match == 0 {
             NSSound.beep()
-            status.stringValue = "No match for \(query.uppercased()) on either strand"
+            statusMessage = "No match for \(query.uppercased()) on either strand"
         }
+        updateStatus()
     }
 
-    /// ⌘F: opens the find bar at the bottom of the middle and puts the cursor
+    /// ⌘F: shows the sequence (opening the panel on it when the map is beside
+    /// it), opens the find bar at the sequence's bottom and puts the cursor
     /// in it; again (or Esc) closes it.
     @objc func performFindPanelAction(_ sender: Any?) {
         guard let bar = findBar else { return }
@@ -682,9 +688,18 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         if !bar.isHidden && editing {
             closeFindBar()
         } else {
+            revealSequence()
             bar.isHidden = false
             window?.makeFirstResponder(searchField)
         }
+    }
+
+    /// Makes the sequence visible: with the map beside it, opens the right
+    /// panel on its Sequence pane.
+    func revealSequence() {
+        guard sequenceInPanel else { return }
+        if let item = inspectorItem, item.isCollapsed { item.animator().isCollapsed = false }
+        inspector.select(.sequence)
     }
 
     private func closeFindBar() {
@@ -692,11 +707,13 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         window?.makeFirstResponder(sequenceView)
     }
 
-    /// The find field in a capsule, centred at the bottom of the middle above
-    /// the status; hidden until ⌘F.
-    private func buildFindBar(in root: NSView) {
+    /// The find field in a capsule, centred at the bottom of the sequence
+    /// (above the status where that floats over it); hidden until ⌘F.
+    private func buildFindBar(in pane: NSView) {
         searchField.translatesAutoresizingMaskIntoConstraints = false
-        searchField.widthAnchor.constraint(equalToConstant: 260).isActive = true
+        let width = searchField.widthAnchor.constraint(equalToConstant: 260)
+        width.priority = .defaultHigh
+        width.isActive = true
         searchField.delegate = self
         let inner = NSView()
         inner.addSubview(searchField)
@@ -728,15 +745,15 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         }
         bar.translatesAutoresizingMaskIntoConstraints = false
         bar.isHidden = true
-        root.addSubview(bar)
-        // Above the floating status (macOS 26), or above the status row.
-        let bottom = statusPill.map { bar.bottomAnchor.constraint(equalTo: $0.topAnchor, constant: -8) }
-            ?? bar.bottomAnchor.constraint(equalTo: root.safeAreaLayoutGuide.bottomAnchor, constant: -36)
-        NSLayoutConstraint.activate([
-            bar.centerXAnchor.constraint(equalTo: root.safeAreaLayoutGuide.centerXAnchor,
-                                         constant: -Self.panelPillRoom / 2),
-            bottom,
-        ])
+        pane.addSubview(bar)
+        // applyMapLayout sets both constants for the layout.
+        let bottom = bar.bottomAnchor.constraint(equalTo: pane.bottomAnchor, constant: -12)
+        let centre = bar.centerXAnchor.constraint(equalTo: pane.centerXAnchor)
+        // Never wider than the sequence; the field gives way first.
+        let leading = bar.leadingAnchor.constraint(greaterThanOrEqualTo: pane.leadingAnchor, constant: 8)
+        NSLayoutConstraint.activate([bottom, centre, leading])
+        findBarBottom = bottom
+        findBarCentre = centre
         findBar = bar
     }
 
@@ -903,5 +920,66 @@ final class DropView: NSView {
             }
         }
         return !urls.isEmpty
+    }
+}
+
+/// The window's title, centred in the toolbar: the file name with a red dot
+/// while there are unsaved changes, and a smaller line under it.
+final class DocumentTitleView: NSView {
+    private let dot = UnsavedDot(diameter: 7)
+    private let name = NSTextField(labelWithString: "")
+    private let subtitle = NSTextField(labelWithString: "")
+
+    init() {
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 30))
+        name.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        name.lineBreakMode = .byTruncatingMiddle
+        name.alignment = .center
+        subtitle.font = .systemFont(ofSize: NSFont.smallSystemFontSize - 1)
+        subtitle.textColor = .secondaryLabelColor
+        subtitle.lineBreakMode = .byTruncatingTail
+        subtitle.alignment = .center
+        for label in [name, subtitle] {
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
+        let top = NSStackView(views: [name, dot])
+        top.spacing = 5
+        top.alignment = .centerY
+        let stack = NSStackView(views: [top, subtitle])
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = 0
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            widthAnchor.constraint(lessThanOrEqualToConstant: 420),
+            widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
+            heightAnchor.constraint(equalToConstant: 30),
+        ])
+        dot.isHidden = true
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    func update(name: String, subtitle: String, edited: Bool) {
+        self.name.stringValue = name
+        self.subtitle.stringValue = subtitle
+        self.subtitle.isHidden = subtitle.isEmpty
+        dot.isHidden = !edited
+        toolTip = edited ? "\(name) (unsaved changes)" : name
+        setAccessibilityLabel(toolTip)
+        invalidateIntrinsicContentSize()
+    }
+
+    /// As wide as the name or subtitle needs, within the constraints above.
+    override var intrinsicContentSize: NSSize {
+        let width = max(name.intrinsicContentSize.width + 14, subtitle.intrinsicContentSize.width) + 8
+        return NSSize(width: min(420, max(160, width)), height: 30)
     }
 }

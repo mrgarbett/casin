@@ -16,32 +16,38 @@ enum Glass {
         return false
     }
 
-    /// Lets the detail pane run underneath the floating glass sidebar. Its
-    /// safe area then excludes the sidebar, so controls still lay out beside it.
-    static func extendUnderSidebar(_ item: NSSplitViewItem) {
+    /// Holds glass capsules that sit side by side so they blend into one
+    /// shape as they come within `spacing` of each other (the status pill
+    /// splitting into two when bases are selected). Nil before macOS 26.
+    static func mergingContainer(around content: NSView, spacing: CGFloat) -> NSView? {
         #if compiler(>=6.2)
         if #available(macOS 26, *) {
-            item.automaticallyAdjustsSafeAreaInsets = true
+            let container = NSGlassEffectContainerView()
+            container.contentView = content
+            container.spacing = spacing
+            container.translatesAutoresizingMaskIntoConstraints = false
+            content.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                content.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                content.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                content.topAnchor.constraint(equalTo: container.topAnchor),
+                content.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            ])
+            return container
         }
         #endif
+        return nil
     }
 
-    /// Wraps `content` so that it stays inside the safe area while its edges are
-    /// mirrored and blurred under the sidebar and toolbar. Returns `content`
-    /// itself before macOS 26.
-    static func extendingBackground(of content: NSView) -> NSView {
-        #if compiler(>=6.2)
-        if #available(macOS 26, *) {
-            let view = NSBackgroundExtensionView()
-            view.contentView = content
-            // Leave placement automatic. Pinning the content to the safe area
-            // with constraints feeds the sidebar width back into itself when
-            // the sidebar opens, and the window frame runs away. Callers re-place
-            // the content when the sidebar changes (see DocumentWindowController).
-            return view
-        }
-        #endif
-        return content
+    /// The backdrop of a side panel (the folder sidebar, the right panel): the
+    /// desktop behind the window shows through, blurred, on every version, so
+    /// the panels read as translucent rather than echoing the middle.
+    static func sidePanelBackground(frame: NSRect) -> NSView {
+        let view = NSVisualEffectView(frame: frame)
+        view.material = .sidebar
+        view.blendingMode = .behindWindow
+        view.state = .followsWindowActiveState
+        return view
     }
 
     /// A glass capsule around `content`, for a control that floats over the

@@ -26,6 +26,14 @@ final class SequenceView: NSView {
     var showComplement = true {
         didSet { invalidateLayout() }
     }
+    /// Told the base under the mouse as it moves, and -1 when it leaves.
+    var onHoverBase: ((Int) -> Void)?
+    /// Called with a feature's index when it is double-clicked.
+    var onEditFeature: ((Int) -> Void)?
+    /// While the width keeps changing (a side panel sliding open), the old
+    /// layout is drawn and the new one waits until the width settles.
+    private var lastWidthChange = Date.distantPast
+    private var pendingRelayout: DispatchWorkItem?
 
     init(document: CoreDocument) {
         self.document = document
@@ -79,6 +87,15 @@ final class SequenceView: NSView {
     private func ensureLayout() -> OpaquePointer? {
         let width = Double(max(1, availableWidth - trailingInset))
         let dark = isDarkAppearance
+        if let current = layout, layoutDark == dark, layoutWidth != width {
+            let now = Date()
+            let changing = now.timeIntervalSince(lastWidthChange) < 0.25
+            lastWidthChange = now
+            if changing {
+                relayoutWhenSettled()
+                return current
+            }
+        }
         if layout == nil || layoutWidth != width || layoutDark != dark {
             if let old = layout { oc_seq_layout_free(old) }
             // The bottom-pill toggles and map options apply here as on the map.
@@ -95,6 +112,13 @@ final class SequenceView: NSView {
             if let layout = layout { oc_seq_layout_set_hover_codon(layout, Int32(hoverCodon)) }
         }
         return layout
+    }
+
+    private func relayoutWhenSettled() {
+        pendingRelayout?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.invalidateLayout() }
+        pendingRelayout = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
     /// Matches the scroll view's width and the content height.
@@ -209,7 +233,11 @@ final class SequenceView: NSView {
         let site = Int(oc_seq_layout_site_at(layout, p.x, p.y))
         if site >= 0 { document.activateSite(site); return }
         let feature = Int(oc_seq_layout_feature_at(layout, p.x, p.y))
-        if feature >= 0 { document.activateFeature(feature); return }
+        if feature >= 0 {
+            document.activateFeature(feature)
+            if event.clickCount == 2 { onEditFeature?(feature) }
+            return
+        }
         window?.makeFirstResponder(self)
         dragging = true
         anchor = Int(oc_seq_layout_position_at(layout, p.x, p.y))
@@ -266,11 +294,16 @@ final class SequenceView: NSView {
         let p = layoutPoint(event)
         // An amino acid under the mouse outlines its codon.
         hoverCodon = Int(oc_seq_layout_codon_at(layout, p.x, p.y))
+        // The base under the mouse, for the status; between lines it keeps
+        // the last one rather than flickering.
+        let base = Int(oc_seq_layout_base_at(layout, p.x, p.y))
+        if base >= 0 { onHoverBase?(base) }
         let tip = takeString(oc_seq_layout_tooltip(layout, p.x, p.y))
         toolTip = tip.isEmpty ? nil : tip
     }
 
     override func mouseExited(with event: NSEvent) {
         hoverCodon = -1
+        onHoverBase?(-1)
     }
 }
