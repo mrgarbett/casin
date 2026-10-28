@@ -364,7 +364,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             return item
         case inspectorToolbarItem:
             return button(id, label: "Inspector", help: "Show or hide Enzymes, Features and Primers",
-                          symbol: "sidebar.right", action: #selector(toggleInspector(_:)))
+                          symbol: "sidebar.right", action: #selector(toggleInspectorPanel(_:)))
         case mapItem:
             return button(id, label: "Map", help: "Show or hide the map",
                           symbol: "circle.circle", action: #selector(toggleMapHidden(_:)))
@@ -434,9 +434,10 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         refreshToggles()
     }
 
-    /// Shows or hides the right-hand panel. (NSSplitViewController has its own
-    /// toggleInspector from macOS 14; this one also serves Ventura.)
-    @objc func toggleInspector(_ sender: Any?) {
+    /// Shows or hides the right-hand panel. Not named toggleInspector: from
+    /// macOS 14 NSSplitViewController has one, which comes first in the
+    /// responder chain and never retitles the menu item.
+    @objc func toggleInspectorPanel(_ sender: Any?) {
         guard let item = inspectorItem else { return }
         item.animator().isCollapsed = !item.isCollapsed
     }
@@ -507,6 +508,12 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             return true
         case #selector(toggleMapStacked(_:)):
             item.state = mapStacked ? .on : .off
+            return true
+        case #selector(toggleInspectorPanel(_:)):
+            item.title = inspectorItem?.isCollapsed == true ? "Show Inspector" : "Hide Inspector"
+            return true
+        case #selector(setFrames(_:)):
+            item.state = core.frames == item.tag ? .on : .off
             return true
         default:
             return true
