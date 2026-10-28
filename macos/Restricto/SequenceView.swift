@@ -50,9 +50,15 @@ final class SequenceView: NSView {
         invalidateLayout()
     }
 
-    /// Room kept free along the right edge (the panel's pill floats there).
-    var trailingInset: CGFloat = 0 {
-        didSet { if trailingInset != oldValue { invalidateLayout() } }
+    /// Room kept free along the left edge (the panel's pill floats there).
+    var leadingInset: CGFloat = 0 {
+        didSet { if leadingInset != oldValue { invalidateLayout() } }
+    }
+
+    /// An event's point in the layout's coordinates (right of the inset).
+    private func layoutPoint(_ event: NSEvent) -> NSPoint {
+        let p = convert(event.locationInWindow, from: nil)
+        return NSPoint(x: p.x - leadingInset, y: p.y)
     }
 
     private var availableWidth: CGFloat {
@@ -61,7 +67,7 @@ final class SequenceView: NSView {
 
     @discardableResult
     private func ensureLayout() -> OpaquePointer? {
-        let width = Double(max(1, availableWidth - trailingInset))
+        let width = Double(max(1, availableWidth - leadingInset))
         let dark = isDarkAppearance
         if layout == nil || layoutWidth != width || layoutDark != dark {
             if let old = layout { oc_seq_layout_free(old) }
@@ -103,8 +109,8 @@ final class SequenceView: NSView {
               let scene = oc_seq_layout_render(layout, document.handle, dirtyRect.minY, dirtyRect.height) else { return }
         defer { oc_scene_free(scene) }
         ctx.saveGState()
-        ctx.translateBy(x: 0, y: dirtyRect.minY)   // scenes are relative to the scroll offset
-        drawScene(scene, in: ctx)
+        ctx.translateBy(x: leadingInset, y: dirtyRect.minY)   // scenes are relative to the scroll offset
+        drawScene(scene, in: ctx, leading: leadingInset)
         ctx.restoreGState()
     }
 
@@ -169,11 +175,21 @@ final class SequenceView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         guard let layout = ensureLayout(), !document.isEmpty else { return }
-        let p = convert(event.locationInWindow, from: nil)
+        let p = layoutPoint(event)
         if event.modifierFlags.contains(.shift) {
             if !document.hasSelection { anchor = 0 }
             dragging = true
             extendSelection(to: p)
+            SelectionBadge.shared.show(for: document, event: event, in: self)
+            return
+        }
+        // An amino acid in a translation row selects its codon.
+        let codon = Int(oc_seq_layout_codon_at(layout, p.x, p.y))
+        if codon >= 0 {
+            window?.makeFirstResponder(self)
+            document.select(start: codon, length: 3)
+            SelectionBadge.shared.show(for: document, event: event, in: self)
+            SelectionBadge.shared.hideSoon()
             return
         }
         let site = Int(oc_seq_layout_site_at(layout, p.x, p.y))
@@ -189,10 +205,12 @@ final class SequenceView: NSView {
     override func mouseDragged(with event: NSEvent) {
         guard dragging else { return }
         autoscroll(with: event)
-        extendSelection(to: convert(event.locationInWindow, from: nil))
+        extendSelection(to: layoutPoint(event))
+        SelectionBadge.shared.show(for: document, event: event, in: self)
     }
 
     override func mouseUp(with event: NSEvent) {
+        if dragging { SelectionBadge.shared.hideSoon() }
         dragging = false
     }
 
@@ -214,7 +232,7 @@ final class SequenceView: NSView {
 
     override func mouseMoved(with event: NSEvent) {
         guard let layout = layout else { return }
-        let p = convert(event.locationInWindow, from: nil)
+        let p = layoutPoint(event)
         let tip = takeString(oc_seq_layout_tooltip(layout, p.x, p.y))
         toolTip = tip.isEmpty ? nil : tip
     }

@@ -30,14 +30,20 @@ final class MapView: NSView {
         if let layout = layout { oc_map_layout_free(layout) }
     }
 
-    /// Room kept free along the right edge (the panel's pill floats there).
-    var trailingInset: CGFloat = 0 {
-        didSet { if trailingInset != oldValue { invalidateLayout() } }
+    /// Room kept free along the left edge (the panel's pill floats there).
+    var leadingInset: CGFloat = 0 {
+        didSet { if leadingInset != oldValue { invalidateLayout() } }
     }
 
-    /// The size the map is laid out in: the view less the trailing inset.
+    /// The size the map is laid out in: the view less the leading inset.
     private var mapSize: CGSize {
-        CGSize(width: max(1, bounds.width - trailingInset), height: bounds.height)
+        CGSize(width: max(1, bounds.width - leadingInset), height: bounds.height)
+    }
+
+    /// An event's point in the map's own coordinates (right of the inset).
+    private func mapPoint(_ event: NSEvent) -> NSPoint {
+        let p = convert(event.locationInWindow, from: nil)
+        return NSPoint(x: p.x - leadingInset, y: p.y)
     }
 
     override var isFlipped: Bool { true }
@@ -69,14 +75,17 @@ final class MapView: NSView {
         guard let ctx = NSGraphicsContext.current?.cgContext, let layout = ensureLayout(),
               let scene = oc_map_layout_render(layout, document.handle) else { return }
         defer { oc_scene_free(scene) }
-        drawScene(scene, in: ctx)
+        ctx.saveGState()
+        ctx.translateBy(x: leadingInset, y: 0)
+        drawScene(scene, in: ctx, leading: leadingInset)
+        ctx.restoreGState()
     }
 
     // MARK: Mouse
 
     override func mouseDown(with event: NSEvent) {
         guard let layout = ensureLayout(), !document.isEmpty else { return }
-        let p = convert(event.locationInWindow, from: nil)
+        let p = mapPoint(event)
         var kind: Int32 = 0, index: Int32 = 0, position: Int32 = 0
         oc_map_layout_hit(layout, p.x, p.y, &kind, &index, &position)
         selecting = false
@@ -98,7 +107,8 @@ final class MapView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         guard selecting, let layout = layout else { return }
-        let p = convert(event.locationInWindow, from: nil)
+        let p = mapPoint(event)
+        defer { SelectionBadge.shared.show(for: document, event: event, in: self) }
         let n = document.length
         if oc_map_layout_is_circular(layout) {
             // Accumulate the swept angle so a drag can pass the origin.
@@ -120,6 +130,7 @@ final class MapView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if selecting { SelectionBadge.shared.hideSoon() }
         selecting = false
     }
 
@@ -134,7 +145,7 @@ final class MapView: NSView {
 
     override func mouseMoved(with event: NSEvent) {
         guard let layout = layout else { return }
-        let p = convert(event.locationInWindow, from: nil)
+        let p = mapPoint(event)
         let tip = takeString(oc_map_layout_tooltip(layout, p.x, p.y))
         toolTip = tip.isEmpty ? nil : tip
     }

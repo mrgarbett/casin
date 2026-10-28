@@ -4,8 +4,7 @@ import RestrictoCore
 
 /// The window's right-hand panel: the sequence (when the map sits beside it),
 /// Enzymes, Features or Primers, picked from a vertical pill. The window floats
-/// the pill over the middle, beside the panel, so it stays when the panel is
-/// hidden. Vibrant on Ventura, glass on macOS 26.
+/// the pill at the left of the middle, where it stays when the panel is hidden. Vibrant on Ventura, glass on macOS 26.
 final class InspectorController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     enum Pane: String, CaseIterable {
         case sequence, enzymes, features, primers

@@ -302,10 +302,12 @@ final class FolderBrowserController: NSViewController, NSOutlineViewDataSource, 
         label.lineBreakMode = .byTruncatingMiddle
         label.toolTip = url?.path ?? name
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        var views: [NSView] = [icon, label]
-        if edited { views.append(UnsavedDot()) }
+        var views: [NSView] = [icon]
+        if edited { views.append(UnsavedDot()) }   // just left of the name
+        views.append(label)
         let stack = NSStackView(views: views)
         stack.spacing = 6
+        if edited, let dot = views.first(where: { $0 is UnsavedDot }) { stack.setCustomSpacing(4, after: dot) }
         return stack
     }
 
@@ -326,7 +328,7 @@ final class FolderBrowserController: NSViewController, NSOutlineViewDataSource, 
 
 /// The small red dot that marks unsaved changes beside a file name.
 final class UnsavedDot: NSView {
-    init(diameter: CGFloat = 8) {
+    init(diameter: CGFloat = 6) {
         super.init(frame: NSRect(x: 0, y: 0, width: diameter, height: diameter))
         wantsLayer = true
         layer?.backgroundColor = NSColor.systemRed.cgColor

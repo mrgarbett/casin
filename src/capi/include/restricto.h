@@ -213,6 +213,8 @@ int oc_seq_layout_position_at(const OCSeqLayout *layout, double x, double y);
 int oc_seq_layout_feature_at(const OCSeqLayout *layout, double x, double y);
 int oc_seq_layout_site_at(const OCSeqLayout *layout, double x, double y);
 int oc_seq_layout_primer_at(const OCSeqLayout *layout, double x, double y);
+/* First base of the codon whose amino acid is at (x, y) in a translation row, or -1. */
+int oc_seq_layout_codon_at(const OCSeqLayout *layout, double x, double y);
 double oc_seq_layout_line_top(const OCSeqLayout *layout, int position);
 double oc_seq_layout_line_height(const OCSeqLayout *layout, int position);
 char *oc_seq_layout_tooltip(const OCSeqLayout *layout, double x, double y);
