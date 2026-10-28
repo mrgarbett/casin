@@ -3,9 +3,9 @@ import AppKit
 import RestrictoCore
 
 /// The window's right-hand panel: the sequence (when the map sits beside it),
-/// Enzymes, Features or Primers, picked from a vertical pill. The window keeps
-/// the pill at its right edge: in this panel's free strip while the panel
-/// shows, over the middle when it is hidden. Vibrant on Ventura, glass on macOS 26.
+/// Enzymes, Features or Primers, picked from a vertical pill. The window floats
+/// the pill at the top right of the middle, beside this panel, where it stays
+/// when the panel is hidden. Vibrant on Ventura, glass on macOS 26.
 final class InspectorController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     enum Pane: String, CaseIterable {
         case sequence, enzymes, features, primers
@@ -17,8 +17,6 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     private var pillButtons: [NSButton] = []
     /// The vertical pill; the window places it.
     private(set) lazy var pill: NSView = buildPill()
-    /// The strip kept free for the pill along the right edge.
-    static let pillRoom: CGFloat = 52
     /// Called after a pill button picks a pane, with whether it was already showing.
     var onPick: ((Pane, Bool) -> Void)?
     /// Holds the window's sequence view while the panel shows it.
@@ -68,7 +66,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         NSLayoutConstraint.activate([
             tabs.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 4),
             tabs.leadingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.leadingAnchor, constant: 6),
-            tabs.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor, constant: -Self.pillRoom),
+            tabs.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor),
             tabs.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
         // macOS 26 draws no line between the middle and the panel. Draw one
@@ -139,25 +137,28 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     private func buildPill() -> NSView {
         let entries = [("Sequence", "text.alignleft"), ("Enzymes", "scissors"), ("Features", "tag"),
                        ("Primers", "arrow.right")]
+        // Symbols at their natural size for a 13 pt font, with room around
+        // them, rather than scaled up to fill each button.
+        let symbolSize = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
         pillButtons = entries.enumerated().map { (i, entry) -> NSButton in
-            let image = NSImage(systemSymbolName: entry.1, accessibilityDescription: entry.0)
-                ?? NSImage(size: NSSize(width: 16, height: 16))
+            let image = NSImage(systemSymbolName: entry.1, accessibilityDescription: entry.0)?
+                .withSymbolConfiguration(symbolSize) ?? NSImage(size: NSSize(width: 14, height: 14))
             let button = NSButton(image: image, target: self, action: #selector(pillClicked(_:)))
             button.isBordered = false
             button.tag = i
             button.toolTip = entry.0
             button.setAccessibilityLabel(entry.0)
-            button.imageScaling = .scaleProportionallyUpOrDown
+            button.imageScaling = .scaleNone
             button.translatesAutoresizingMaskIntoConstraints = false
             button.widthAnchor.constraint(equalToConstant: 28).isActive = true
-            button.heightAnchor.constraint(equalToConstant: 28).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 26).isActive = true
             return button
         }
         pillButtons.first?.isHidden = !hostsSequence
         let stack = NSStackView(views: pillButtons)
         stack.orientation = .vertical
-        stack.spacing = 4
-        stack.edgeInsets = NSEdgeInsets(top: 6, left: 4, bottom: 6, right: 4)
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 9, left: 4, bottom: 9, right: 4)
         return Glass.verticalCapsule(around: stack, width: 36)
     }
 

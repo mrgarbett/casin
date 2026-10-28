@@ -550,22 +550,23 @@ void Document::removePrimer(int index)
          [&] { return sel; });
 }
 
-std::string Document::statusText() const
+std::string Document::statusText(bool withLength) const
 {
     if (m_seq.empty())
-        return "No sequence";
+        return withLength ? "No sequence" : "";
     const int n = m_seq.length();
-    std::string s = view::formatBp(n) + "  ·  " + (m_seq.circular ? "circular" : "linear");
+    std::string s = withLength ? view::formatBp(n) + "  ·  " + (m_seq.circular ? "circular" : "linear") : "";
+    const std::string sep = s.empty() ? "" : "  ·  ";
     if (!m_hasSelection)
         return s;
     if (m_selection.length == 0) {
-        s += "  ·  position " + view::withThousands(m_selection.start);
+        s += sep + "position " + view::withThousands(m_selection.start);
         return s;
     }
     int end = m_selection.end();
     if (end > n)
         end -= n;
-    s += "  ·  selected " + view::withThousands(m_selection.start + 1) + "–" + view::withThousands(end) + " ("
+    s += sep + "selected " + view::withThousands(m_selection.start + 1) + "–" + view::withThousands(end) + " ("
        + view::formatBp(m_selection.length) + ")";
     const std::string bases = selectedBases();
     char buf[64];

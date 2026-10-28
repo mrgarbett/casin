@@ -31,6 +31,8 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     /// enzymes and features on the map.
     private var viewToggles: [NSButton] = []
     private let searchField = NSSearchField()
+    /// The find bar (⌘F), hidden until asked for.
+    private var findBar: NSView?
     /// Keeps the glass status inside the sequence pane. A constant, updated on
     /// resize, so a longer status can't push the map/sequence divider.
     private var pillMaxWidth: NSLayoutConstraint?
@@ -41,16 +43,8 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private var statusPill: NSView?
     private var pillBottom: NSLayoutConstraint?
     private var detailRoot: NSView?
-    /// Room the panel's pill takes at the window's right edge.
-    private static let panelPillRoom = InspectorController.pillRoom
-    /// The panel pill's place: at the window's right edge, inside the panel
-    /// while it shows, else over the middle (see placePanelPill).
-    private var panelPillConstraints: [NSLayoutConstraint] = []
-    private var panelPillOverMiddle: Bool?
-    /// The status capsule's centre and right edge guard, which leave room for
-    /// the panel pill while it is over the middle.
-    private var statusCentre: NSLayoutConstraint?
-    private var statusTrailing: NSLayoutConstraint?
+    /// Room the panel's pill takes along the middle's right edge.
+    private static let panelPillRoom: CGFloat = 52
     /// Minimum sizes for the two panes; which pair is active follows the layout.
     private var minWidths: [NSLayoutConstraint] = []
     private var minHeights: [NSLayoutConstraint] = []
@@ -149,24 +143,23 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
                 content.topAnchor.constraint(equalTo: root.topAnchor),
                 content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             ])
-            // Shifted as the map is while the panel pill is over the middle
-            // (placePanelPill). The edges stay inside the visible middle: on a
-            // narrow middle the status text truncates instead of the pill
-            // running under the sidebar or the panel pill.
+            // Shifted as the map is, which leaves room for the panel's pill on
+            // the right. The edges stay inside the visible middle: on a narrow
+            // middle the status text truncates instead of the pill running
+            // under the sidebar or the panel pill.
             // The max width (updatePillMaxWidth) is what keeps it inside; these
             // guards stay below the split view's holding priority, so the pill
             // never raises the middle's minimum width, and the window's with it.
-            let centre = pill.centerXAnchor.constraint(equalTo: root.safeAreaLayoutGuide.centerXAnchor)
+            let centre = pill.centerXAnchor.constraint(equalTo: root.safeAreaLayoutGuide.centerXAnchor,
+                                                       constant: -Self.panelPillRoom / 2)
             centre.priority = .defaultHigh
             let leading = pill.leadingAnchor.constraint(greaterThanOrEqualTo: root.safeAreaLayoutGuide.leadingAnchor,
                                                         constant: 8)
             let trailing = pill.trailingAnchor.constraint(lessThanOrEqualTo: root.safeAreaLayoutGuide.trailingAnchor,
-                                                          constant: -8)
+                                                          constant: -8 - Self.panelPillRoom)
             leading.priority = .defaultLow - 1
             trailing.priority = .defaultLow - 1
             NSLayoutConstraint.activate([centre, leading, trailing])
-            statusCentre = centre
-            statusTrailing = trailing
             root.postsFrameChangedNotifications = true
             NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: root,
                                                    queue: .main) { [weak self] _ in
@@ -198,6 +191,18 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             ])
         }
 
+        // The panel's pill floats at the top right of the middle: at the
+        // window's edge while the panel is hidden, and it slides left with the
+        // panel's edge as the panel opens.
+        let panelPill = inspector.pill
+        panelPill.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(panelPill)
+        NSLayoutConstraint.activate([
+            panelPill.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 10),
+            panelPill.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor, constant: -8),
+        ])
+        mapView.trailingInset = Self.panelPillRoom
+        buildFindBar(in: root)
         inspector.onPick = { [weak self] _, wasShowing in
             guard let item = self?.inspectorItem else { return }
             // A hidden panel opens on the pane picked; picking the pane already
@@ -231,12 +236,10 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         window.contentViewController = splitController
         self.splitController = splitController
         applyMapLayout()
-        placePanelPill()
-        // The panel pill follows the panel being shown or hidden (by the pill,
-        // the menu or dragging the divider), after the resize, not inside it.
+        // The panel toggle's tint follows the panel, however it was shown or hidden.
         NotificationCenter.default.addObserver(forName: NSSplitView.didResizeSubviewsNotification,
                                                object: splitController.splitView, queue: .main) { [weak self] _ in
-            DispatchQueue.main.async { self?.placePanelPill() }
+            DispatchQueue.main.async { self?.refreshToolbarToggles() }
         }
 
         // The background extension places its content inside the safe area only
@@ -332,7 +335,8 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
                 : pill.bottomAnchor.constraint(equalTo: root.safeAreaLayoutGuide.bottomAnchor, constant: -12)
             pillBottom?.isActive = true
         }
-        updateMiddleInsets()
+        // In the middle without the map, the sequence leaves room for the pill.
+        sequenceView.trailingInset = !sequenceInPanel && mapHidden ? Self.panelPillRoom : 0
         // A panel holding the sequence may grow as wide as the user likes, but
         // not over the middle: the split view (not the constraints inside the
         // middle) has to keep room for the map, or for the sequence when the
@@ -341,40 +345,6 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         detailItem?.minimumThickness = sequenceInPanel ? 260 : 320
         split.adjustSubviews()
         sequenceView.updateSize()
-    }
-
-    /// The panel's pill stays at the window's right edge, near the top: in the
-    /// panel while it shows (the panel keeps that strip free), else over the
-    /// middle, whose map (or sequence, when it is alone) then keeps it free.
-    /// Moves it only when the panel's state changed.
-    private func placePanelPill() {
-        guard let item = inspectorItem, let root = detailRoot else { return }
-        let overMiddle = item.isCollapsed
-        guard overMiddle != panelPillOverMiddle else { return }
-        panelPillOverMiddle = overMiddle
-        let pill = inspector.pill
-        NSLayoutConstraint.deactivate(panelPillConstraints)
-        pill.removeFromSuperview()
-        let host = overMiddle ? root : inspector.view
-        pill.translatesAutoresizingMaskIntoConstraints = false
-        host.addSubview(pill)
-        panelPillConstraints = [
-            pill.topAnchor.constraint(equalTo: host.safeAreaLayoutGuide.topAnchor, constant: 10),
-            pill.trailingAnchor.constraint(equalTo: host.safeAreaLayoutGuide.trailingAnchor, constant: -8),
-        ]
-        NSLayoutConstraint.activate(panelPillConstraints)
-        updateMiddleInsets()
-        DispatchQueue.main.async { self.updatePillMaxWidth() }
-    }
-
-    /// Room for the panel pill in the middle while it floats there: the map
-    /// keeps a strip free on its right, or the sequence when it is alone.
-    private func updateMiddleInsets() {
-        let room = panelPillOverMiddle == true ? Self.panelPillRoom : 0
-        mapView.trailingInset = mapHidden ? 0 : room
-        sequenceView.trailingInset = !sequenceInPanel && mapHidden ? room : 0
-        statusCentre?.constant = -room / 2
-        statusTrailing?.constant = -8 - room
     }
 
     /// Map 45 %, sequence the rest, along the split's axis; with the sequence in
@@ -408,8 +378,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     /// constant changes only when the width really did.
     private func updatePillMaxWidth() {
         guard let limit = pillMaxWidth, let root = detailRoot else { return }
-        let room = panelPillOverMiddle == true ? Self.panelPillRoom : 0
-        let width = max(0, root.safeAreaRect.width - room - 16)
+        let width = max(0, root.safeAreaRect.width - Self.panelPillRoom - 16)
         if abs(limit.constant - width) >= 1 { limit.constant = width }
     }
 
@@ -478,6 +447,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         for (button, isOn) in zip(viewToggles, on) {
             button.contentTintColor = isOn ? .controlAccentColor : .tertiaryLabelColor
         }
+        refreshToolbarToggles()
     }
 
     private func buildToolbar() {
@@ -537,7 +507,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     }
 
     private func updateTexts() {
-        status.stringValue = core.statusText
+        status.stringValue = core.selectionText
         // The title stays the document's file name (NSDocument's, with the
         // proxy icon); the sequence name can differ, so it goes in the subtitle.
         if core.isEmpty {
@@ -552,7 +522,9 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
 
     // MARK: Toolbar
 
-    private let searchItem = NSToolbarItem.Identifier("find")
+    private let undoItem = NSToolbarItem.Identifier("undo")
+    private let redoItem = NSToolbarItem.Identifier("redo")
+    private let saveItem = NSToolbarItem.Identifier("save")
     private let complementItem = NSToolbarItem.Identifier("complement")
     private let exportItem = NSToolbarItem.Identifier("exportMap")
     private let mapItem = NSToolbarItem.Identifier("map")
@@ -562,14 +534,20 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private let unsavedItem = NSToolbarItem.Identifier("unsaved")
     private var unsavedToolbarItem: NSToolbarItem?
 
+    /// Toggles in the toolbar, with their symbols: each turns accent blue while on.
+    private var toolbarToggles: [NSToolbarItem.Identifier: (item: NSToolbarItem, symbol: String)] = [:]
+    private var toolbarToggleShown: [NSToolbarItem.Identifier: Bool] = [:]
+
+    // Undo, redo, save and export sit beside the title; Find opens at the
+    // bottom of the middle (⌘F).
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, unsavedItem, .flexibleSpace, mapItem, layoutItem, exportItem,
-         searchItem, inspectorToolbarItem]
+        [.toggleSidebar, .sidebarTrackingSeparator, unsavedItem, undoItem, redoItem, saveItem, exportItem,
+         .flexibleSpace, mapItem, layoutItem, inspectorToolbarItem]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, unsavedItem, .flexibleSpace, .space, mapItem, layoutItem,
-         complementItem, exportItem, searchItem, inspectorToolbarItem]
+        [.toggleSidebar, .sidebarTrackingSeparator, unsavedItem, undoItem, redoItem, saveItem, exportItem,
+         .flexibleSpace, .space, mapItem, layoutItem, complementItem, inspectorToolbarItem]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier,
@@ -595,28 +573,75 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             unsavedToolbarItem = item
             updateUnsavedDot()
             return item
-        case searchItem:
-            let item = NSSearchToolbarItem(itemIdentifier: id)
-            item.searchField = searchField
-            item.preferredWidthForSearchField = 240
+        case undoItem:
+            return button(id, label: "Undo", help: "Undo the last edit (⌘Z)", symbol: "arrow.uturn.backward",
+                          action: #selector(undoEdit(_:)))
+        case redoItem:
+            return button(id, label: "Redo", help: "Redo (⇧⌘Z)", symbol: "arrow.uturn.forward",
+                          action: #selector(redoEdit(_:)))
+        case saveItem:
+            let item = button(id, label: "Save", help: "Save (⌘S)", symbol: "square.and.arrow.down",
+                              action: #selector(NSDocument.save(_:)))
+            item.target = nil   // the document, through the responder chain
+            return item
+        case exportItem:
+            let item = NSMenuToolbarItem(itemIdentifier: id)
+            item.label = "Export"
+            item.paletteLabel = "Export"
+            item.toolTip = "Export the map, or the sequence as GenBank or FASTA"
+            item.image = NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: "Export")
+            item.showsIndicator = false
+            let menu = NSMenu()
+            for (title, action) in [("Map Image (PNG or PDF)…", #selector(exportMap(_:))),
+                                    ("GenBank…", #selector(saveAsGenBank(_:))),
+                                    ("FASTA…", #selector(exportFasta(_:)))] {
+                let entry = NSMenuItem(title: title, action: action, keyEquivalent: "")
+                entry.target = self
+                menu.addItem(entry)
+            }
+            item.menu = menu
             return item
         case inspectorToolbarItem:
-            return button(id, label: "Inspector", help: "Show or hide the right panel",
+            return toggle(id, label: "Panel", help: "Show or hide the right panel",
                           symbol: "sidebar.right", action: #selector(toggleInspectorPanel(_:)))
         case mapItem:
-            return button(id, label: "Map", help: "Show or hide the map",
+            return toggle(id, label: "Map", help: "Show or hide the map",
                           symbol: "circle.circle", action: #selector(toggleMapHidden(_:)))
         case layoutItem:
-            return button(id, label: "Layout", help: "Put the map beside or above the sequence",
+            return toggle(id, label: "Stack", help: "Stack the map above the sequence, or put it beside",
                           symbol: "rectangle.split.1x2", action: #selector(toggleMapStacked(_:)))
         case complementItem:
-            return button(id, label: "Complement", help: "Show or hide the complement strand",
+            return toggle(id, label: "Complement", help: "Show or hide the complement strand",
                           symbol: "arrow.left.arrow.right", action: #selector(toggleComplementStrand(_:)))
-        case exportItem:
-            return button(id, label: "Export Map", help: "Export the map as PNG or PDF",
-                          symbol: "square.and.arrow.up", action: #selector(exportMap(_:)))
         default:
             return nil
+        }
+    }
+
+    /// A toolbar button for something that is on or off; refreshToolbarToggles
+    /// tints it.
+    private func toggle(_ id: NSToolbarItem.Identifier, label: String, help: String, symbol: String,
+                        action: Selector) -> NSToolbarItem {
+        let item = button(id, label: label, help: help, symbol: symbol, action: action)
+        toolbarToggles[id] = (item, symbol)
+        refreshToolbarToggles()
+        return item
+    }
+
+    /// Accent blue for a toolbar toggle that is on: the map shown, the map
+    /// stacked, the panel shown, the complement strand shown.
+    private func refreshToolbarToggles() {
+        let on: [NSToolbarItem.Identifier: Bool] = [
+            mapItem: !mapHidden, layoutItem: mapStacked,
+            inspectorToolbarItem: !(inspectorItem?.isCollapsed ?? true),
+            complementItem: sequenceView.showComplement,
+        ]
+        for (id, entry) in toolbarToggles {
+            let isOn = on[id] ?? false
+            guard toolbarToggleShown[id] != isOn else { continue }
+            toolbarToggleShown[id] = isOn
+            let base = NSImage(systemSymbolName: entry.symbol, accessibilityDescription: entry.item.label)
+            entry.item.image = isOn ? base?.withSymbolConfiguration(.init(paletteColors: [.controlAccentColor])) : base
         }
     }
 
@@ -649,8 +674,70 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         }
     }
 
+    /// ⌘F: opens the find bar at the bottom of the middle and puts the cursor
+    /// in it; again (or Esc) closes it.
     @objc func performFindPanelAction(_ sender: Any?) {
-        window?.makeFirstResponder(searchField)
+        guard let bar = findBar else { return }
+        let editing = searchField.currentEditor() != nil
+        if !bar.isHidden && editing {
+            closeFindBar()
+        } else {
+            bar.isHidden = false
+            window?.makeFirstResponder(searchField)
+        }
+    }
+
+    private func closeFindBar() {
+        findBar?.isHidden = true
+        window?.makeFirstResponder(sequenceView)
+    }
+
+    /// The find field in a capsule, centred at the bottom of the middle above
+    /// the status; hidden until ⌘F.
+    private func buildFindBar(in root: NSView) {
+        searchField.translatesAutoresizingMaskIntoConstraints = false
+        searchField.widthAnchor.constraint(equalToConstant: 260).isActive = true
+        searchField.delegate = self
+        let inner = NSView()
+        inner.addSubview(searchField)
+        NSLayoutConstraint.activate([
+            searchField.leadingAnchor.constraint(equalTo: inner.leadingAnchor, constant: 8),
+            searchField.trailingAnchor.constraint(equalTo: inner.trailingAnchor, constant: -8),
+            searchField.centerYAnchor.constraint(equalTo: inner.centerYAnchor),
+        ])
+        let bar: NSView
+        if let glass = Glass.capsule(around: inner, height: 38) {
+            bar = glass
+        } else {
+            // Before macOS 26: a rounded vibrant panel.
+            let panel = NSVisualEffectView()
+            panel.material = .popover
+            panel.state = .active
+            panel.wantsLayer = true
+            panel.layer?.cornerRadius = 10
+            inner.translatesAutoresizingMaskIntoConstraints = false
+            panel.addSubview(inner)
+            NSLayoutConstraint.activate([
+                inner.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+                inner.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
+                inner.topAnchor.constraint(equalTo: panel.topAnchor),
+                inner.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
+                panel.heightAnchor.constraint(equalToConstant: 38),
+            ])
+            bar = panel
+        }
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        bar.isHidden = true
+        root.addSubview(bar)
+        // Above the floating status (macOS 26), or above the status row.
+        let bottom = statusPill.map { bar.bottomAnchor.constraint(equalTo: $0.topAnchor, constant: -8) }
+            ?? bar.bottomAnchor.constraint(equalTo: root.safeAreaLayoutGuide.bottomAnchor, constant: -36)
+        NSLayoutConstraint.activate([
+            bar.centerXAnchor.constraint(equalTo: root.safeAreaLayoutGuide.centerXAnchor,
+                                         constant: -Self.panelPillRoom / 2),
+            bottom,
+        ])
+        findBar = bar
     }
 
     @objc func copy(_ sender: Any?) {
@@ -694,6 +781,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         applyMapLayout()
         window?.layoutIfNeeded()
         placeDivider()
+        refreshToolbarToggles()
     }
 
     @objc func toggleMapStacked(_ sender: Any?) {
@@ -702,6 +790,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         applyMapLayout()
         window?.layoutIfNeeded()
         placeDivider()
+        refreshToolbarToggles()
     }
 
     @objc func saveAsGenBank(_ sender: Any?) {
@@ -763,6 +852,15 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         default:
             return true
         }
+    }
+}
+
+extension DocumentWindowController: NSSearchFieldDelegate {
+    /// Esc in the find field closes the find bar.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        guard control === searchField, selector == #selector(NSResponder.cancelOperation(_:)) else { return false }
+        closeFindBar()
+        return true
     }
 }
 

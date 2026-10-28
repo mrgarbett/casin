@@ -112,7 +112,9 @@ public:
     void removePrimer(int index);
 
     // Text for a status bar: length, topology, selection, GC%, Tm.
-    std::string statusText() const;
+    // Length and topology, then the caret or selection (positions, length, GC, Tm).
+    // Without `withLength`, only the caret or selection part (empty if none).
+    std::string statusText(bool withLength = true) const;
 
     void onSequenceChanged(Listener l) { m_seqListeners.push_back(std::move(l)); }
     void onSelectionChanged(Listener l) { m_selListeners.push_back(std::move(l)); }

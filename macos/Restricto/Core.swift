@@ -116,6 +116,8 @@ final class CoreDocument {
     var length: Int { Int(oc_document_length(handle)) }
     var isCircular: Bool { oc_document_is_circular(handle) }
     var statusText: String { takeString(oc_document_status_text(handle)) }
+    /// The caret or selection part of the status (the title shows the length).
+    var selectionText: String { takeString(oc_document_selection_text(handle)) }
 
     var features: [FeatureInfo] {
         (0..<Int(oc_document_feature_count(handle))).compactMap { i in

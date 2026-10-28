@@ -22,6 +22,8 @@ struct MapOptions {
     bool enzymes = true;
     bool primers = true;
     std::set<std::string> hiddenTypes;
+    int frames = 0;           // 3: forward ORFs as arrows, 6: both strands (as the sequence's translation)
+    int minOrfCodons = 75;    // as SeqOptions::minOrfCodons
 };
 
 struct MapHit {
@@ -87,6 +89,8 @@ private:
     void renderCircular(Scene &s, const MapState &st) const;
     void renderLinear(Scene &s, const MapState &st) const;
     void renderLabels(Scene &s, const MapState &st) const;
+    void findMapOrfs();
+    void renderOrfs(Scene &s) const;
     std::string featureTooltip(int i) const;
     std::string siteTooltip(const std::vector<int> &sites) const;
 
@@ -99,6 +103,15 @@ private:
     bool m_circular;
     std::vector<int> m_cutCount;   // per site: total cuts of its enzyme
     std::vector<FeatureGlyph> m_features;
+    // ORFs drawn as arrows (MapOptions::frames): each on a row of its strand.
+    struct OrfGlyph {
+        int start = 0, length = 0;
+        bool forward = true;
+        int row = 0;
+    };
+    std::vector<OrfGlyph> m_orfs;
+    int m_orfRows = 0;   // rows per strand
+    double m_orfR = 0;   // circular: radius of the first forward row
     std::vector<LabelGlyph> m_labels;
     std::vector<TextItem> m_tickLabels;
     std::vector<std::pair<Point, Point>> m_ticks;

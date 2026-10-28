@@ -73,6 +73,10 @@ enum UISmokeTest {
                 controller?.toggleMapStacked(nil)
                 controller?.toggleInspectorPanel(nil)
             }),
+            ("9e-find-open", { controller?.performFindPanelAction(nil) }),
+            ("9e-find-closed", { controller?.performFindPanelAction(nil) }),
+            ("9e-translation-on-map", { (controller?.document as? SequenceDocument)?.core.frames = 6 }),
+            ("9e-translation-off", { (controller?.document as? SequenceDocument)?.core.frames = 0 }),
             ("9e-edited", { (controller?.document as? NSDocument)?.updateChangeCount(.changeDone) }),
             ("9f-saved", { (controller?.document as? NSDocument)?.updateChangeCount(.changeCleared) }),
             ("10-below-minimum", { resize(NSSize(width: 600, height: 400)) }),

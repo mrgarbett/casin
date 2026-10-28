@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "maplayout.h"
 
+#include "../core/orf.h"
+
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -64,10 +66,88 @@ MapLayout::MapLayout(const oc::Sequence &seq, const std::vector<CutSite> &sites,
         m_cutCount.push_back(counts[s.enzyme]);
     if (m_n == 0)
         return;
+    findMapOrfs();
     if (m_circular)
         layoutCircular(measure);
     else
         layoutLinear(measure);
+}
+
+// ORFs for the translation toggle, as on the sequence: forward ones for 3
+// frames, both strands for 6. Each strand's ORFs share rows where they don't
+// overlap.
+void MapLayout::findMapOrfs()
+{
+    if (m_options.frames != 3 && m_options.frames != 6)
+        return;
+    std::vector<std::vector<std::pair<int, int>>> used[2];   // per strand, per row: [start, end) spans
+    for (const Orf &o : findOrfs(m_seq, std::max(1, m_options.minOrfCodons))) {
+        const bool fwd = o.strand != Strand::Reverse;
+        if (!fwd && m_options.frames != 6)
+            continue;
+        auto &rows = used[fwd ? 0 : 1];
+        // A span past the origin counts as two pieces.
+        std::vector<std::pair<int, int>> pieces;
+        if (o.start + o.length > m_n) {
+            pieces = {{o.start, m_n}, {0, o.start + o.length - m_n}};
+        } else {
+            pieces = {{o.start, o.start + o.length}};
+        }
+        size_t row = 0;
+        for (; row < rows.size(); ++row) {
+            bool clash = false;
+            for (const auto &u : rows[row])
+                for (const auto &p : pieces)
+                    clash = clash || (p.first < u.second && u.first < p.second);
+            if (!clash)
+                break;
+        }
+        if (row >= 3)   // keep the band small; the sequence lists them all
+            continue;
+        if (row == rows.size())
+            rows.emplace_back();
+        rows[row].insert(rows[row].end(), pieces.begin(), pieces.end());
+        m_orfs.push_back({o.start, o.length, fwd, int(row)});
+        m_orfRows = std::max(m_orfRows, int(row) + 1);
+    }
+}
+
+// ORF arrows: green forward ones, red reverse ones, each pointing the way it reads.
+void MapLayout::renderOrfs(Scene &s) const
+{
+    const double head = 6, w = 2.4, pitch = 6;
+    for (const OrfGlyph &o : m_orfs) {
+        const Color c = o.forward ? m_theme.orfForward : m_theme.orfReverse;
+        const int a = o.start, b = o.start + o.length;   // b may run past the origin
+        if (m_circular) {
+            const double r = m_orfR - (o.forward ? 0 : m_orfRows * pitch + 3) - o.row * pitch;
+            double a0 = angleOfPos(a), a1 = angleOfPos(b);
+            if (a1 <= a0)
+                a1 += 2 * kPi;
+            const double ah = std::min(head / std::max(r, 1.0), (a1 - a0) / 2);
+            PathItem arc;
+            if (o.forward)
+                arcPoints(arc.points, a0, a1 - ah, r);
+            else
+                arcPoints(arc.points, a0 + ah, a1, r);
+            arc.stroke = c;
+            arc.lineWidth = w;
+            s.path(arc);
+            const double tip = o.forward ? a1 : a0, base = o.forward ? a1 - ah : a0 + ah;
+            s.polygon({polar(tip, r), polar(base, r - 3), polar(base, r + 3)}, c);
+        } else {
+            const double y = m_yb + 30 + (o.forward ? 0 : m_orfRows * pitch + 3) + o.row * pitch;
+            const double x0 = xOfPos(a), x1 = xOfPos(std::min(b, m_n));
+            const double hh = std::min(head, (x1 - x0) / 2);
+            if (o.forward) {
+                s.line({x0, y}, {x1 - hh, y}, c, w);
+                s.polygon({{x1, y}, {x1 - hh, y - 3}, {x1 - hh, y + 3}}, c);
+            } else {
+                s.line({x0 + hh, y}, {x1, y}, c, w);
+                s.polygon({{x0, y}, {x0 + hh, y - 3}, {x0 + hh, y + 3}}, c);
+            }
+        }
+    }
 }
 
 bool MapLayout::shows(const Feature &f) const
@@ -241,6 +321,8 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
     m_r = r;
     m_featureOuter = m_r + 6 + laneCount * (m_laneH + kLaneGap);
     m_innerR = m_r * 0.62;
+    // ORF rows sit inside the tick labels.
+    m_orfR = m_r - 30;
 
     // Ticks, inside the backbone, with labels kept clear of the name and
     // length in the centre (see renderCircular).
@@ -543,7 +625,9 @@ void MapLayout::layoutLinear(TextMeasurer &tm)
     });
     int laneCount = 0;
     const std::vector<int> lanes = assignLanes(order, &laneCount);
-    const double lane0 = m_yb + 30;
+    // Feature lanes start below the ORF rows, if any (renderOrfs).
+    const double orfBand = m_orfRows > 0 ? (m_options.frames == 6 ? 2 : 1) * m_orfRows * 6 + 6 : 0;
+    const double lane0 = m_yb + 30 + orfBand;
     std::map<int, std::vector<std::pair<double, double>>> below;   // lane -> used x ranges
     const auto blocks = featureBlocks();
     for (int fi : order) {
@@ -684,6 +768,7 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
         s.line(t.first, t.second, m_theme.tick, 1);
     for (const TextItem &t : m_tickLabels)
         s.text(t);
+    renderOrfs(s);
 
     for (const FeatureGlyph &g : m_features) {
         const bool active = g.feature == st.activeFeature;
@@ -782,6 +867,7 @@ void MapLayout::renderLinear(Scene &s, const MapState &st) const
         s.line(t.first, t.second, m_theme.tick, 1);
     for (const TextItem &t : m_tickLabels)
         s.text(t);
+    renderOrfs(s);
     for (const FeatureGlyph &g : m_features) {
         const bool active = g.feature == st.activeFeature;
         for (const auto &c : g.connectors)
