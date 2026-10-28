@@ -1231,6 +1231,60 @@ static void testOrfs()
         CHECK(o.protein != "MPPPPPPPPPPP");   // the one across the origin is gone
 }
 
+// Public reference sequences, checked against published results. Sources for
+// every expected number are in docs/KNOWN-RESULTS.md.
+static std::vector<int> bandSizes(const Sequence &seq, std::initializer_list<const char *> names)
+{
+    std::vector<Enzyme> use;
+    for (const char *n : names)
+        use.push_back(*findEnzyme(n));
+    std::vector<int> sizes;
+    for (const DigestFragment &f : digest(seq, use).fragments)
+        sizes.push_back(f.length);
+    std::sort(sizes.rbegin(), sizes.rend());
+    return sizes;
+}
+
+static std::vector<int> siteStarts(const Sequence &seq, const char *name)
+{
+    std::vector<int> starts;
+    for (const CutSite &c : findSites(seq, {*findEnzyme(name)}))
+        starts.push_back(c.matchStart + 1);   // 1-based, as maps print them
+    std::sort(starts.begin(), starts.end());
+    return starts;
+}
+
+static void testReferences(const std::string &dir)
+{
+    Sequence puc, lambda;
+    std::string err;
+    CHECK(loadSequenceFile(dir + "/reference/pUC19-L09137.gb", &puc, &err));
+    CHECK(loadSequenceFile(dir + "/reference/lambda-NC_001416.gb", &lambda, &err));
+
+    // pUC19 (GenBank L09137.2): 2,686 bp circle; unique EcoRI and HindIII
+    // sites at the ends of the MCS; PvuII cuts twice, 322 + 2,364 bp.
+    CHECK_EQ(puc.length(), 2686);
+    CHECK(puc.circular);
+    CHECK(siteStarts(puc, "EcoRI") == std::vector<int>({396}));
+    CHECK(siteStarts(puc, "HindIII") == std::vector<int>({447}));
+    CHECK(bandSizes(puc, {"EcoRI"}) == std::vector<int>({2686}));
+    CHECK(bandSizes(puc, {"PvuII"}) == std::vector<int>({2364, 322}));
+
+    // Phage lambda (RefSeq NC_001416.1): 48,502 bp, linear. EcoRI gives the
+    // six bands of the lambda/EcoRI marker.
+    CHECK_EQ(lambda.length(), 48502);
+    CHECK(!lambda.circular);
+    CHECK(bandSizes(lambda, {"EcoRI"}) == std::vector<int>({21226, 7421, 5804, 5643, 4878, 3530}));
+    // HindIII: the wild-type record has six sites. The commercial marker DNA
+    // (cI857ind1 Sam7) has a seventh at 37,584 that splits 6,682 into 6,557
+    // + 125; one base change adds it and gives the eight published bands.
+    CHECK(bandSizes(lambda, {"HindIII"}) == std::vector<int>({23130, 9416, 6682, 4361, 2322, 2027, 564}));
+    CHECK_EQ(lambda.bases.substr(37583, 6), std::string("AAGCTC"));
+    Sequence marker = lambda;
+    marker.bases[37588] = 'T';
+    CHECK(bandSizes(marker, {"HindIII"}) == std::vector<int>({23130, 9416, 6557, 4361, 2322, 2027, 564, 125}));
+}
+
 int main(int argc, char **argv)
 {
     testBasics();
@@ -1259,6 +1313,7 @@ int main(int argc, char **argv)
     if (argc > 1) {
         testEmbl(argv[1]);
         testSamples(argv[1]);
+        testReferences(argv[1]);
     } else
         std::fprintf(stderr, "note: no samples directory given, skipping sample tests\n");
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
