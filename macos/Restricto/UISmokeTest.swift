@@ -34,6 +34,7 @@ enum UISmokeTest {
 
     private static func steps(_ window: NSWindow) -> [(String, () -> Void)] {
         let split = window.contentViewController as? NSSplitViewController
+        let controller = window.windowController as? DocumentWindowController
         func resize(_ size: NSSize) {
             var frame = window.frame
             frame.size = size
@@ -49,8 +50,12 @@ enum UISmokeTest {
             ("3-sidebar-toggled", { split?.toggleSidebar(nil) }),
             ("4-sidebar-toggled-back", { split?.toggleSidebar(nil) }),
             ("5-large", { resize(NSSize(width: 1400, height: 900)) }),
-            ("6-below-minimum", { resize(NSSize(width: 600, height: 400)) }),
-            ("7-sidebar-toggled-at-quit", { split?.toggleSidebar(nil) }),
+            ("6-map-stacked", { controller?.toggleMapStacked(nil) }),
+            ("7-map-hidden", { controller?.toggleMapHidden(nil) }),
+            ("8-map-shown", { controller?.toggleMapHidden(nil) }),
+            ("9-map-beside", { controller?.toggleMapStacked(nil) }),
+            ("10-below-minimum", { resize(NSSize(width: 600, height: 400)) }),
+            ("11-sidebar-toggled-at-quit", { split?.toggleSidebar(nil) }),
         ]
     }
 

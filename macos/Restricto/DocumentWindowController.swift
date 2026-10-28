@@ -4,7 +4,7 @@ import RestrictoCore
 import UniformTypeIdentifiers
 
 /// The window for one document: a Features/Enzymes sidebar, then map |
-/// sequence, with find and view controls in a unified toolbar and a status line.
+/// sequence (or map over sequence, and the map can be hidden), with find and view controls in a unified toolbar and a status line.
 ///
 /// Ventura through Sequoia get the classic layout: a vibrant sidebar and a flat
 /// status line under the content. macOS 26 adds Liquid Glass (see Glass.swift):
@@ -20,8 +20,16 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     /// Keeps the glass status inside the sequence pane. A constant, updated on
     /// resize, so a longer status can't push the map/sequence divider.
     private var pillMaxWidth: NSLayoutConstraint?
-    /// Map | sequence.
+    /// Map | sequence, or map over sequence (View > Stack Map Above Sequence).
     private let split = NSSplitView()
+    /// Minimum sizes for the two panes; which pair is active follows the layout.
+    private var minWidths: [NSLayoutConstraint] = []
+    private var minHeights: [NSLayoutConstraint] = []
+    /// The map layout new windows start with; each window can change its own.
+    static let mapStackedKey = "MapStacked"
+    static let mapHiddenKey = "MapHidden"
+    private var mapStacked = UserDefaults.standard.bool(forKey: DocumentWindowController.mapStackedKey)
+    private var mapHidden = UserDefaults.standard.bool(forKey: DocumentWindowController.mapHiddenKey)
     private var didFirstShow = false
     /// The view that mirrors content under the sidebar (macOS 26), and the
     /// safe-area inset its content was last placed for.
@@ -81,8 +89,11 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         split.addArrangedSubview(scroll)
         split.setHoldingPriority(.defaultLow, forSubviewAt: 0)
         split.setHoldingPriority(.defaultLow - 1, forSubviewAt: 1)
-        mapView.widthAnchor.constraint(greaterThanOrEqualToConstant: 300).isActive = true
-        scroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 360).isActive = true
+        minWidths = [mapView.widthAnchor.constraint(greaterThanOrEqualToConstant: 300),
+                     scroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 360)]
+        minHeights = [mapView.heightAnchor.constraint(greaterThanOrEqualToConstant: 180),
+                      scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 180)]
+        applyMapLayout()
 
         status.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         status.textColor = .secondaryLabelColor
@@ -189,9 +200,28 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         // not yet tell the sequence name from the file name.
         updateTexts()
         window.layoutIfNeeded()
-        split.setPosition(split.bounds.width * 0.45, ofDividerAt: 0)
+        placeDivider()
         sequenceView.updateSize()
         sequenceView.scroll(.zero)
+    }
+
+    /// Puts the split in the window's current layout: side by side or stacked,
+    /// with or without the map. Only the minimum sizes along the split's axis
+    /// apply, and none for a hidden map, so it can collapse.
+    private func applyMapLayout() {
+        NSLayoutConstraint.deactivate(minWidths + minHeights)
+        split.isVertical = !mapStacked
+        mapView.isHidden = mapHidden
+        let mins = mapStacked ? minHeights : minWidths
+        NSLayoutConstraint.activate(mapHidden ? [mins[1]] : mins)
+        split.adjustSubviews()
+    }
+
+    /// Map 45 %, sequence the rest, along the split's axis.
+    private func placeDivider() {
+        guard !mapHidden else { return }
+        let length = split.isVertical ? split.bounds.width : split.bounds.height
+        split.setPosition(length * 0.45, ofDividerAt: 0)
     }
 
     /// The status line inside a glass capsule, or nil before macOS 26.
@@ -244,13 +274,17 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private let searchItem = NSToolbarItem.Identifier("find")
     private let complementItem = NSToolbarItem.Identifier("complement")
     private let exportItem = NSToolbarItem.Identifier("exportMap")
+    private let mapItem = NSToolbarItem.Identifier("map")
+    private let layoutItem = NSToolbarItem.Identifier("mapLayout")
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace, complementItem, exportItem, searchItem]
+        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace, mapItem, layoutItem, complementItem, exportItem,
+         searchItem]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace, .space, complementItem, exportItem, searchItem]
+        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace, .space, mapItem, layoutItem, complementItem,
+         exportItem, searchItem]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier,
@@ -261,6 +295,12 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             item.searchField = searchField
             item.preferredWidthForSearchField = 240
             return item
+        case mapItem:
+            return button(id, label: "Map", help: "Show or hide the map",
+                          symbol: "circle.circle", action: #selector(toggleMapHidden(_:)))
+        case layoutItem:
+            return button(id, label: "Layout", help: "Put the map beside or above the sequence",
+                          symbol: "rectangle.split.1x2", action: #selector(toggleMapStacked(_:)))
         case complementItem:
             return button(id, label: "Complement", help: "Show or hide the complement strand",
                           symbol: "arrow.left.arrow.right", action: #selector(toggleComplementStrand(_:)))
@@ -323,6 +363,22 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         sequenceView.showComplement.toggle()
     }
 
+    @objc func toggleMapHidden(_ sender: Any?) {
+        mapHidden.toggle()
+        UserDefaults.standard.set(mapHidden, forKey: Self.mapHiddenKey)
+        applyMapLayout()
+        window?.layoutIfNeeded()
+        placeDivider()
+    }
+
+    @objc func toggleMapStacked(_ sender: Any?) {
+        mapStacked.toggle()
+        UserDefaults.standard.set(mapStacked, forKey: Self.mapStackedKey)
+        applyMapLayout()
+        window?.layoutIfNeeded()
+        placeDivider()
+    }
+
     @objc func saveAsGenBank(_ sender: Any?) {
         runSavePanel(name: "\(core.name).gb", types: [UTType(filenameExtension: "gb") ?? .plainText]) { url in
             try self.core.save(path: url.path, format: Int32(OC_FORMAT_GENBANK))
@@ -363,6 +419,12 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             return core.hasSelection && core.selectionLength > 0
         case #selector(toggleComplementStrand(_:)):
             item.state = sequenceView.showComplement ? .on : .off
+            return true
+        case #selector(toggleMapHidden(_:)):
+            item.title = mapHidden ? "Show Map" : "Hide Map"
+            return true
+        case #selector(toggleMapStacked(_:)):
+            item.state = mapStacked ? .on : .off
             return true
         default:
             return true
