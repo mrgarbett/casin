@@ -2,7 +2,7 @@
 // Draws a shared-layout scene with CoreGraphics. Expects a flipped context
 // (y grows downward), as in a flipped NSView.
 import AppKit
-import OpenCloneCore
+import RestrictoCore
 
 func drawScene(_ scene: OpaquePointer, in ctx: CGContext) {
     let background = oc_scene_background(scene)
@@ -95,17 +95,17 @@ func sceneImage(_ scene: OpaquePointer) -> NSImage {
 /// Writes a map to .png (2x) or .pdf, chosen by the file extension.
 func writeMapImage(document: CoreDocument, to url: URL, size: CGSize) throws {
     guard let layout = newMapLayout(document, size: size, dark: false) else {
-        throw NSError(domain: "OpenClone", code: 3, userInfo: [NSLocalizedDescriptionKey: "Could not lay out the map"])
+        throw NSError(domain: "Restricto", code: 3, userInfo: [NSLocalizedDescriptionKey: "Could not lay out the map"])
     }
     defer { oc_map_layout_free(layout) }
     guard let scene = oc_map_layout_render(layout, document.handle) else {
-        throw NSError(domain: "OpenClone", code: 3, userInfo: [NSLocalizedDescriptionKey: "Could not draw the map"])
+        throw NSError(domain: "Restricto", code: 3, userInfo: [NSLocalizedDescriptionKey: "Could not draw the map"])
     }
     defer { oc_scene_free(scene) }
     if url.pathExtension.lowercased() == "pdf" {
         var box = CGRect(origin: .zero, size: size)
         guard let pdf = CGContext(url as CFURL, mediaBox: &box, nil) else {
-            throw NSError(domain: "OpenClone", code: 4, userInfo: [NSLocalizedDescriptionKey: "Could not create the PDF"])
+            throw NSError(domain: "Restricto", code: 4, userInfo: [NSLocalizedDescriptionKey: "Could not create the PDF"])
         }
         pdf.beginPDFPage(nil)
         pdf.translateBy(x: 0, y: size.height)
@@ -121,14 +121,14 @@ func writeMapImage(document: CoreDocument, to url: URL, size: CGSize) throws {
                                      hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
                                      bytesPerRow: 0, bitsPerPixel: 0),
           let gc = NSGraphicsContext(bitmapImageRep: rep) else {
-        throw NSError(domain: "OpenClone", code: 5, userInfo: [NSLocalizedDescriptionKey: "Could not create the image"])
+        throw NSError(domain: "Restricto", code: 5, userInfo: [NSLocalizedDescriptionKey: "Could not create the image"])
     }
     let cg = gc.cgContext
     cg.translateBy(x: 0, y: size.height * scale)
     cg.scaleBy(x: scale, y: -scale)
     drawScene(scene, in: cg)
     guard let png = rep.representation(using: .png, properties: [:]) else {
-        throw NSError(domain: "OpenClone", code: 6, userInfo: [NSLocalizedDescriptionKey: "Could not encode the PNG"])
+        throw NSError(domain: "Restricto", code: 6, userInfo: [NSLocalizedDescriptionKey: "Could not encode the PNG"])
     }
     try png.write(to: url)
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Layout tests for openclone_view, using approximate text metrics.
+// Layout tests for restricto_view, using approximate text metrics.
 // Usage: view_tests <samples-dir>
 #include "core/abif.h"
 #include "core/enzymes.h"

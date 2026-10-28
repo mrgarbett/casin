@@ -3,7 +3,7 @@
 // Each action works on the front window's document and opens products in new
 // windows, as the Linux app does. Plain AppKit: the same on every macOS version.
 import AppKit
-import OpenCloneCore
+import RestrictoCore
 import UniformTypeIdentifiers
 
 enum ToolMenus {
@@ -47,7 +47,7 @@ enum ToolMenus {
     /// display options to View, and Sequence, Cloning and Align menus before
     /// View.
     static func install(in main: NSMenu) {
-        if let app = main.item(withTitle: "OpenClone")?.submenu {
+        if let app = main.item(withTitle: "Restricto")?.submenu {
             experimentalToggle.target = ExperimentalSwitch.shared
             app.insertItem(experimentalToggle, at: min(2, app.numberOfItems))
             app.insertItem(.separator(), at: min(3, app.numberOfItems))

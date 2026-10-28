@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AppKit
-import OpenCloneCore
+import RestrictoCore
 
 /// Double-strand sequence view. Lives inside an NSScrollView as its document
 /// view; only the visible lines are drawn.

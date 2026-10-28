@@ -1,4 +1,4 @@
-module OpenCloneCore {
-    header "openclone.h"
+module RestrictoCore {
+    header "restricto.h"
     export *
 }

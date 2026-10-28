@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Plain C interface over the OpenClone core and layout code, for frontends
+ * Plain C interface over the Restricto core and layout code, for frontends
  * written in other languages (the Swift/AppKit app on macOS).
  *
  * Ownership: *_new returns an object you free with the matching *_free.
@@ -10,8 +10,8 @@
  * Layouts keep pointers into their document. Rebuild them (free + new)
  * after the document reports OC_CHANGED_SEQUENCE or OC_CHANGED_ENZYMES.
  */
-#ifndef OPENCLONE_H
-#define OPENCLONE_H
+#ifndef RESTRICTO_H
+#define RESTRICTO_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -391,4 +391,4 @@ bool oc_scene_text(const OCScene *scene, int index, OCTextInfo *out);
 }
 #endif
 
-#endif /* OPENCLONE_H */
+#endif /* RESTRICTO_H */

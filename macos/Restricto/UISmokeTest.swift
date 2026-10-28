@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // A launch check for CI, where nobody can click:
-//   OpenClone --ui-smoke <out-dir> <file>
+//   Restricto --ui-smoke <out-dir> <file>
 // opens <file> in a real window, then resizes it to its minimum size, below
 // it (as a restored frame can be), collapses and reopens the sidebar, and
 // saves a PNG of the window after each step. It exits 0 when every step got

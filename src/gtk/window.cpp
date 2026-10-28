@@ -122,7 +122,7 @@ void Window::buildUi(GtkApplication *app)
 {
     m_window = adw_application_window_new(app);
     gtk_window_set_default_size(GTK_WINDOW(m_window), 1320, 820);
-    gtk_window_set_title(GTK_WINDOW(m_window), "OpenClone");
+    gtk_window_set_title(GTK_WINDOW(m_window), "Restricto");
     g_object_set_data_full(G_OBJECT(m_window), "oc-window", this,
                            [](gpointer p) { delete static_cast<Window *>(p); });
 
@@ -179,7 +179,7 @@ void Window::buildUi(GtkApplication *app)
 
     // Header bar.
     GtkWidget *header = adw_header_bar_new();
-    m_title = adw_window_title_new("OpenClone", "");
+    m_title = adw_window_title_new("Restricto", "");
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), m_title);
 
     GtkWidget *open = gtk_button_new_from_icon_name("document-open-symbolic");
@@ -271,7 +271,7 @@ void Window::buildUi(GtkApplication *app)
 
     // Empty state.
     GtkWidget *empty = adw_status_page_new();
-    adw_status_page_set_icon_name(ADW_STATUS_PAGE(empty), "io.github.openclone.OpenClone");
+    adw_status_page_set_icon_name(ADW_STATUS_PAGE(empty), "io.github.mrgarbett.Restricto");
     adw_status_page_set_title(ADW_STATUS_PAGE(empty), "Open a Sequence");
     adw_status_page_set_description(ADW_STATUS_PAGE(empty),
                                     "GenBank, FASTA and SnapGene .dna files.\nYou can also drop a file here.");
@@ -302,7 +302,7 @@ void Window::buildUi(GtkApplication *app)
     adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar), header);
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), m_stack);
     // The version sits at the right of the status bar while we're in alpha.
-    GtkWidget *version = gtk_label_new("OpenClone " OPENCLONE_VERSION);
+    GtkWidget *version = gtk_label_new("Restricto " RESTRICTO_VERSION);
     gtk_widget_add_css_class(version, "dim-label");
     gtk_widget_add_css_class(version, "caption");
     gtk_widget_set_margin_end(version, 12);
@@ -504,9 +504,9 @@ void Window::updateTitle()
 {
     const Sequence &s = m_doc.sequence();
     if (m_doc.isEmpty()) {
-        adw_window_title_set_title(ADW_WINDOW_TITLE(m_title), "OpenClone");
+        adw_window_title_set_title(ADW_WINDOW_TITLE(m_title), "Restricto");
         adw_window_title_set_subtitle(ADW_WINDOW_TITLE(m_title), "");
-        gtk_window_set_title(gtkWindow(), "OpenClone");
+        gtk_window_set_title(gtkWindow(), "Restricto");
         return;
     }
     const std::string name = s.name.empty() ? "Untitled" : s.name;
@@ -516,7 +516,7 @@ void Window::updateTitle()
     const std::string shown = m_doc.isModified() ? "• " + name : name;
     adw_window_title_set_title(ADW_WINDOW_TITLE(m_title), shown.c_str());
     adw_window_title_set_subtitle(ADW_WINDOW_TITLE(m_title), sub.c_str());
-    gtk_window_set_title(gtkWindow(), (shown + " — OpenClone").c_str());
+    gtk_window_set_title(gtkWindow(), (shown + " — Restricto").c_str());
     updateStatus();
 }
 
@@ -665,7 +665,7 @@ void Window::onFilterChanged(GObject *dd, GParamSpec *, gpointer p)
 namespace {
 std::string enzymeSetsPath()
 {
-    gchar *path = g_build_filename(g_get_user_config_dir(), "openclone", "enzyme-sets.txt", nullptr);
+    gchar *path = g_build_filename(g_get_user_config_dir(), "restricto", "enzyme-sets.txt", nullptr);
     std::string out = path;
     g_free(path);
     return out;
@@ -1018,7 +1018,7 @@ const char *const kExperimentalActions[] = {
 
 std::string settingsPath()
 {
-    gchar *path = g_build_filename(g_get_user_config_dir(), "openclone", "settings.ini", nullptr);
+    gchar *path = g_build_filename(g_get_user_config_dir(), "restricto", "settings.ini", nullptr);
     std::string out = path;
     g_free(path);
     return out;
@@ -1132,7 +1132,7 @@ void Window::rebuildMenu()
     GMenu *appSection = g_menu_new();
     g_menu_append_submenu(appSection, "View", G_MENU_MODEL(viewMenu));
     g_menu_append(appSection, "Experimental Tools", "app.experimental");
-    g_menu_append(appSection, "About OpenClone", "app.about");
+    g_menu_append(appSection, "About Restricto", "app.about");
     g_menu_append_section(menu, nullptr, G_MENU_MODEL(appSection));
     gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(m_menuButton), G_MENU_MODEL(menu));
     for (GMenu *m : {fileSection, editSection, seqSection, featureMenu, primerMenu, cloneMenu, verifyMenu, viewMenu,
