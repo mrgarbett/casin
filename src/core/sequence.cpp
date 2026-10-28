@@ -130,6 +130,33 @@ std::string Sequence::slice(int start, int len) const
     return out;
 }
 
+std::string Sequence::shown(int start, int len) const
+{
+    const int n = length();
+    start = std::clamp(start, 0, n);
+    len = std::clamp(len, 0, n - start);
+    std::string out = bases.substr(size_t(start), size_t(len));
+    if (lower.size() == bases.size())   // marks always match the bases; guard anyway
+        for (int i = 0; i < len; ++i)
+            if (lower[size_t(start + i)])
+                out[size_t(i)] = char(std::tolower(static_cast<unsigned char>(out[size_t(i)])));
+    return out;
+}
+
+void Sequence::setBasesFromText(const std::string &raw)
+{
+    const std::string cased = cleanBasesKeepingCase(raw);
+    bases = cleanBases(cased);
+    lower.clear();
+    const bool hasLower = std::any_of(cased.begin(), cased.end(), [](char c) { return c >= 'a' && c <= 'z'; });
+    const bool hasUpper = std::any_of(cased.begin(), cased.end(), [](char c) { return c >= 'A' && c <= 'Z'; });
+    if (hasLower && hasUpper) {
+        lower.reserve(cased.size());
+        for (char c : cased)
+            lower.push_back(c >= 'a' && c <= 'z');
+    }
+}
+
 std::vector<int> Sequence::featurePositions(const Feature &f) const
 {
     std::vector<int> pos;
@@ -273,7 +300,7 @@ std::string cleanBases(const std::string &raw)
     return out;
 }
 
-std::string cleanPrimerBases(const std::string &raw)
+std::string cleanBasesKeepingCase(const std::string &raw)
 {
     std::string out;
     out.reserve(raw.size());
@@ -285,6 +312,12 @@ std::string cleanPrimerBases(const std::string &raw)
         if (iupacMask(u))
             out.push_back(lower ? char(u + 32) : u);
     }
+    return out;
+}
+
+std::string cleanPrimerBases(const std::string &raw)
+{
+    const std::string out = cleanBasesKeepingCase(raw);
     const bool hasLower = std::any_of(out.begin(), out.end(), [](char c) { return c >= 'a' && c <= 'z'; });
     const bool hasUpper = std::any_of(out.begin(), out.end(), [](char c) { return c >= 'A' && c <= 'Z'; });
     return hasLower && hasUpper ? out : cleanBases(out);

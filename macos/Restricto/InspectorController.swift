@@ -19,6 +19,8 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     private(set) lazy var pill: NSView = buildPill()
     /// Called after a pill button picks a pane, with whether it was already showing.
     var onPick: ((Pane, Bool) -> Void)?
+    /// Called with a feature's index when its row is double-clicked.
+    var onEditFeature: ((Int) -> Void)?
     /// Holds the window's sequence view while the panel shows it.
     private let sequenceHolder = NSView()
     private let featureTable = NSTableView()
@@ -60,7 +62,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         buildFeaturesTab()
         buildPrimersTab()
 
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 600))
+        let root = Glass.sidePanelBackground(frame: NSRect(x: 0, y: 0, width: 320, height: 600))
         tabs.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(tabs)
         NSLayoutConstraint.activate([
@@ -209,6 +211,8 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
 
     private func buildFeaturesTab() {
         let scroll = makeTable(featureTable, columns: [("name", "Feature", 150), ("location", "Location", 110)])
+        featureTable.target = self
+        featureTable.doubleAction = #selector(featureDoubleClicked(_:))
         let item = NSTabViewItem(identifier: Pane.features.rawValue)
         item.label = "Features"
         item.view = scroll
@@ -317,6 +321,12 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         } else {
             featureTable.deselectAll(nil)
         }
+    }
+
+    @objc private func featureDoubleClicked(_ sender: NSTableView) {
+        let row = sender.clickedRow
+        guard row >= 0 && row < features.count else { return }
+        onEditFeature?(features[row].index)
     }
 
     @objc private func filterChanged(_ sender: NSPopUpButton) {
@@ -447,7 +457,20 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
             label.lineBreakMode = .byTruncatingTail
             label.toolTip = e.name
             label.textColor = e.passesFilter ? .labelColor : .tertiaryLabelColor
-            return label
+            guard e.methylationBlocked > 0 else { return label }
+            // Dam/Dcm: a small orange tag; the tooltip says how many sites it blocks.
+            let tag = NSTextField(labelWithString: e.methylation == "Dam and Dcm" ? "Dam·Dcm" : e.methylation)
+            tag.font = .systemFont(ofSize: 9, weight: .semibold)
+            tag.textColor = .systemOrange
+            let all = e.methylationBlocked >= e.cuts
+            let tip = "\(e.name): \(all ? "every site" : "\(e.methylationBlocked) of \(e.cuts) sites") blocked by "
+                + "\(e.methylation) methylation when the DNA comes from a dam+ dcm+ E. coli strain"
+            label.toolTip = tip
+            tag.toolTip = tip
+            tag.setContentCompressionResistancePriority(.required, for: .horizontal)
+            let stack = NSStackView(views: [label, tag])
+            stack.spacing = 4
+            return stack
         case "site":
             let label = NSTextField(labelWithString: e.site)
             label.lineBreakMode = .byTruncatingTail

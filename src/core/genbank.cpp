@@ -305,7 +305,7 @@ bool readGenBank(const std::string &data, Sequence *out, std::string *error)
         const bool keywordLine = !line.empty() && !std::isspace(static_cast<unsigned char>(line[0]));
 
         if (mode == Mode::Origin && !keywordLine) {
-            bases += cleanBases(line);
+            bases += cleanBasesKeepingCase(line);
             continue;
         }
         if (keywordLine) {
@@ -396,7 +396,7 @@ bool readGenBank(const std::string &data, Sequence *out, std::string *error)
         return false;
     }
 
-    seq.bases = bases;
+    seq.setBasesFromText(bases);   // GenBank is usually all lowercase: that means none marked
     definition = trim(definition);
     if (definition == ".")
         definition.clear();
@@ -569,7 +569,8 @@ std::string writeGenBank(const Sequence &seq)
     }
 
     out += "ORIGIN\n";
-    const std::string lower = toLower(seq.bases);
+    // Lowercase by convention; with marked bases, their case as shown.
+    const std::string lower = seq.lower.empty() ? toLower(seq.bases) : seq.shownBases();
     for (int i = 0; i < n; i += 60) {
         std::string l = pad(std::to_string(i + 1), 9, true);
         for (int j = i; j < std::min(i + 60, n); j += 10)

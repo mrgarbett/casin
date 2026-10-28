@@ -29,6 +29,7 @@ add_library(restricto_core STATIC
     src/core/abif.cpp
     src/core/align.cpp
     src/core/orf.cpp
+    src/core/featurelib.cpp
     src/core/protein.cpp
     src/core/embl.cpp
     src/core/enzymesets.cpp

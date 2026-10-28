@@ -47,6 +47,15 @@ const Enzyme *findEnzyme(const std::string &name);
 // linear ones. The returned pointers refer into `enzymes`.
 std::vector<CutSite> findSites(const Sequence &seq, const std::vector<Enzyme> &enzymes);
 
+// E. coli methylation that can block a site, for DNA from a dam+ dcm+ strain
+// (most cloning strains): Dam methylates the A of GATC, Dcm the inner C of
+// CCWGG, on both strands. A site counts as blocked when its enzyme is
+// sensitive (NEB's Dam-Dcm methylation chart, enzymes in commonEnzymes()) and a
+// methylated base falls inside its recognition site.
+enum MethylationBlock { MethylNone = 0, MethylDam = 1, MethylDcm = 2 };
+int methylationBlock(const Sequence &seq, const CutSite &site);
+std::string methylationName(int block);   // "", "Dam", "Dcm", "Dam and Dcm"
+
 // Commercial suppliers (REBASE codes) and which of them sell an enzyme.
 struct Supplier {
     char code;

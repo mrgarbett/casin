@@ -102,6 +102,7 @@ private:
     int m_n;
     bool m_circular;
     std::vector<int> m_cutCount;   // per site: total cuts of its enzyme
+    std::vector<int> m_methyl;     // per site: MethylationBlock flags
     std::vector<FeatureGlyph> m_features;
     // ORFs drawn as arrows (MapOptions::frames): each on a row of its strand.
     struct OrfGlyph {
@@ -110,8 +111,8 @@ private:
         int row = 0;
     };
     std::vector<OrfGlyph> m_orfs;
-    int m_orfRows = 0;   // rows per strand
-    double m_orfR = 0;   // circular: radius of the first forward row
+    int m_orfRows = 0;      // rows per strand
+    double m_orfBand = 0;   // room the rows take next to the backbone, before the ticks
     std::vector<LabelGlyph> m_labels;
     std::vector<TextItem> m_tickLabels;
     std::vector<std::pair<Point, Point>> m_ticks;

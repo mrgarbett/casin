@@ -75,6 +75,17 @@ final class Form {
         return boxes
     }
 
+    @discardableResult
+    func color(_ label: String, _ value: NSColor) -> NSColorWell {
+        let well = NSColorWell(frame: NSRect(x: 0, y: 0, width: 44, height: 24))
+        well.color = value
+        well.translatesAutoresizingMaskIntoConstraints = false
+        well.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        well.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        addRow(label, well)
+        return well
+    }
+
     func note(_ text: String) {
         let label = NSTextField(wrappingLabelWithString: text)
         label.textColor = .secondaryLabelColor

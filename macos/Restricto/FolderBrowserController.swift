@@ -110,7 +110,7 @@ final class FolderBrowserController: NSViewController, NSOutlineViewDataSource, 
         search.target = self
         search.action = #selector(searchChanged(_:))
 
-        let rootView = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 600))
+        let rootView = Glass.sidePanelBackground(frame: NSRect(x: 0, y: 0, width: 240, height: 600))
         for v in [folderLabel, choose, search, scroll, empty] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             rootView.addSubview(v)

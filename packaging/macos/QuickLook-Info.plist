@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>RestrictoQuickLook</string>
+    <key>CFBundleDisplayName</key><string>Restricto Preview</string>
+    <key>CFBundleIdentifier</key><string>io.github.mrgarbett.Restricto.QuickLook</string>
+    <key>CFBundleExecutable</key><string>RestrictoQuickLook</string>
+    <key>CFBundlePackageType</key><string>XPC!</string>
+    <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>LSMinimumSystemVersion</key><string>13.0</string>
+    <key>NSHumanReadableCopyright</key><string>Restricto contributors. GPL-3.0-or-later.</string>
+    <key>NSExtension</key>
+    <dict>
+        <key>NSExtensionPointIdentifier</key><string>com.apple.quicklook.preview</string>
+        <key>NSExtensionPrincipalClass</key><string>PreviewProvider</string>
+        <key>NSExtensionAttributes</key>
+        <dict>
+            <key>QLIsDataBasedPreview</key><true/>
+            <key>QLSupportsSearchableItems</key><false/>
+            <key>QLSupportedContentTypes</key>
+            <array>
+                <string>io.github.mrgarbett.restricto.genbank</string>
+                <string>biosequence.genbank</string>
+                <string>biosequence.genbank.extended</string>
+                <string>edu.utah.biology.jorgensen.ape</string>
+                <string>io.github.mrgarbett.restricto.snapgene-dna</string>
+                <string>com.gslbiotech.dna</string>
+                <string>io.github.mrgarbett.restricto.fasta</string>
+                <string>biosequence.fasta</string>
+                <string>biosequence.fasta.multi</string>
+                <string>io.github.mrgarbett.restricto.embl</string>
+                <string>biosequence.embl</string>
+            </array>
+        </dict>
+    </dict>
+</dict>
+</plist>

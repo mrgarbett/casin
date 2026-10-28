@@ -167,6 +167,8 @@ int main(int argc, char **argv)
     CHECK(strcmp(fin.name, "tag") == 0 && fin.strand == OC_STRAND_REVERSE);
     oc_document_update_feature(doc, fi, "tag2", "CDS", OC_STRAND_FORWARD, 100, 30);
     CHECK(oc_document_feature(doc, fi, &fin) && fin.part_count == 1 && fin.start == 100);
+    oc_document_set_feature_color(doc, fi, "#ff0000");
+    CHECK(oc_document_feature(doc, fi, &fin) && fin.color.r > 0.99 && fin.color.g < 0.01);
     oc_document_remove_feature(doc, fi);
     CHECK(oc_document_feature_count(doc) == features);
     int primers = oc_document_primer_count(doc);

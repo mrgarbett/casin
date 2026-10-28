@@ -42,6 +42,8 @@ static void testUndo(const Sequence &seq)
     doc.setSelection({10, 0});
     CHECK(doc.typeBases("gg aa"));
     CHECK(!doc.typeBases("123"));
+    CHECK(!doc.typeBases("N"));   // only A, C, G and T can be typed
+    CHECK(doc.sequence().shown(10, 4) == "ggaa" && doc.sequence().bases.substr(10, 4) == "GGAA");
     CHECK_EQ(doc.sequence().length(), int(original.size()) + 4);
     CHECK(doc.selection().start == 14 && doc.selection().length == 0);
     CHECK(doc.isModified() && doc.canUndo());
@@ -153,6 +155,14 @@ int main(int argc, char **argv)
     // A click on the first line's first base gives position 0; further right, later.
     const double y0 = sl.lineTopFor(0) + sl.lineHeightFor(0) / 2;
     CHECK(sl.positionAt({0, y0}) == 0);
+    // Hovering: the first base under the mouse on the first line is base 0;
+    // above the strands (the enzyme labels) is no base.
+    int firstBase = -1;
+    for (double y = sl.lineTopFor(0); y < sl.lineTopFor(0) + sl.lineHeightFor(0) && firstBase < 0; y += 1)
+        for (double x = 0; x < 900 && firstBase < 0; x += 1)
+            firstBase = sl.baseAt({x, y});
+    CHECK(firstBase == 0);
+    CHECK(sl.baseAt({300, sl.lineTopFor(0)}) == -1);
     CHECK(sl.positionAt({300, y0}) > 0);
     CHECK(sl.positionAt({300, sl.lineTopFor(sl.basesPerLine()) + 5}) > sl.basesPerLine());
     Scene ss = sl.render(0, 600, {});

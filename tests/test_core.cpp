@@ -11,6 +11,7 @@
 #include "core/primercheck.h"
 #include "core/protein.h"
 #include "core/enzymes.h"
+#include "core/featurelib.h"
 #include "core/fasta.h"
 #include "core/genbank.h"
 #include "core/seqio.h"
@@ -1240,6 +1241,128 @@ static void testOrfs()
         CHECK(o.protein != "MPPPPPPPPPPP");   // the one across the origin is gone
 }
 
+// Lowercase marks: kept from mixed-case files, through edits and saving;
+// a file all in one case has none.
+static void testLowercase()
+{
+    Sequence s;
+    s.setBasesFromText("ACGTacgtAC");
+    CHECK_EQ(s.bases, std::string("ACGTACGTAC"));
+    CHECK_EQ(s.shownBases(), std::string("ACGTacgtAC"));
+    Sequence all;
+    all.setBasesFromText("acgtacgt");
+    CHECK(all.lower.empty() && all.bases == "ACGTACGT");
+    // Saved and read back in each format.
+    s.name = "low";
+    Sequence r;
+    CHECK(readGenBank(writeGenBank(s), &r));
+    CHECK_EQ(r.shownBases(), std::string("ACGTacgtAC"));
+    CHECK(readFasta(writeFasta(s), &r));
+    CHECK_EQ(r.shownBases(), std::string("ACGTacgtAC"));
+    CHECK(readSnapGene(writeSnapGene(s), &r));
+    CHECK_EQ(r.shownBases(), std::string("ACGTacgtAC"));
+    // A plain GenBank (all lowercase ORIGIN) has no marks.
+    all.name = "all";
+    CHECK(readGenBank(writeGenBank(all), &r) && r.lower.empty());
+    // Edits keep the marks on their bases.
+    Sequence e = s;
+    insertBases(e, 2, "gg");
+    CHECK_EQ(e.shownBases(), std::string("ACggGTacgtAC"));
+    deleteBases(e, {0, 3});
+    CHECK_EQ(e.shownBases(), std::string("gGTacgtAC"));
+    reverseComplementSequence(e);
+    CHECK_EQ(e.shownBases(), std::string("GTacgtACc"));
+    Sequence c = s;
+    c.circular = true;
+    rotateOrigin(c, 4);
+    CHECK_EQ(c.shownBases(), std::string("acgtACACGT"));
+    CHECK_EQ(extractFragment(c, {8, 4}).shownBases(), std::string("GTac"));
+    Sequence u = s;
+    insertBases(u, 0, "TT");   // uppercase into a marked sequence stays uppercase
+    CHECK_EQ(u.shownBases(), std::string("TTACGTacgtAC"));
+}
+
+// Dam/Dcm blocking: only for sensitive enzymes, only when a methylated base
+// falls inside the site.
+static void testMethylation()
+{
+    auto blockOf = [](const std::string &bases, const std::string &enzyme) {
+        Sequence s;
+        s.bases = bases;
+        const std::vector<Enzyme> one = {*findEnzyme(enzyme)};   // sites point into it
+        const std::vector<CutSite> sites = findSites(s, one);
+        return sites.empty() ? -1 : methylationBlock(s, sites.front());
+    };
+    CHECK(blockOf("AAAATCTAGAAAAA", "XbaI") == MethylNone);
+    CHECK(blockOf("AAAATCTAGATCAA", "XbaI") == MethylDam);     // TCTAGATC
+    CHECK(blockOf("AAAATGATCAAAAA", "BclI") == MethylDam);     // GATC inside the site
+    CHECK(blockOf("AAAAGGATCCAAAA", "BamHI") == MethylNone);   // BamHI isn't sensitive
+    CHECK(blockOf("AAAAGGCCTGGAAA", "StuI") == MethylDcm);     // AGGCCTGG, with the A before
+    CHECK(blockOf("AAAAGGCCTAAAAA", "StuI") == MethylNone);    // no CCWGG
+    CHECK(blockOf("AAAAAAAAAAAAAA", "StuI") == -1);            // no site
+    CHECK(methylationName(MethylDam | MethylDcm) == "Dam and Dcm");
+}
+
+static void testCommonFeatures()
+{
+    const CommonElement *amp = nullptr, *t7 = nullptr, *m13 = nullptr;
+    for (const CommonElement &e : commonElements()) {
+        if (std::string(e.name) == "AmpR")
+            amp = &e;
+        if (std::string(e.name) == "T7 promoter")
+            t7 = &e;
+        if (std::string(e.name) == "M13 fwd")
+            m13 = &e;
+    }
+    CHECK(amp && t7 && m13);
+    if (!amp || !t7 || !m13)
+        return;
+    // Filler with no element in it, AmpR with 3 mismatches (on the forward
+    // strand), and the T7 promoter on the reverse strand.
+    std::string filler;
+    unsigned x = 7;
+    for (int i = 0; i < 300; ++i) {
+        x = x * 1103515245u + 12345u;
+        filler += "ACGT"[(x >> 16) & 3];
+    }
+    std::string ampBases = amp->bases;
+    for (int i : {100, 400, 700})
+        ampBases[size_t(i)] = ampBases[size_t(i)] == 'A' ? 'C' : 'A';
+    Sequence s;
+    s.circular = true;
+    s.bases = filler + ampBases + filler + reverseComplement(t7->bases) + filler;
+    std::vector<Feature> found = findCommonFeatures(s);
+    CHECK(found.size() == 2);
+    if (found.size() == 2) {
+        CHECK(found[0].name == "AmpR" && found[0].type == "CDS" && found[0].strand == Strand::Forward);
+        CHECK(found[0].ranges.size() == 1 && found[0].ranges[0].start == 300 && found[0].ranges[0].end == 300 + int(ampBases.size()));
+        CHECK(found[1].name == "T7 promoter" && found[1].strand == Strand::Reverse);
+        CHECK(found[1].ranges[0].length() == int(std::string(t7->bases).size()));
+    }
+    // A short element with one mismatch isn't found.
+    Sequence t;
+    std::string m = m13->bases;
+    m[5] = m[5] == 'A' ? 'C' : 'A';
+    t.bases = filler + m + filler;
+    CHECK(findCommonFeatures(t).empty());
+    // Across the origin: two ranges.
+    rotateOrigin(s, 300 + 500);
+    found = findCommonFeatures(s);
+    CHECK(found.size() == 2);
+    bool wrapped = false;
+    for (const Feature &f : found)
+        wrapped = wrapped || (f.name == "AmpR" && f.ranges.size() == 2 && f.totalLength() == int(ampBases.size()));
+    CHECK(wrapped);
+    // Already annotated: left out.
+    s.features = found;
+    CHECK(findCommonFeatures(s).empty());
+    // Linear: no match across the end.
+    s.features.clear();
+    s.circular = false;
+    found = findCommonFeatures(s);
+    CHECK(found.size() == 1 && found[0].name == "T7 promoter");
+}
+
 int main(int argc, char **argv)
 {
     testBasics();
@@ -1265,6 +1388,9 @@ int main(int argc, char **argv)
     testOrfs();
     testEnzymeSets();
     testOverhangClone();
+    testLowercase();
+    testMethylation();
+    testCommonFeatures();
     if (argc > 1) {
         testEmbl(argv[1]);
         testSamples(argv[1]);

@@ -2,11 +2,14 @@
 #include "document.h"
 #include "maplayout.h"   // withThousands
 #include "../core/edit.h"
+#include "../core/featurelib.h"
 #include "../core/tm.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 namespace oc {
 
@@ -316,7 +319,15 @@ void Document::markUnsaved()
 
 bool Document::typeBases(const std::string &text)
 {
-    const std::string bases = cleanBases(text);
+    std::string bases;
+    for (char c : text) {
+        const unsigned char u = static_cast<unsigned char>(c);
+        if (std::isspace(u) || std::isdigit(u))
+            continue;
+        if (!std::strchr("ACGTacgt", c))
+            return false;
+        bases.push_back(c);
+    }
     if (bases.empty())
         return false;
     const Span sel = m_hasSelection ? m_selection : Span{m_seq.length(), 0};
@@ -502,6 +513,21 @@ void Document::removeFeature(int index)
              return true;
          },
          [&] { return sel; });
+}
+
+int Document::annotateCommonFeatures()
+{
+    const std::vector<Feature> found = findCommonFeatures(m_seq);
+    if (found.empty())
+        return 0;
+    const Span sel = m_selection;
+    edit("Annotate Common Features",
+         [&](Sequence &s) {
+             s.features.insert(s.features.end(), found.begin(), found.end());
+             return true;
+         },
+         [&] { return sel; });
+    return int(found.size());
 }
 
 int Document::addPrimerFromSelection(const std::string &name, Strand strand)
