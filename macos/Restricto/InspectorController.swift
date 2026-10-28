@@ -3,8 +3,9 @@ import AppKit
 import RestrictoCore
 
 /// The window's right-hand panel: the sequence (when the map sits beside it),
-/// Enzymes, Features or Primers, picked from a vertical pill along its right
-/// edge. Vibrant on Ventura, glass on macOS 26.
+/// Enzymes, Features or Primers, picked from a vertical pill. The window floats
+/// the pill over the middle, beside the panel, so it stays when the panel is
+/// hidden. Vibrant on Ventura, glass on macOS 26.
 final class InspectorController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     enum Pane: String, CaseIterable {
         case sequence, enzymes, features, primers
@@ -14,6 +15,10 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     private let tabs = NSTabView()
     /// The pill's buttons, one per pane in Pane order.
     private var pillButtons: [NSButton] = []
+    /// The vertical pill; the window places it.
+    private(set) lazy var pill: NSView = buildPill()
+    /// Called after a pill button picks a pane, with whether it was already showing.
+    var onPick: ((Pane, Bool) -> Void)?
     /// Holds the window's sequence view while the panel shows it.
     private let sequenceHolder = NSView()
     private let featureTable = NSTableView()
@@ -54,19 +59,14 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         buildEnzymesTab()
         buildFeaturesTab()
         buildPrimersTab()
-        let pill = buildPill()
 
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 600))
-        for v in [tabs, pill] {
-            v.translatesAutoresizingMaskIntoConstraints = false
-            root.addSubview(v)
-        }
+        tabs.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(tabs)
         NSLayoutConstraint.activate([
-            pill.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 8),
-            pill.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor, constant: -8),
             tabs.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 4),
             tabs.leadingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.leadingAnchor),
-            tabs.trailingAnchor.constraint(equalTo: pill.leadingAnchor, constant: -6),
+            tabs.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor),
             tabs.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
         view = root
@@ -97,8 +97,8 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
                 view.bottomAnchor.constraint(equalTo: sequenceHolder.bottomAnchor),
             ])
         }
-        guard isViewLoaded else { return }
         pillButtons.first?.isHidden = view == nil
+        guard isViewLoaded else { return }
         select(view != nil ? .sequence : tablePane)
     }
 
@@ -147,11 +147,13 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
 
     @objc private func pillClicked(_ sender: NSButton) {
         let pane = Pane.allCases[sender.tag]
+        let wasShowing = pane == self.pane
         if pane != .sequence {
             tablePane = pane
             UserDefaults.standard.set(pane.rawValue, forKey: Self.paneKey)
         }
         select(pane)
+        onPick?(pane, wasShowing)
     }
 
     private func makeTable(_ table: NSTableView, columns: [(String, String, CGFloat)]) -> NSScrollView {
@@ -204,6 +206,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         enzymeSearch.controlSize = .small
         enzymeSearch.target = self
         enzymeSearch.action = #selector(enzymeSearchChanged(_:))
+        onMapOnly.title = "On map only"
         onMapOnly.controlSize = .small
         onMapOnly.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         onMapOnly.toolTip = "Hide enzymes the cut filter leaves out or that are unticked"
@@ -215,7 +218,13 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         let credit = NSTextField(labelWithString: "Enzyme data: REBASE, rebase.neb.com")
         credit.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         credit.textColor = .secondaryLabelColor
-        let stack = NSStackView(views: [enzymeSearch, filter, onMapOnly, scroll, credit])
+        // The cut filter takes the row's spare width; the switch keeps its own.
+        let filterRow = NSStackView(views: [filter, onMapOnly])
+        filterRow.spacing = 8
+        filter.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
+        filter.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        onMapOnly.setContentHuggingPriority(.required, for: .horizontal)
+        let stack = NSStackView(views: [enzymeSearch, filterRow, scroll, credit])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.distribution = .fill
@@ -225,6 +234,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16).isActive = true
         enzymeSearch.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16).isActive = true
+        filterRow.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -16).isActive = true
         // NSTabView shrinks a stack view item to its fitting size, so give the
         // tab a plain container and pin the stack inside it.
         let container = NSView()

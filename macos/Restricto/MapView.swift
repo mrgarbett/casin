@@ -30,6 +30,16 @@ final class MapView: NSView {
         if let layout = layout { oc_map_layout_free(layout) }
     }
 
+    /// Room kept free along the right edge (the panel's pill floats there).
+    var trailingInset: CGFloat = 0 {
+        didSet { if trailingInset != oldValue { invalidateLayout() } }
+    }
+
+    /// The size the map is laid out in: the view less the trailing inset.
+    private var mapSize: CGSize {
+        CGSize(width: max(1, bounds.width - trailingInset), height: bounds.height)
+    }
+
     override var isFlipped: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
@@ -46,10 +56,10 @@ final class MapView: NSView {
 
     private func ensureLayout() -> OpaquePointer? {
         let dark = isDarkAppearance
-        if layout == nil || layoutSize != bounds.size || layoutDark != dark {
+        if layout == nil || layoutSize != mapSize || layoutDark != dark {
             if let old = layout { oc_map_layout_free(old) }
-            layout = newMapLayout(document, size: bounds.size, dark: dark)
-            layoutSize = bounds.size
+            layout = newMapLayout(document, size: mapSize, dark: dark)
+            layoutSize = mapSize
             layoutDark = dark
         }
         return layout

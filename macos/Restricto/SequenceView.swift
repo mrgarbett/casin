@@ -50,13 +50,18 @@ final class SequenceView: NSView {
         invalidateLayout()
     }
 
+    /// Room kept free along the right edge (the panel's pill floats there).
+    var trailingInset: CGFloat = 0 {
+        didSet { if trailingInset != oldValue { invalidateLayout() } }
+    }
+
     private var availableWidth: CGFloat {
         enclosingScrollView?.contentSize.width ?? bounds.width
     }
 
     @discardableResult
     private func ensureLayout() -> OpaquePointer? {
-        let width = Double(availableWidth)
+        let width = Double(max(1, availableWidth - trailingInset))
         let dark = isDarkAppearance
         if layout == nil || layoutWidth != width || layoutDark != dark {
             if let old = layout { oc_seq_layout_free(old) }
