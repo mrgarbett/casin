@@ -22,6 +22,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private let browser = FolderBrowserController()
     private let inspector: InspectorController
     private var inspectorItem: NSSplitViewItem?
+    private var detailItem: NSSplitViewItem?
     private var splitController: NSSplitViewController?
     /// macOS 26: the status floats over the middle, so the sequence there scrolls clear of it.
     private var floatsStatus = false
@@ -171,6 +172,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         sidebarItem.canCollapse = true
         let detailItem = NSSplitViewItem(viewController: detail)
         Glass.extendUnderSidebar(detailItem)
+        self.detailItem = detailItem
         let inspectorItem = NSSplitViewItem(inspectorWithViewController: inspector)
         inspectorItem.minimumThickness = 280
         inspectorItem.maximumThickness = 460
@@ -266,8 +268,12 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         // The floating status covers the bottom of the middle only.
         sequenceScroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: floatsStatus && !sequenceInPanel ? 52 : 0,
                                                     right: 0)
-        // A panel holding the sequence may grow as wide as the user likes.
+        // A panel holding the sequence may grow as wide as the user likes, but
+        // not over the middle: the split view (not the constraints inside the
+        // middle) has to keep room for the map, or for the sequence when the
+        // middle shows it, so the panel gives way on a narrow window too.
         inspectorItem?.maximumThickness = sequenceInPanel ? NSSplitViewItem.unspecifiedDimension : 460
+        detailItem?.minimumThickness = sequenceInPanel ? 260 : 320
         split.adjustSubviews()
         sequenceView.updateSize()
     }
