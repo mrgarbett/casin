@@ -34,6 +34,16 @@ struct FeatureInfo {
     let drawn: Bool
 }
 
+struct PrimerInfo {
+    let index: Int
+    let name: String
+    let bases: String
+    /// Binding site, 0-based; length 0 when the primer doesn't bind.
+    let start: Int
+    let length: Int
+    let strand: Int32
+}
+
 struct EnzymeInfo {
     let name: String
     let site: String
@@ -115,6 +125,15 @@ final class CoreDocument {
             guard oc_document_enzyme(handle, Int32(i), &e) else { return nil }
             return EnzymeInfo(name: String(cString: e.name), site: String(cString: e.site), cuts: Int(e.cuts),
                               hidden: e.hidden, passesFilter: e.passes_filter)
+        }
+    }
+
+    var primers: [PrimerInfo] {
+        (0..<Int(oc_document_primer_count(handle))).compactMap { i in
+            var p = OCPrimerInfo()
+            guard oc_document_primer(handle, Int32(i), &p) else { return nil }
+            return PrimerInfo(index: i, name: String(cString: p.name), bases: String(cString: p.bases),
+                              start: Int(p.start), length: Int(p.length), strand: p.strand)
         }
     }
 

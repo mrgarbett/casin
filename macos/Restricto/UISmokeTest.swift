@@ -2,8 +2,9 @@
 // A launch check for CI, where nobody can click:
 //   Restricto --ui-smoke <out-dir> <file>
 // opens <file> in a real window, then resizes it to its minimum size, below
-// it (as a restored frame can be), collapses and reopens the sidebar, and
-// saves a PNG of the window after each step. It exits 0 when every step got
+// it (as a restored frame can be), collapses and reopens the sidebar, stacks
+// and hides the map, hides and shows the inspector, and saves a PNG of the
+// window after each step. It exits 0 when every step got
 // through layout; a layout loop or other exception aborts the process instead.
 import AppKit
 
@@ -54,6 +55,8 @@ enum UISmokeTest {
             ("7-map-hidden", { controller?.toggleMapHidden(nil) }),
             ("8-map-shown", { controller?.toggleMapHidden(nil) }),
             ("9-map-beside", { controller?.toggleMapStacked(nil) }),
+            ("9a-inspector-hidden", { controller?.toggleInspector(nil) }),
+            ("9b-inspector-shown", { controller?.toggleInspector(nil) }),
             ("10-below-minimum", { resize(NSSize(width: 600, height: 400)) }),
             ("11-sidebar-toggled-at-quit", { split?.toggleSidebar(nil) }),
         ]
@@ -73,10 +76,13 @@ enum UISmokeTest {
             capture(window, to: out.appendingPathComponent("\(name).png"))
             let split = window.contentViewController as? NSSplitViewController
             let sidebar = split?.splitViewItems.first?.viewController.view.frame.width ?? -1
-            print("ui-smoke: \(name) \(Int(window.frame.width))x\(Int(window.frame.height)) sidebar \(sidebar)")
+            let inspector = split?.splitViewItems.last?.viewController.view.frame.width ?? -1
+            print("ui-smoke: \(name) \(Int(window.frame.width))x\(Int(window.frame.height)) sidebar \(sidebar)"
+                  + " inspector \(inspector)")
             fflush(stdout)   // keep the log if a later step aborts
-            // A sidebar wider than the window means its width ran away.
-            if !sidebar.isFinite || sidebar > window.frame.width {
+            // A side panel wider than the window means its width ran away.
+            if !sidebar.isFinite || sidebar > window.frame.width || !inspector.isFinite
+                || inspector > window.frame.width {
                 FileHandle.standardError.write("ui-smoke: sidebar width ran away\n".data(using: .utf8)!)
                 exit(4)
             }

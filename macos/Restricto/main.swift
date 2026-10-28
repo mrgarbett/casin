@@ -80,6 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ])
         submenu("File", [
             item("Open…", #selector(NSDocumentController.openDocument(_:)), "o"),
+            item("Show Folder in Sidebar…", #selector(DocumentWindowController.chooseBrowserFolder(_:)), "o",
+                 [.command, .shift]),
             .separator(),
             item("Close", #selector(NSWindow.performClose(_:)), "w"),
             item("Save As GenBank…", #selector(DocumentWindowController.saveAsGenBank(_:)), "s", [.command, .shift]),
@@ -96,6 +98,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ])
         submenu("View", [
             item("Toggle Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)), "s", [.command, .control]),
+            item("Toggle Inspector", #selector(DocumentWindowController.toggleInspector(_:)), "i",
+                 [.command, .option]),
             .separator(),
             item("Hide Map", #selector(DocumentWindowController.toggleMapHidden(_:)), "m", [.command, .shift]),
             item("Stack Map Above Sequence", #selector(DocumentWindowController.toggleMapStacked(_:))),

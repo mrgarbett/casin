@@ -3,8 +3,10 @@ import AppKit
 import RestrictoCore
 import UniformTypeIdentifiers
 
-/// The window for one document: a Features/Enzymes sidebar, then map |
-/// sequence (or map over sequence, and the map can be hidden), with find and view controls in a unified toolbar and a status line.
+/// The window for one document: a folder browser on the left, map | sequence
+/// (or map over sequence, and the map can be hidden) in the middle, and an
+/// Enzymes/Features/Primers inspector on the right, with find and view
+/// controls in a unified toolbar and a status line.
 ///
 /// Ventura through Sequoia get the classic layout: a vibrant sidebar and a flat
 /// status line under the content. macOS 26 adds Liquid Glass (see Glass.swift):
@@ -14,7 +16,9 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private let core: CoreDocument
     private let mapView: MapView
     private let sequenceView: SequenceView
-    private let sidebar: SidebarController
+    private let browser = FolderBrowserController()
+    private let inspector: InspectorController
+    private var inspectorItem: NSSplitViewItem?
     private let status = NSTextField(labelWithString: "")
     private let searchField = NSSearchField()
     /// Keeps the glass status inside the sequence pane. A constant, updated on
@@ -40,7 +44,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         core = document.core
         mapView = MapView(document: core)
         sequenceView = SequenceView(document: core)
-        sidebar = SidebarController(document: core)
+        inspector = InspectorController(document: core)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1320, height: 820),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
@@ -89,8 +93,8 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         split.addArrangedSubview(scroll)
         split.setHoldingPriority(.defaultLow, forSubviewAt: 0)
         split.setHoldingPriority(.defaultLow - 1, forSubviewAt: 1)
-        minWidths = [mapView.widthAnchor.constraint(greaterThanOrEqualToConstant: 300),
-                     scroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 360)]
+        minWidths = [mapView.widthAnchor.constraint(greaterThanOrEqualToConstant: 260),
+                     scroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 320)]
         minHeights = [mapView.heightAnchor.constraint(greaterThanOrEqualToConstant: 180),
                       scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 180)]
         applyMapLayout()
@@ -145,18 +149,27 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             ])
         }
 
-        let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebar)
-        sidebarItem.minimumThickness = 260
-        sidebarItem.maximumThickness = 420
+        browser.fallbackFolder = { [weak self] in
+            (self?.document as? NSDocument)?.fileURL?.deletingLastPathComponent()
+        }
+        let sidebarItem = NSSplitViewItem(sidebarWithViewController: browser)
+        sidebarItem.minimumThickness = 200
+        sidebarItem.maximumThickness = 380
         sidebarItem.canCollapse = true
         let detailItem = NSSplitViewItem(viewController: detail)
         Glass.extendUnderSidebar(detailItem)
+        let inspectorItem = NSSplitViewItem(inspectorWithViewController: inspector)
+        inspectorItem.minimumThickness = 280
+        inspectorItem.maximumThickness = 460
+        inspectorItem.canCollapse = true
+        self.inspectorItem = inspectorItem
 
         let splitController = NSSplitViewController()
         Self.discardBrokenSidebarFrames()
-        splitController.splitView.autosaveName = "RestrictoSidebar"
+        splitController.splitView.autosaveName = Self.panesAutosaveName
         splitController.addSplitViewItem(sidebarItem)
         splitController.addSplitViewItem(detailItem)
+        splitController.addSplitViewItem(inspectorItem)
         window.contentViewController = splitController
 
         // The background extension places its content inside the safe area only
@@ -168,9 +181,9 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
                                                    object: splitController.splitView, queue: .main) { [weak self] _ in
                 DispatchQueue.main.async {
                     guard let self = self, let view = self.backgroundExtension else { return }
-                    let inset = view.safeAreaInsets.left
-                    guard inset != self.placedInset else { return }
-                    self.placedInset = inset
+                    let insets = (view.safeAreaInsets.left, view.safeAreaInsets.right)
+                    guard insets != self.placedInsets else { return }
+                    self.placedInsets = insets
                     view.needsLayout = true
                 }
             }
@@ -180,8 +193,10 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     /// Builds with the safe-area pinning in Glass.swift could autosave a
     /// sidebar billions of points wide, which then broke every launch. Forget
     /// saved frames wider than any screen so the split view starts fresh.
+    private static let panesAutosaveName = "RestrictoPanes"
+
     private static func discardBrokenSidebarFrames() {
-        let key = "NSSplitView Subview Frames RestrictoSidebar"
+        let key = "NSSplitView Subview Frames \(panesAutosaveName)"
         guard let frames = UserDefaults.standard.stringArray(forKey: key) else { return }
         let broken = frames.contains { frame in
             let parts = frame.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
@@ -276,15 +291,16 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private let exportItem = NSToolbarItem.Identifier("exportMap")
     private let mapItem = NSToolbarItem.Identifier("map")
     private let layoutItem = NSToolbarItem.Identifier("mapLayout")
+    private let inspectorToolbarItem = NSToolbarItem.Identifier("inspector")
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace, mapItem, layoutItem, complementItem, exportItem,
-         searchItem]
+         searchItem, inspectorToolbarItem]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace, .space, mapItem, layoutItem, complementItem,
-         exportItem, searchItem]
+         exportItem, searchItem, inspectorToolbarItem]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier,
@@ -295,6 +311,9 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             item.searchField = searchField
             item.preferredWidthForSearchField = 240
             return item
+        case inspectorToolbarItem:
+            return button(id, label: "Inspector", help: "Show or hide Enzymes, Features and Primers",
+                          symbol: "sidebar.right", action: #selector(toggleInspector(_:)))
         case mapItem:
             return button(id, label: "Map", help: "Show or hide the map",
                           symbol: "circle.circle", action: #selector(toggleMapHidden(_:)))
@@ -361,6 +380,17 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
 
     @objc func toggleComplementStrand(_ sender: Any?) {
         sequenceView.showComplement.toggle()
+    }
+
+    /// Shows or hides the right-hand panel. (NSSplitViewController has its own
+    /// toggleInspector from macOS 14; this one also serves Ventura.)
+    @objc func toggleInspector(_ sender: Any?) {
+        guard let item = inspectorItem else { return }
+        item.animator().isCollapsed = !item.isCollapsed
+    }
+
+    @objc func chooseBrowserFolder(_ sender: Any?) {
+        browser.chooseFolder(sender)
     }
 
     @objc func toggleMapHidden(_ sender: Any?) {
