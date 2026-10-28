@@ -12,6 +12,7 @@ import UniformTypeIdentifiers
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let launchFiles: [String]
+    private var launched = false
 
     init(launchFiles: [String]) {
         self.launchFiles = launchFiles
@@ -28,13 +29,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let error = error { NSApp.presentError(error) }
             }
         }
-        if launchFiles.isEmpty && NSDocumentController.shared.documents.isEmpty {
-            NSDocumentController.shared.openDocument(nil)
-        }
         UISmokeTest.startIfRequested()
+        DispatchQueue.main.async { self.launched = true }
     }
 
-    func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool { false }
+    // AppKit asks this only when nothing was opened: a plain launch or a Dock
+    // click with no windows, not a Finder double-click, whose document is
+    // still loading when didFinishLaunching runs. Show the Open panel then.
+    func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        launchFiles.isEmpty || launched
+    }
+
+    func applicationOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        NSDocumentController.shared.openDocument(nil)
+        return true
+    }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
@@ -80,6 +89,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ])
         submenu("File", [
             item("Open…", #selector(NSDocumentController.openDocument(_:)), "o"),
+            item("Show Folder in Sidebar…", #selector(DocumentWindowController.chooseBrowserFolder(_:)), "o",
+                 [.command, .shift]),
             .separator(),
             item("Close", #selector(NSWindow.performClose(_:)), "w"),
             item("Save As GenBank…", #selector(DocumentWindowController.saveAsGenBank(_:)), "s", [.command, .shift]),
@@ -96,6 +107,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ])
         submenu("View", [
             item("Toggle Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)), "s", [.command, .control]),
+            item("Toggle Inspector", #selector(DocumentWindowController.toggleInspector(_:)), "i",
+                 [.command, .option]),
+            .separator(),
+            item("Hide Map", #selector(DocumentWindowController.toggleMapHidden(_:)), "m", [.command, .shift]),
+            item("Stack Map Above Sequence", #selector(DocumentWindowController.toggleMapStacked(_:))),
             .separator(),
             item("Show Complement Strand", #selector(DocumentWindowController.toggleComplementStrand(_:))),
             .separator(),
@@ -113,15 +129,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// Another installed app (ApE, SnapGene, ...) may export its own UTI for .gb or
-/// .dna; Launch Services then prefers it over our imported types and the default
-/// controller refuses the file. Fall back to our types by filename extension.
+/// Another installed app (ApE, SnapGene, MacVector, ...) may export its own UTI
+/// for .gb or .dna; Launch Services then prefers it over our imported types.
+/// Info.plist lists those UTIs too so Finder offers Restricto, but documents
+/// always take our type by filename extension, so that Save picks the right
+/// format (SequenceDocument.write switches on our type names).
 final class DocumentController: NSDocumentController {
     override func typeForContents(of url: URL) throws -> String {
         let type = try super.typeForContents(of: url)
-        if documentClass(forType: type) != nil { return type }
+        if type.hasPrefix("io.github.mrgarbett.restricto.") { return type }
         let ext = url.pathExtension.lowercased()
-        for ours in ["io.github.mrgarbett.restricto.genbank", "io.github.mrgarbett.restricto.snapgene-dna", "io.github.mrgarbett.restricto.fasta"] {
+        for ours in ["io.github.mrgarbett.restricto.genbank", "io.github.mrgarbett.restricto.snapgene-dna", "io.github.mrgarbett.restricto.fasta",
+                     "io.github.mrgarbett.restricto.embl"] {
             if let ut = UTType(ours), ut.tags[.filenameExtension]?.contains(ext) == true { return ours }
         }
         return type

@@ -21,28 +21,30 @@
             <key>CFBundleTypeName</key><string>GenBank Sequence</string>
             <key>CFBundleTypeRole</key><string>Editor</string>
             <key>LSHandlerRank</key><string>Alternate</string>
-            <key>LSItemContentTypes</key><array><string>io.github.mrgarbett.restricto.genbank</string></array>
+            <key>LSItemContentTypes</key><array><string>io.github.mrgarbett.restricto.genbank</string><string>biosequence.genbank</string>
+                <string>biosequence.genbank.extended</string><string>edu.utah.biology.jorgensen.ape</string></array>
             <key>NSDocumentClass</key><string>SequenceDocument</string>
         </dict>
         <dict>
             <key>CFBundleTypeName</key><string>SnapGene DNA File</string>
             <key>CFBundleTypeRole</key><string>Editor</string>
             <key>LSHandlerRank</key><string>Alternate</string>
-            <key>LSItemContentTypes</key><array><string>io.github.mrgarbett.restricto.snapgene-dna</string></array>
+            <key>LSItemContentTypes</key><array><string>io.github.mrgarbett.restricto.snapgene-dna</string><string>com.gslbiotech.dna</string></array>
             <key>NSDocumentClass</key><string>SequenceDocument</string>
         </dict>
         <dict>
             <key>CFBundleTypeName</key><string>FASTA Sequence</string>
             <key>CFBundleTypeRole</key><string>Editor</string>
             <key>LSHandlerRank</key><string>Alternate</string>
-            <key>LSItemContentTypes</key><array><string>io.github.mrgarbett.restricto.fasta</string></array>
+            <key>LSItemContentTypes</key><array><string>io.github.mrgarbett.restricto.fasta</string><string>biosequence.fasta</string>
+                <string>biosequence.fasta.multi</string></array>
             <key>NSDocumentClass</key><string>SequenceDocument</string>
         </dict>
         <dict>
             <key>CFBundleTypeName</key><string>EMBL Sequence</string>
             <key>CFBundleTypeRole</key><string>Editor</string>
             <key>LSHandlerRank</key><string>Alternate</string>
-            <key>LSItemContentTypes</key><array><string>io.github.mrgarbett.restricto.embl</string></array>
+            <key>LSItemContentTypes</key><array><string>io.github.mrgarbett.restricto.embl</string><string>biosequence.embl</string></array>
             <key>NSDocumentClass</key><string>SequenceDocument</string>
         </dict>
     </array>
