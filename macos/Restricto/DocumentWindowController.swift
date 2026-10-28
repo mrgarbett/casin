@@ -100,11 +100,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             // This runs inside the window's layout pass; changing a constraint
             // here marks layout dirty again and can loop until AppKit aborts.
             // Apply the new width after the pass, and only when it changed.
-            DispatchQueue.main.async {
-                guard let self = self, let limit = self.pillMaxWidth else { return }
-                let width = max(0, self.split.frame.width - 32)
-                if abs(limit.constant - width) >= 1 { limit.constant = width }
-            }
+            DispatchQueue.main.async { self?.updatePillMaxWidth() }
         }
 
         split.isVertical = true
@@ -149,16 +145,24 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             // left. The edges stay inside the visible middle: on a narrow middle
             // the status text truncates instead of the pill running under the
             // sidebar or the panel pill.
+            // The max width (updatePillMaxWidth) is what keeps it inside; these
+            // guards stay below the split view's holding priority, so the pill
+            // never raises the middle's minimum width, and the window's with it.
             let centre = pill.centerXAnchor.constraint(equalTo: root.safeAreaLayoutGuide.centerXAnchor,
                                                        constant: Self.panelPillRoom / 2)
             centre.priority = .defaultHigh
-            NSLayoutConstraint.activate([
-                centre,
-                pill.leadingAnchor.constraint(greaterThanOrEqualTo: root.safeAreaLayoutGuide.leadingAnchor,
-                                              constant: Self.panelPillRoom + 8),
-                pill.trailingAnchor.constraint(lessThanOrEqualTo: root.safeAreaLayoutGuide.trailingAnchor,
-                                               constant: -8),
-            ])
+            let leading = pill.leadingAnchor.constraint(greaterThanOrEqualTo: root.safeAreaLayoutGuide.leadingAnchor,
+                                                        constant: Self.panelPillRoom + 8)
+            let trailing = pill.trailingAnchor.constraint(lessThanOrEqualTo: root.safeAreaLayoutGuide.trailingAnchor,
+                                                          constant: -8)
+            leading.priority = .defaultLow - 1
+            trailing.priority = .defaultLow - 1
+            NSLayoutConstraint.activate([centre, leading, trailing])
+            root.postsFrameChangedNotifications = true
+            NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: root,
+                                                   queue: .main) { [weak self] _ in
+                DispatchQueue.main.async { self?.updatePillMaxWidth() }
+            }
             statusPill = pill
             pillMaxWidth = pill.widthAnchor.constraint(lessThanOrEqualToConstant: 400)
             pillMaxWidth?.isActive = true
@@ -355,6 +359,16 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     /// Shows one pane of the right panel (the UI smoke test walks through them).
     func showInspectorPane(_ pane: InspectorController.Pane) {
         inspector.select(pane)
+    }
+
+    /// The widest the status pill may be: the visible middle (the root's safe
+    /// area leaves out the sidebar it runs under) less the panel pill's room
+    /// and a margin. Called after layout, never from inside it, and the
+    /// constant changes only when the width really did.
+    private func updatePillMaxWidth() {
+        guard let limit = pillMaxWidth, let root = detailRoot else { return }
+        let width = max(0, root.safeAreaRect.width - Self.panelPillRoom - 16)
+        if abs(limit.constant - width) >= 1 { limit.constant = width }
     }
 
     /// The status line inside a glass capsule, or nil before macOS 26.
