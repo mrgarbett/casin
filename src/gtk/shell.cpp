@@ -64,6 +64,12 @@ std::vector<std::pair<std::string, bool>> listFolder(const std::string &folder)
             continue;
         gchar *path = g_build_filename(folder.c_str(), name, nullptr);
         const bool isDir = g_file_test(path, G_FILE_TEST_IS_DIR);
+        // A link to a folder can lead out of the chosen folder (flatpak-builder
+        // leaves var/run -> /run) or round in a loop: leave those out.
+        if (isDir && g_file_test(path, G_FILE_TEST_IS_SYMLINK)) {
+            g_free(path);
+            continue;
+        }
         if (isDir || kSequenceExtensions.count(lowerExtension(name)))
             out.emplace_back(path, isDir);
         g_free(path);
@@ -82,14 +88,16 @@ std::vector<std::pair<std::string, bool>> listFolder(const std::string &folder)
     return out;
 }
 
-// The sequence files under `folder` whose name contains `query`, at most 500.
-void findFiles(const std::string &folder, const std::string &query, std::vector<std::string> *found, int depth = 0)
+// The sequence files under `folder` whose name contains `query`, at most 500,
+// looking in at most 5,000 folders. Runs off the main thread.
+void findFiles(const std::string &folder, const std::string &query, std::vector<std::string> *found,
+               int *folders, int depth = 0)
 {
-    if (depth > 12 || found->size() >= 500)
+    if (depth > 12 || found->size() >= 500 || ++*folders > 5000)
         return;
     for (const auto &[path, isDir] : listFolder(folder)) {
         if (isDir) {
-            findFiles(path, query, found, depth + 1);
+            findFiles(path, query, found, folders, depth + 1);
             continue;
         }
         gchar *base = g_path_get_basename(path.c_str());
@@ -326,14 +334,19 @@ void Shell::buildUi()
 
     m_split = adw_overlay_split_view_new();
     adw_overlay_split_view_set_sidebar(ADW_OVERLAY_SPLIT_VIEW(m_split), buildBrowser());
-    adw_overlay_split_view_set_content(ADW_OVERLAY_SPLIT_VIEW(m_split), m_tabs);
+    // The tab bar sits over the documents only, so the sidebar doesn't move
+    // when it appears.
+    GtkWidget *content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_vexpand(m_tabs, TRUE);
+    gtk_box_append(GTK_BOX(content), tabBar);
+    gtk_box_append(GTK_BOX(content), m_tabs);
+    adw_overlay_split_view_set_content(ADW_OVERLAY_SPLIT_VIEW(m_split), content);
     adw_overlay_split_view_set_min_sidebar_width(ADW_OVERLAY_SPLIT_VIEW(m_split), 220);
     adw_overlay_split_view_set_max_sidebar_width(ADW_OVERLAY_SPLIT_VIEW(m_split), 320);
     setSidebarShown(settingBool("Layout", "sidebar", true));
 
     GtkWidget *toolbar = adw_toolbar_view_new();
     adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar), header);
-    adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar), tabBar);
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar), m_split);
     m_toasts = adw_toast_overlay_new();
     adw_toast_overlay_set_child(ADW_TOAST_OVERLAY(m_toasts), toolbar);
@@ -677,15 +690,21 @@ void Shell::reloadBrowser()
     const std::string query = folded;
     g_free(folded);
     if (!query.empty()) {
-        header("Search Results");
-        std::vector<std::string> found;
-        findFiles(folder, query, &found);
-        std::sort(found.begin(), found.end(),
-                  [](const std::string &a, const std::string &b) { return baseNameOf(a) < baseNameOf(b); });
-        for (const std::string &path : found)
+        // The search walks the folder tree in a thread; the list fills in when
+        // it is done (a newer search makes an older one's results stale).
+        const std::string key = folder + '\n' + query;
+        if (key != m_searchKey) {
+            m_searchKey = key;
+            m_found.clear();
+            m_searching = true;
+            startSearch(folder, query);
+        }
+        header(m_searching ? "Searching…" : m_found.empty() ? "No Matching Files" : "Search Results");
+        for (const std::string &path : m_found)
             addBrowserRow(path, false, 0);
         return;
     }
+    m_searchKey.clear();
     header("Files");
     // Depth-first through the open folders.
     std::vector<std::tuple<std::string, bool, int>> stack;
@@ -702,6 +721,38 @@ void Shell::reloadBrowser()
         if (isDir && g_expanded.count(path))
             push(path, depth + 1);
     }
+}
+
+namespace {
+struct SearchJob {
+    std::string folder, query, key;
+    std::vector<std::string> found;
+};
+} // namespace
+
+void Shell::startSearch(const std::string &folder, const std::string &query)
+{
+    auto *job = new SearchJob{folder, query, m_searchKey, {}};
+    // The task holds the window, so the shell outlives the search.
+    GTask *task = g_task_new(m_window, nullptr, [](GObject *window, GAsyncResult *res, gpointer) {
+        auto *job = static_cast<SearchJob *>(g_task_get_task_data(G_TASK(res)));
+        Shell *self = fromWindow(GTK_WINDOW(window));
+        if (self && !self->m_closing && job->key == self->m_searchKey) {
+            self->m_found = std::move(job->found);
+            self->m_searching = false;
+            self->reloadBrowser();
+        }
+    }, nullptr);
+    g_task_set_task_data(task, job, [](gpointer p) { delete static_cast<SearchJob *>(p); });
+    g_task_run_in_thread(task, [](GTask *task, gpointer, gpointer data, GCancellable *) {
+        auto *job = static_cast<SearchJob *>(data);
+        int folders = 0;
+        findFiles(job->folder, job->query, &job->found, &folders);
+        std::sort(job->found.begin(), job->found.end(),
+                  [](const std::string &a, const std::string &b) { return baseNameOf(a) < baseNameOf(b); });
+        g_task_return_boolean(task, TRUE);
+    });
+    g_object_unref(task);
 }
 
 void Shell::addBrowserRow(const std::string &path, bool folder, int depth)

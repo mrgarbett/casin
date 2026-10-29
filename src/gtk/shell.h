@@ -48,6 +48,7 @@ private:
     void buildUi();
     GtkWidget *buildBrowser();
     void reloadBrowser();
+    void startSearch(const std::string &folder, const std::string &query);
     void addBrowserRow(const std::string &path, bool folder, int depth);
     void browserRowActivated(GtkListBoxRow *row);
     std::string browserFolder() const;
@@ -72,6 +73,10 @@ private:
     GtkWidget *m_fileList = nullptr;
     GtkWidget *m_noFolder = nullptr;
     int m_rows = 0;
+    // The file search: what was asked, and what it found.
+    std::string m_searchKey;
+    std::vector<std::string> m_found;
+    bool m_searching = false;
     bool m_closing = false;
 };
 

@@ -447,19 +447,43 @@ void Window::buildUi()
     gtk_widget_add_css_class(m_info, "restricto-capsule");
     gtk_box_append(GTK_BOX(m_info), m_status);
     gtk_widget_set_visible(m_info, FALSE);
-    m_statusRow = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-    gtk_widget_set_halign(m_statusRow, GTK_ALIGN_CENTER);
-    gtk_widget_set_valign(m_statusRow, GTK_ALIGN_END);
-    gtk_widget_set_margin_bottom(m_statusRow, 12);
-    gtk_widget_set_margin_start(m_statusRow, 12);
-    gtk_widget_set_margin_end(m_statusRow, kPillRoom);
-    gtk_box_append(GTK_BOX(m_statusRow), toggles);
-    gtk_box_append(GTK_BOX(m_statusRow), m_info);
+    m_statusRow = toggles;
 
+    // The toggles stay centred whether or not the second capsule shows (so
+    // they don't move under the pointer); the second sits to their right, or
+    // above them when there is no room beside them.
     m_middle = gtk_overlay_new();
     gtk_overlay_set_child(GTK_OVERLAY(m_middle), middleBox);
     gtk_overlay_add_overlay(GTK_OVERLAY(m_middle), m_pill);
     gtk_overlay_add_overlay(GTK_OVERLAY(m_middle), m_statusRow);
+    gtk_overlay_add_overlay(GTK_OVERLAY(m_middle), m_info);
+    g_signal_connect(m_middle, "get-child-position",
+                     G_CALLBACK((+[](GtkOverlay *overlay, GtkWidget *child, GdkRectangle *at, gpointer p) {
+                         auto *self = static_cast<Window *>(p);
+                         if (child != self->m_statusRow && child != self->m_info)
+                             return gboolean(FALSE);
+                         const int width = gtk_widget_get_width(GTK_WIDGET(overlay));
+                         const int height = gtk_widget_get_height(GTK_WIDGET(overlay));
+                         int tw = 0, th = 0, iw = 0, ih = 0, unused = 0;
+                         gtk_widget_measure(self->m_statusRow, GTK_ORIENTATION_HORIZONTAL, -1, &unused, &tw, nullptr, nullptr);
+                         gtk_widget_measure(self->m_statusRow, GTK_ORIENTATION_VERTICAL, -1, &unused, &th, nullptr, nullptr);
+                         const int tx = std::max(0, (width - tw) / 2), ty = std::max(0, height - th - 12);
+                         if (child == self->m_statusRow) {
+                             *at = {tx, ty, tw, th};
+                             return gboolean(TRUE);
+                         }
+                         int minw = 0;
+                         gtk_widget_measure(self->m_info, GTK_ORIENTATION_HORIZONTAL, -1, &minw, &iw, nullptr, nullptr);
+                         gtk_widget_measure(self->m_info, GTK_ORIENTATION_VERTICAL, -1, &unused, &ih, nullptr, nullptr);
+                         if (tx + tw + 10 + iw <= width - 12) {
+                             *at = {tx + tw + 10, ty + (th - ih) / 2, iw, ih};
+                         } else {
+                             const int w = std::max(minw, std::min(iw, width - 24));
+                             *at = {std::max(0, (width - w) / 2), std::max(0, ty - ih - 8), w, ih};
+                         }
+                         return gboolean(TRUE);
+                     })),
+                     this);
     gtk_widget_set_size_request(m_middle, 300, -1);
 
     m_panel = buildPanel();
@@ -665,8 +689,10 @@ void Window::applyLayout()
     // Stacked, the map keeps the pill's corner; alone, the sequence does. In
     // the middle, the sequence scrolls clear of the status floating over it.
     m_seq->setTrailingInset(!inPanel && m_mapHidden ? kPillRoom : 0);
-    m_seq->setBottomInset(inPanel ? 0 : 52);
-    gtk_widget_set_margin_bottom(m_findBar, inPanel ? 12 : 58);
+    m_seq->setBottomInset(inPanel ? 0 : 96);
+    gtk_widget_set_margin_bottom(m_findBar, inPanel ? 12 : 100);
+    // Beside the sequence or alone, the map's labels stay clear of the status.
+    gtk_widget_set_margin_bottom(m_map->widget(), m_mapStacked ? 0 : 52);
     if (inPanel)
         showPane("sequence");
     else if (m_pane == "sequence")
@@ -877,7 +903,15 @@ void Window::showBadge(GtkWidget *from, double x, double y)
     const graphene_point_t pt = GRAPHENE_POINT_INIT(float(x), float(y));
     if (!gtk_widget_compute_point(from, m_page, &pt, &at))
         return;
-    gtk_widget_set_margin_start(m_badge, std::max(0, int(at.x) + 12));
+    // Keep it inside the window: to the left of the pointer near the right edge
+    // (measured once shown: a hidden widget measures 0).
+    gtk_widget_set_visible(m_badge, TRUE);
+    int bw = 0, unused = 0;
+    gtk_widget_measure(m_badge, GTK_ORIENTATION_HORIZONTAL, -1, &unused, &bw, nullptr, nullptr);
+    int bx = int(at.x) + 12;
+    if (bx + bw > gtk_widget_get_width(m_page) - 4)
+        bx = int(at.x) - 12 - bw;
+    gtk_widget_set_margin_start(m_badge, std::max(0, bx));
     gtk_widget_set_margin_top(m_badge, std::max(0, int(at.y) - 34));
     gtk_widget_set_visible(m_badge, TRUE);
 }
@@ -1712,6 +1746,9 @@ void Window::updateActions()
     enable("set-origin", has && m_doc.sequence().circular && m_doc.hasSelection());
     enable("clear-reads", !m_doc.reads().empty());
     enable("revert", !m_doc.path().empty() && m_doc.isModified());
+    // Saving an unchanged file would only rewrite it (and drop what Restricto
+    // doesn't read); a new sequence can always be saved.
+    enable("save", has && (m_doc.isModified() || m_doc.path().empty()));
     enable("delete-primer", !m_doc.sequence().primers.empty());
     auto state = [this](const char *name, GVariant *value) {
         GAction *a = g_action_map_lookup_action(G_ACTION_MAP(m_window), name);
