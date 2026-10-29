@@ -99,6 +99,38 @@ GtkWidget *capsuleButton(const char *icon, const char *tip)
     return b;
 }
 
+// Fades something floating in or out (hidden once faded out), from wherever
+// a fade already under way has got to.
+void fade(GtkWidget *w, bool in)
+{
+    auto *anim = static_cast<AdwAnimation *>(g_object_get_data(G_OBJECT(w), "oc-fade"));
+    const bool moving = anim && adw_animation_get_state(anim) == ADW_ANIMATION_PLAYING;
+    const bool shown = gtk_widget_get_visible(w);
+    if (!moving && (in ? shown && gtk_widget_get_opacity(w) >= 1 : !shown))
+        return;
+    if (moving && adw_timed_animation_get_value_to(ADW_TIMED_ANIMATION(anim)) == (in ? 1 : 0))
+        return;
+    if (!anim) {
+        AdwAnimationTarget *target = adw_callback_animation_target_new(
+            +[](double v, gpointer w) { gtk_widget_set_opacity(GTK_WIDGET(w), v); }, w, nullptr);
+        anim = adw_timed_animation_new(w, 0, 1, 160, target);
+        adw_timed_animation_set_easing(ADW_TIMED_ANIMATION(anim), ADW_EASE_OUT_CUBIC);
+        g_signal_connect(anim, "done", G_CALLBACK(+[](AdwAnimation *a, gpointer w) {
+                             if (adw_animation_get_value(a) <= 0)
+                                 gtk_widget_set_visible(GTK_WIDGET(w), FALSE);
+                         }),
+                         w);
+        g_object_set_data_full(G_OBJECT(w), "oc-fade", anim, g_object_unref);
+    }
+    const double from = shown ? gtk_widget_get_opacity(w) : 0;
+    adw_animation_reset(anim);
+    gtk_widget_set_opacity(w, from);
+    gtk_widget_set_visible(w, TRUE);
+    adw_timed_animation_set_value_from(ADW_TIMED_ANIMATION(anim), from);
+    adw_timed_animation_set_value_to(ADW_TIMED_ANIMATION(anim), in ? 1 : 0);
+    adw_animation_play(anim);
+}
+
 GtkWidget *scrolled(GtkWidget *child)
 {
     GtkWidget *scroll = gtk_scrolled_window_new();
@@ -228,6 +260,11 @@ Window::Window(Shell *shell) : m_shell(shell), m_window(shell->widget())
 
 Window::~Window()
 {
+    if (m_panelAnim) {
+        g_signal_handlers_disconnect_by_data(m_panelAnim, this);
+        adw_animation_reset(m_panelAnim);
+        g_object_unref(m_panelAnim);
+    }
     if (m_badgeTimer)
         g_source_remove(m_badgeTimer);
     if (m_settleTimer)
@@ -766,10 +803,58 @@ void Window::setMapHidden(bool hidden)
 
 void Window::setPanelShown(bool shown)
 {
+    const bool sliding = m_panelAnim && adw_animation_get_state(m_panelAnim) == ADW_ANIMATION_PLAYING;
     m_panelShown = shown;
-    gtk_widget_set_visible(m_panel, shown);
     refreshPill();
     updateActions();
+    const int width = gtk_widget_get_width(m_outer);
+    if (!gtk_widget_get_mapped(m_outer) || width <= 0) {
+        gtk_widget_set_visible(m_panel, shown);
+        return;
+    }
+    if (!sliding && shown == gtk_widget_get_visible(m_panel))
+        return;
+    if (shown && (m_panelRest < 300 || m_panelRest > width - 200)) {
+        // Never shown yet, or the window has changed size since: the panel's
+        // usual width.
+        const bool inPanel = !m_mapStacked && !m_mapHidden;
+        m_panelRest = std::max(300, width - (inPanel ? std::max(420, width / 2) : 320));
+    }
+    // Slide the divider: from the edge to where it rests, or back to the edge.
+    int from = gtk_paned_get_position(GTK_PANED(m_outer));
+    if (!sliding) {
+        if (shown) {
+            from = width;
+            gtk_paned_set_position(GTK_PANED(m_outer), width);
+            gtk_widget_set_visible(m_panel, TRUE);
+        } else {
+            m_panelRest = from;
+        }
+    }
+    if (!m_panelAnim) {
+        AdwAnimationTarget *target = adw_callback_animation_target_new(
+            +[](double v, gpointer p) {
+                gtk_paned_set_position(GTK_PANED(static_cast<Window *>(p)->m_outer), int(std::lround(v)));
+            },
+            this, nullptr);
+        m_panelAnim = adw_timed_animation_new(m_outer, 0, 1, 220, target);
+        adw_timed_animation_set_easing(ADW_TIMED_ANIMATION(m_panelAnim), ADW_EASE_OUT_CUBIC);
+        g_signal_connect(m_panelAnim, "done", G_CALLBACK(+[](AdwAnimation *, gpointer p) {
+                             auto *self = static_cast<Window *>(p);
+                             gtk_paned_set_shrink_end_child(GTK_PANED(self->m_outer), FALSE);
+                             if (!self->m_panelShown) {
+                                 gtk_widget_set_visible(self->m_panel, FALSE);
+                                 gtk_paned_set_position(GTK_PANED(self->m_outer), self->m_panelRest);
+                             }
+                         }),
+                         this);
+    }
+    // While it slides, the panel may be narrower than it can be laid out.
+    gtk_paned_set_shrink_end_child(GTK_PANED(m_outer), TRUE);
+    adw_animation_reset(m_panelAnim);
+    adw_timed_animation_set_value_from(ADW_TIMED_ANIMATION(m_panelAnim), from);
+    adw_timed_animation_set_value_to(ADW_TIMED_ANIMATION(m_panelAnim), shown ? m_panelRest : width);
+    adw_animation_play(m_panelAnim);
 }
 
 void Window::showPane(const std::string &pane)
@@ -874,13 +959,13 @@ void Window::showBadge(GtkWidget *from, double x, double y)
         m_badgeTimer = g_timeout_add(1500, [](gpointer p) -> gboolean {
             auto *self = static_cast<Window *>(p);
             self->m_badgeTimer = 0;
-            gtk_widget_set_visible(self->m_badge, FALSE);
+            fade(self->m_badge, false);
             return G_SOURCE_REMOVE;
         }, this);
         return;
     }
     if (!m_doc.hasSelection() || m_doc.selection().length <= 0) {
-        gtk_widget_set_visible(m_badge, FALSE);
+        fade(m_badge, false);
         return;
     }
     const Span s = m_doc.selection();
@@ -906,6 +991,8 @@ void Window::showBadge(GtkWidget *from, double x, double y)
         return;
     // Keep it inside the window: to the left of the pointer near the right edge
     // (measured once shown: a hidden widget measures 0).
+    if (!gtk_widget_get_visible(m_badge))
+        gtk_widget_set_opacity(m_badge, 0);
     gtk_widget_set_visible(m_badge, TRUE);
     int bw = 0, unused = 0;
     gtk_widget_measure(m_badge, GTK_ORIENTATION_HORIZONTAL, -1, &unused, &bw, nullptr, nullptr);
@@ -914,7 +1001,7 @@ void Window::showBadge(GtkWidget *from, double x, double y)
         bx = int(at.x) - 12 - bw;
     gtk_widget_set_margin_start(m_badge, std::max(0, bx));
     gtk_widget_set_margin_top(m_badge, std::max(0, int(at.y) - 34));
-    gtk_widget_set_visible(m_badge, TRUE);
+    fade(m_badge, true);
 }
 
 void Window::applyEnzymeSearch()
@@ -1034,7 +1121,7 @@ void Window::updateStatus()
             text += (text.empty() ? "" : "  ·  ") + std::string("Base ") + view::withThousands(m_hoverBase + 1);
     }
     gtk_label_set_text(GTK_LABEL(m_status), text.c_str());
-    gtk_widget_set_visible(m_info, !text.empty());
+    fade(m_info, !text.empty());
 }
 
 void Window::rebuildFeatureList()

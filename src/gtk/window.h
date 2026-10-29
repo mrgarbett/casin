@@ -231,6 +231,9 @@ private:
     bool m_mapStacked = false;
     bool m_mapHidden = false;
     bool m_panelShown = true;
+    // The panel slides open and shut; where its divider rests while it is shut.
+    AdwAnimation *m_panelAnim = nullptr;
+    int m_panelRest = 0;
     std::string m_pane = "sequence";
     std::string m_tablePane = "enzymes";   // the pane last picked other than the sequence
     bool m_settingToggles = false;

@@ -55,6 +55,9 @@ private:
     static void draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer self);
     static void resized(GtkDrawingArea *, int w, int h, gpointer self);
     static gboolean scrolled(GtkEventControllerScroll *, double dx, double dy, gpointer self);
+    static void scrollEnd(GtkEventControllerScroll *, gpointer self);
+    static void decelerate(GtkEventControllerScroll *, double vx, double vy, gpointer self);
+    static gboolean tick(GtkWidget *, GdkFrameClock *clock, gpointer self);
     static void valueChanged(GtkAdjustment *, gpointer self);
     static void dragBegin(GtkGestureDrag *, double x, double y, gpointer self);
     static void dragUpdate(GtkGestureDrag *, double dx, double dy, gpointer self);
@@ -70,7 +73,19 @@ private:
     void updateAdjustment();
     void extendSelectionTo(double viewX, double viewY);
     void setHoverCodon(int codon);
-    double scrollY() const;
+    double scrollY() const { return m_offset; }
+    // Scrolling. The offset can run past either end while a touchpad pulls
+    // it (the rubber band); a tick callback runs the momentum after a flick,
+    // the spring back, and the eased wheel and jump scrolls.
+    enum class Motion { None, Momentum, Spring, Ease };
+    double maxOffset() const;
+    double overshoot() const;   // < 0 past the top, > 0 past the bottom
+    void setOffset(double y);   // now, stopping any motion
+    void syncOffset();          // the scrollbar and the drawing follow m_offset
+    void scrollSmoothlyTo(double y);
+    void startMotion(Motion motion);
+    void stopMotion();
+    void relayoutSoon();
 
     Document *m_doc;
     GtkWidget *m_box, *m_area, *m_scrollbar;
@@ -97,6 +112,14 @@ private:
     int m_hoverCodon = -1;
     double m_x0 = 0, m_y0 = 0, m_lastX = 0, m_lastY = 0;
     guint m_timer = 0;
+    // scroll state
+    double m_offset = 0, m_velocity = 0, m_target = 0;
+    Motion m_motion = Motion::None;
+    guint m_tickId = 0;
+    gint64 m_lastFrame = 0;
+    guint m_releaseTimer = 0;   // springs back when a touchpad stops without telling
+    guint m_relayoutTimer = 0;  // while the width keeps changing, the old layout is drawn
+    bool m_syncing = false;
 };
 
 } // namespace oc::gtk

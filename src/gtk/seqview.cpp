@@ -26,6 +26,8 @@ SequenceView::SequenceView(Document *doc) : m_doc(doc)
     GtkEventController *scroll = gtk_event_controller_scroll_new(
         GtkEventControllerScrollFlags(GTK_EVENT_CONTROLLER_SCROLL_VERTICAL | GTK_EVENT_CONTROLLER_SCROLL_KINETIC));
     g_signal_connect(scroll, "scroll", G_CALLBACK(&SequenceView::scrolled), this);
+    g_signal_connect(scroll, "scroll-end", G_CALLBACK(&SequenceView::scrollEnd), this);
+    g_signal_connect(scroll, "decelerate", G_CALLBACK(&SequenceView::decelerate), this);
     gtk_widget_add_controller(m_area, scroll);
 
     GtkGesture *drag = gtk_gesture_drag_new();
@@ -54,7 +56,7 @@ SequenceView::SequenceView(Document *doc) : m_doc(doc)
 
     m_doc->onSequenceChanged([this] {
         if (!m_doc->isEditing())
-            gtk_adjustment_set_value(m_adj, 0);   // a newly loaded sequence starts at the top
+            setOffset(0);   // a newly loaded sequence starts at the top
         invalidate();
     });
     m_doc->onEnzymesChanged([this] { invalidate(); });
@@ -71,6 +73,12 @@ SequenceView::~SequenceView()
 {
     if (m_timer)
         g_source_remove(m_timer);
+    if (m_releaseTimer)
+        g_source_remove(m_releaseTimer);
+    if (m_relayoutTimer)
+        g_source_remove(m_relayoutTimer);
+    if (m_tickId)
+        gtk_widget_remove_tick_callback(m_area, m_tickId);
     g_object_unref(m_adj);
 }
 
@@ -129,11 +137,6 @@ void SequenceView::setHiddenTypes(std::set<std::string> types)
     }
 }
 
-double SequenceView::scrollY() const
-{
-    return gtk_adjustment_get_value(m_adj);
-}
-
 void SequenceView::ensureLayout()
 {
     if (m_layout || m_w <= 0)
@@ -154,8 +157,13 @@ void SequenceView::updateAdjustment()
 {
     const double total = m_layout ? m_layout->totalHeight() + 20 + m_bottomInset : 0;
     const double page = std::max(1, m_h);
-    const double value = std::min(gtk_adjustment_get_value(m_adj), std::max(0.0, total - page));
-    gtk_adjustment_configure(m_adj, value, 0, std::max(total, page), 40, page * 0.9, page);
+    m_syncing = true;
+    gtk_adjustment_configure(m_adj, std::clamp(m_offset, 0.0, std::max(0.0, total - page)), 0,
+                             std::max(total, page), 40, page * 0.9, page);
+    m_syncing = false;
+    // Past an end only while the rubber band or a spring is moving it.
+    if (m_motion == Motion::None && overshoot() != 0)
+        setOffset(std::clamp(m_offset, 0.0, maxOffset()));
 }
 
 void SequenceView::scrollToPosition(int pos)
@@ -164,31 +172,226 @@ void SequenceView::scrollToPosition(int pos)
     if (!m_layout)
         return;
     const double top = m_layout->lineTopFor(pos), h = m_layout->lineHeightFor(pos);
-    const double y = scrollY();
+    const double y = m_motion == Motion::Ease ? m_target : m_offset;
     if (top < y || top + h > y + m_h)
-        gtk_adjustment_set_value(m_adj, std::max(0.0, top - 20));
+        scrollSmoothlyTo(top - 20);
+}
+
+// ---- scrolling ---------------------------------------------------------------------
+
+namespace {
+// Momentum after a flick: the velocity keeps 0.998 of itself each millisecond.
+const double kDecayPerMs = 0.998;
+// The spring that pulls the view back from past an end: critically damped,
+// settling in about a quarter of a second.
+const double kSpring = 220, kDamping = 2 * std::sqrt(kSpring);
+// Eased wheel and jump scrolls close the gap with this time constant (s).
+const double kEase = 0.07;
+
+bool animationsEnabled(GtkWidget *w)
+{
+    gboolean on = TRUE;
+    g_object_get(gtk_widget_get_settings(w), "gtk-enable-animations", &on, nullptr);
+    return on;
+}
+}
+
+double SequenceView::maxOffset() const
+{
+    return std::max(0.0, gtk_adjustment_get_upper(m_adj) - gtk_adjustment_get_page_size(m_adj));
+}
+
+double SequenceView::overshoot() const
+{
+    if (m_offset < 0)
+        return m_offset;
+    const double max = maxOffset();
+    return m_offset > max ? m_offset - max : 0;
+}
+
+void SequenceView::syncOffset()
+{
+    m_syncing = true;
+    gtk_adjustment_set_value(m_adj, std::clamp(m_offset, 0.0, maxOffset()));
+    m_syncing = false;
+    gtk_widget_queue_draw(m_area);
+}
+
+void SequenceView::setOffset(double y)
+{
+    stopMotion();
+    m_offset = y;
+    syncOffset();
+}
+
+void SequenceView::scrollSmoothlyTo(double y)
+{
+    m_target = std::clamp(y, 0.0, maxOffset());
+    if (!animationsEnabled(m_area) || !gtk_widget_get_mapped(m_area)) {
+        setOffset(m_target);
+        return;
+    }
+    startMotion(Motion::Ease);
+}
+
+void SequenceView::startMotion(Motion motion)
+{
+    m_motion = motion;
+    if (!animationsEnabled(m_area) || !gtk_widget_get_mapped(m_area)) {
+        // No animation: straight to where the motion would end.
+        setOffset(motion == Motion::Ease ? m_target : std::clamp(m_offset, 0.0, maxOffset()));
+        return;
+    }
+    if (!m_tickId) {
+        m_lastFrame = gdk_frame_clock_get_frame_time(gtk_widget_get_frame_clock(m_area));
+        m_tickId = gtk_widget_add_tick_callback(m_area, &SequenceView::tick, this, nullptr);
+    }
+}
+
+void SequenceView::stopMotion()
+{
+    m_motion = Motion::None;
+    m_velocity = 0;
+    if (m_tickId) {
+        gtk_widget_remove_tick_callback(m_area, m_tickId);
+        m_tickId = 0;
+    }
+}
+
+gboolean SequenceView::tick(GtkWidget *, GdkFrameClock *clock, gpointer p)
+{
+    auto *self = static_cast<SequenceView *>(p);
+    const gint64 now = gdk_frame_clock_get_frame_time(clock);
+    const double dt = std::clamp((now - self->m_lastFrame) / 1e6, 0.0, 0.05);
+    self->m_lastFrame = now;
+    switch (self->m_motion) {
+    case Motion::Momentum:
+        self->m_velocity *= std::pow(kDecayPerMs, dt * 1000);
+        self->m_offset += self->m_velocity * dt;
+        if (self->overshoot() != 0)
+            self->m_motion = Motion::Spring;   // ran into an end: bounce back
+        else if (std::abs(self->m_velocity) < 8)
+            self->m_motion = Motion::None;
+        break;
+    case Motion::Spring: {
+        const double bound = std::clamp(self->m_offset, 0.0, self->maxOffset());
+        // Small steps keep the stiff spring stable at low frame rates.
+        for (double left = dt; left > 0; left -= 0.004) {
+            const double h = std::min(left, 0.004);
+            const double x = self->m_offset - bound;
+            self->m_velocity += (-kSpring * x - kDamping * self->m_velocity) * h;
+            self->m_offset += self->m_velocity * h;
+        }
+        if (std::abs(self->m_offset - bound) < 0.5 && std::abs(self->m_velocity) < 10) {
+            self->m_offset = bound;
+            self->m_motion = Motion::None;
+        }
+        break;
+    }
+    case Motion::Ease:
+        self->m_offset += (self->m_target - self->m_offset) * (1 - std::exp(-dt / kEase));
+        if (std::abs(self->m_target - self->m_offset) < 0.5) {
+            self->m_offset = self->m_target;
+            self->m_motion = Motion::None;
+        }
+        break;
+    case Motion::None:
+        break;
+    }
+    self->syncOffset();
+    if (self->m_motion != Motion::None)
+        return G_SOURCE_CONTINUE;
+    self->m_velocity = 0;
+    self->m_tickId = 0;
+    return G_SOURCE_REMOVE;
+}
+
+gboolean SequenceView::scrolled(GtkEventControllerScroll *c, double, double dy, gpointer p)
+{
+    auto *self = static_cast<SequenceView *>(p);
+    if (gtk_event_controller_scroll_get_unit(c) != GDK_SCROLL_UNIT_SURFACE) {
+        // A mouse wheel: eased steps, which add up while one is still moving.
+        const double from = self->m_motion == Motion::Ease ? self->m_target : self->m_offset;
+        self->scrollSmoothlyTo(from + dy * 50);
+        return TRUE;
+    }
+    // A touchpad follows the fingers, with growing resistance past an end.
+    self->stopMotion();
+    double delta = dy;
+    const double over = self->overshoot();
+    if ((over < 0 && delta < 0) || (over > 0 && delta > 0))
+        delta *= 0.45 / (1 + std::abs(over) / 40);
+    self->m_offset += delta;
+    self->syncOffset();
+    // X11 never says when the fingers lift: spring back after a pause.
+    if (self->m_releaseTimer)
+        g_source_remove(self->m_releaseTimer);
+    self->m_releaseTimer = g_timeout_add(150, [](gpointer p) -> gboolean {
+        auto *self = static_cast<SequenceView *>(p);
+        self->m_releaseTimer = 0;
+        if (self->m_motion == Motion::None && self->overshoot() != 0)
+            self->startMotion(Motion::Spring);
+        return G_SOURCE_REMOVE;
+    }, self);
+    return TRUE;
+}
+
+void SequenceView::scrollEnd(GtkEventControllerScroll *, gpointer p)
+{
+    auto *self = static_cast<SequenceView *>(p);
+    if (self->overshoot() != 0)
+        self->startMotion(Motion::Spring);
+}
+
+void SequenceView::decelerate(GtkEventControllerScroll *c, double, double vy, gpointer p)
+{
+    auto *self = static_cast<SequenceView *>(p);
+    if (gtk_event_controller_scroll_get_unit(c) != GDK_SCROLL_UNIT_SURFACE)
+        return;
+    // The fingers left with this speed: carry on and slow down, or bounce
+    // back if already past an end.
+    if (self->overshoot() != 0 || std::abs(vy) > 30) {
+        self->m_velocity = self->overshoot() != 0 ? vy * 0.3 : vy;
+        self->startMotion(self->overshoot() != 0 ? Motion::Spring : Motion::Momentum);
+    }
+}
+
+// ---- layout ------------------------------------------------------------------------
+
+void SequenceView::relayoutSoon()
+{
+    if (m_relayoutTimer)
+        g_source_remove(m_relayoutTimer);
+    m_relayoutTimer = g_timeout_add(120, [](gpointer p) -> gboolean {
+        auto *self = static_cast<SequenceView *>(p);
+        self->m_relayoutTimer = 0;
+        self->invalidate();
+        return G_SOURCE_REMOVE;
+    }, this);
 }
 
 void SequenceView::resized(GtkDrawingArea *, int w, int h, gpointer p)
 {
     auto *self = static_cast<SequenceView *>(p);
+    self->m_h = h;
     if (w != self->m_w) {
         self->m_w = w;
-        self->m_layout.reset();
+        // While the width keeps changing (a panel sliding, a window being
+        // resized), the old layout is drawn and the new one waits for it to
+        // settle.
+        if (self->m_layout) {
+            self->relayoutSoon();
+            self->updateAdjustment();
+            return;
+        }
     }
-    self->m_h = h;
     self->ensureLayout();
     self->updateAdjustment();
 }
 
-void SequenceView::draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer p)
+void SequenceView::draw(GtkDrawingArea *, cairo_t *cr, int, int h, gpointer p)
 {
     auto *self = static_cast<SequenceView *>(p);
-    if (w != self->m_w || h != self->m_h) {
-        self->m_w = w;
-        self->m_h = h;
-        self->m_layout.reset();
-    }
     self->ensureLayout();
     if (!self->m_layout)
         return;
@@ -208,17 +411,15 @@ void SequenceView::draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer p)
     view::drawScene(cr, scene);
 }
 
-gboolean SequenceView::scrolled(GtkEventControllerScroll *c, double, double dy, gpointer p)
+void SequenceView::valueChanged(GtkAdjustment *adj, gpointer p)
 {
     auto *self = static_cast<SequenceView *>(p);
-    const bool pixels = gtk_event_controller_scroll_get_unit(c) == GDK_SCROLL_UNIT_SURFACE;
-    gtk_adjustment_set_value(self->m_adj, self->scrollY() + dy * (pixels ? 1.0 : 50.0));
-    return TRUE;
-}
-
-void SequenceView::valueChanged(GtkAdjustment *, gpointer p)
-{
-    gtk_widget_queue_draw(static_cast<SequenceView *>(p)->m_area);
+    if (!self->m_syncing) {
+        // The scrollbar dragged: it leads.
+        self->stopMotion();
+        self->m_offset = gtk_adjustment_get_value(adj);
+    }
+    gtk_widget_queue_draw(self->m_area);
 }
 
 void SequenceView::setHoverCodon(int codon)
@@ -365,7 +566,7 @@ gboolean SequenceView::autoScroll(gpointer p)
         self->m_timer = 0;
         return G_SOURCE_REMOVE;
     }
-    gtk_adjustment_set_value(self->m_adj, self->scrollY() + step);
+    self->setOffset(std::clamp(self->m_offset + step, 0.0, self->maxOffset()));
     self->extendSelectionTo(self->m_lastX, std::clamp(self->m_lastY, 0.0, double(self->m_h)));
     return G_SOURCE_CONTINUE;
 }
