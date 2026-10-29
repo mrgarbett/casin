@@ -60,6 +60,8 @@ SequenceView::SequenceView(Document *doc) : m_doc(doc)
         invalidate();
     });
     m_doc->onEnzymesChanged([this] { invalidate(); });
+    // A primer being added draws as if it were on the sequence.
+    m_doc->onPendingChanged([this] { invalidate(); });
     m_doc->onReadsChanged([this] { invalidate(); });
     m_doc->onSelectionChanged([this] {
         // Keep in sync with selections made elsewhere (map, lists, find).
@@ -146,7 +148,7 @@ void SequenceView::ensureLayout()
     options.groupTens = m_groupTens;
     options.enzymes = m_enzymes;
     options.hiddenTypes = m_hiddenTypes;
-    m_layout = std::make_unique<view::SequenceLayout>(m_doc->sequence(), m_doc->visibleSites(),
+    m_layout = std::make_unique<view::SequenceLayout>(m_doc->displaySequence(), m_doc->visibleSites(),
                                                       m_dark ? view::Theme::darkTheme() : view::Theme::light(),
                                                       m_measure, std::max(200, m_w - m_trailing), m_complement,
                                                       options, m_doc->reads());
@@ -365,9 +367,31 @@ void SequenceView::relayoutSoon()
     m_relayoutTimer = g_timeout_add(120, [](gpointer p) -> gboolean {
         auto *self = static_cast<SequenceView *>(p);
         self->m_relayoutTimer = 0;
-        self->invalidate();
+        self->relayoutKeepingPlace();
         return G_SOURCE_REMOVE;
     }, this);
+}
+
+void SequenceView::relayoutKeepingPlace()
+{
+    // The lines rewrap around a base that stays put: the caret's, when it is
+    // in view, else the first one shown.
+    int keep = -1;
+    double below = 0;
+    if (m_layout) {
+        keep = m_layout->positionAt({0, m_offset + 1});
+        if (m_doc->hasSelection()) {
+            const int caret = m_doc->selection().start;
+            const double top = m_layout->lineTopFor(caret);
+            if (top >= m_offset && top + m_layout->lineHeightFor(caret) <= m_offset + m_h)
+                keep = caret;
+        }
+        if (keep >= 0)
+            below = m_layout->lineTopFor(keep) - m_offset;
+    }
+    invalidate();
+    if (keep >= 0 && m_layout)
+        setOffset(std::clamp(m_layout->lineTopFor(keep) - below, 0.0, maxOffset()));
 }
 
 void SequenceView::resized(GtkDrawingArea *, int w, int h, gpointer p)
@@ -533,9 +557,10 @@ void SequenceView::dragBegin(GtkGestureDrag *g, double x, double y, gpointer p)
         self->m_doc->activateSite(site);
         return;
     }
+    // The layout draws displaySequence(): the pending primer, if any, comes last.
     const int primer = self->m_layout->primerAt(content);
-    if (primer >= 0) {
-        const Range b = self->m_doc->sequence().primers[size_t(primer)].binding;
+    if (primer >= 0 && primer < int(self->m_doc->displaySequence().primers.size())) {
+        const Range b = self->m_doc->displaySequence().primers[size_t(primer)].binding;
         self->m_anchor = b.start;
         self->m_doc->setSelection({b.start, b.length()});
         return;

@@ -86,6 +86,7 @@ private:
     void startMotion(Motion motion);
     void stopMotion();
     void relayoutSoon();
+    void relayoutKeepingPlace();
 
     Document *m_doc;
     GtkWidget *m_box, *m_area, *m_scrollbar;

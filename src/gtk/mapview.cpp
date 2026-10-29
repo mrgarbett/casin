@@ -37,6 +37,8 @@ MapView::MapView(Document *doc) : m_doc(doc)
 
     m_doc->onSequenceChanged([this] { invalidate(); });
     m_doc->onEnzymesChanged([this] { invalidate(); });
+    // A primer being added draws as if it were on the sequence.
+    m_doc->onPendingChanged([this] { invalidate(); });
     m_doc->onSelectionChanged([this] { gtk_widget_queue_draw(m_area); });
 }
 
@@ -79,7 +81,7 @@ void MapView::ensureLayout(int w, int h)
         return;
     m_w = w;
     m_h = h;
-    m_layout = std::make_unique<view::MapLayout>(m_doc->sequence(), m_doc->visibleSites(),
+    m_layout = std::make_unique<view::MapLayout>(m_doc->displaySequence(), m_doc->visibleSites(),
                                                  m_dark ? view::Theme::darkTheme() : view::Theme::light(),
                                                  m_measure, w, h, m_options);
 }
