@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Adding a primer, in the right panel's Primers pane: the primer's name,
 // description, colour and bases, with codons, enzyme sites and tags to insert
-// into it. While it binds, the window's map and sequence draw it where it
-// would go, as it will look; Add puts it on the document as one undo step.
+// into it (each marked under the bases with a line showing which way it reads).
+// While it binds, the window's map and sequence draw it where it would go, as
+// it will look; Add puts it on the document as one undo step.
 import AppKit
 import RestrictoCore
 
@@ -19,7 +20,7 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
     private let descriptionField = NSTextField(string: "")
     private let colorWell = NSColorWell(style: .minimal)
     private var colorChosen = false
-    private let sequenceText = NSTextView()
+    private let sequenceText = PrimerTextView(usingTextLayoutManager: false)
     /// The sequence box's own undo, apart from the document's.
     private let textUndo = UndoManager()
     /// On when the bases are the reverse complement of what was typed, so the
@@ -56,7 +57,7 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
 
     override func loadView() {
         view = buildView()
-        sequenceText.string = initialBases
+        sequenceText.setPlain(initialBases)
         // A 5' tail is what gets added most, so start at the 5' end.
         sequenceText.setSelectedRange(NSRange(location: 0, length: 0))
         refresh()
@@ -69,7 +70,7 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
 
     /// Replaces the bases, as when a new selection is sent here.
     func setBases(_ bases: String) {
-        sequenceText.string = bases
+        sequenceText.setPlain(bases)
         flipSwitch.state = .off
         sequenceText.setSelectedRange(NSRange(location: 0, length: 0))
         refresh()
@@ -86,6 +87,7 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         }
         let title = NSTextField(labelWithString: "New Primer")
         title.font = .systemFont(ofSize: NSFont.systemFontSize + 2, weight: .semibold)
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         nameField.placeholderString = "primer"
         nameField.stringValue = nextPrimerName()
@@ -109,6 +111,7 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         sequenceText.allowsUndo = true
         sequenceText.delegate = self
         sequenceText.textContainerInset = NSSize(width: 4, height: 6)
+        sequenceText.setUpLook()
         let textScroll = NSScrollView()
         textScroll.documentView = sequenceText
         textScroll.hasVerticalScroller = true
@@ -116,7 +119,7 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         sequenceText.autoresizingMask = [.width]
         sequenceText.isVerticallyResizable = true
         sequenceText.textContainer?.widthTracksTextView = true
-        textScroll.heightAnchor.constraint(equalToConstant: 96).isActive = true
+        textScroll.heightAnchor.constraint(equalToConstant: 110).isActive = true
 
         flipSwitch.controlSize = .small
         flipSwitch.target = self
@@ -145,7 +148,7 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
             .sorted(by: { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) {
             let cuts = e.cuts == 0 ? "doesn't cut" : "cuts \(e.cuts)×"
             enzymePopup.addItem(withTitle: "\(e.name)  \(e.site)  · \(cuts)")
-            enzymePopup.lastItem?.representedObject = e.site
+            enzymePopup.lastItem?.representedObject = PrimerPart(kind: .enzymeSite, name: e.name, bases: e.site)
         }
         if let i = enzymePopup.itemArray.firstIndex(where: { $0.title.hasPrefix("EcoRI ") }) {
             enzymePopup.selectItem(at: i)
@@ -155,26 +158,30 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         // Tags and protease sites.
         for tag in PrimerParts.tags {
             tagPopup.addItem(withTitle: "\(tag.name)  · \(tag.protein)")
-            tagPopup.lastItem?.representedObject = tag.bases
+            tagPopup.lastItem?.representedObject = PrimerPart(kind: tag.isProteaseSite ? .proteaseSite : .tag,
+                                                              name: tag.shortName, bases: tag.bases)
         }
         let tagRow = insertRow([tagPopup], action: #selector(insertTag(_:)))
 
-        let insertHint = NSTextField(wrappingLabelWithString: "Inserts go in at the cursor, in lowercase.")
+        let insertHint = NSTextField(wrappingLabelWithString:
+            "Inserts go in at the cursor, marked underneath with which way they read.")
         insertHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         insertHint.textColor = .tertiaryLabelColor
 
+        // Cancel and Add stay at the top, beside the title, where they're seen.
         // Return and Esc work from the fields, not as window-wide keys, so
         // they don't take over the rest of the window (Find, for one).
         let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancel(_:)))
+        cancel.controlSize = .small
         addButton.target = self
         addButton.action = #selector(accept(_:))
+        addButton.controlSize = .small
         addButton.bezelColor = .controlAccentColor
         addButton.toolTip = "Add the primer (Return)"
-        let buttons = NSStackView(views: [NSView(), cancel, addButton])
-        buttons.spacing = 8
+        let header = NSStackView(views: [title, NSView(), cancel, addButton])
+        header.spacing = 8
 
         let stack = NSStackView(views: [
-            title,
             heading("NAME"), nameField,
             heading("DESCRIPTION"), descriptionField,
             heading("TAG"), colorRow,
@@ -188,7 +195,7 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 6
-        for v in [title, nameField, descriptionField, colorRow, flipRow, codonRow, enzymeRow] as [NSView] {
+        for v in [nameField, descriptionField, colorRow, flipRow, codonRow, enzymeRow] as [NSView] {
             stack.setCustomSpacing(14, after: v)
         }
         stack.setCustomSpacing(18, after: warnings)
@@ -198,7 +205,7 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
             v.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24).isActive = true
         }
 
-        // The inputs scroll when the panel is short; the buttons stay put.
+        // The inputs scroll when the panel is short; the header stays put.
         let content = FlippedView()
         stack.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(stack)
@@ -219,18 +226,18 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         ])
 
         let root = NSView()
-        for v in [scroll, buttons] as [NSView] {
+        for v in [header, scroll] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(v)
         }
         NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 10),
+            header.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
+            header.topAnchor.constraint(equalTo: root.topAnchor, constant: 8),
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: root.topAnchor),
-            scroll.bottomAnchor.constraint(equalTo: buttons.topAnchor, constant: -10),
-            buttons.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 10),
-            buttons.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
-            buttons.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -12),
+            scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 6),
+            scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
         return root
     }
@@ -380,10 +387,9 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
 
     @objc private func flipChanged(_ sender: Any?) {
         // Keep the cursor on the same base of the flipped primer.
-        let text = sequenceText.string
+        let length = (sequenceText.string as NSString).length
         let caret = sequenceText.selectedRange()
-        sequenceText.string = PrimerParts.reverseComplement(text)
-        let length = (text as NSString).length
+        sequenceText.flip()
         sequenceText.setSelectedRange(NSRange(location: max(0, length - caret.location - caret.length),
                                               length: caret.length))
         refresh()
@@ -396,20 +402,21 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         let aa = PrimerParts.aminoAcids[max(0, aminoAcidPopup.indexOfSelectedItem)]
         for (i, codon) in aa.codons.enumerated() {
             codonPopup.addItem(withTitle: i == 0 && aa.codons.count > 1 ? "\(codon) (E. coli)" : codon)
-            codonPopup.lastItem?.representedObject = codon
+            codonPopup.lastItem?.representedObject = PrimerPart(kind: .codon, name: aa.shortName, bases: codon)
         }
     }
 
-    @objc private func insertCodon(_ sender: Any?) { insert(codonPopup.selectedItem?.representedObject as? String) }
-    @objc private func insertEnzymeSite(_ sender: Any?) { insert(enzymePopup.selectedItem?.representedObject as? String) }
-    @objc private func insertTag(_ sender: Any?) { insert(tagPopup.selectedItem?.representedObject as? String) }
+    @objc private func insertCodon(_ sender: Any?) { insert(codonPopup.selectedItem?.representedObject as? PrimerPart) }
+    @objc private func insertEnzymeSite(_ sender: Any?) { insert(enzymePopup.selectedItem?.representedObject as? PrimerPart) }
+    @objc private func insertTag(_ sender: Any?) { insert(tagPopup.selectedItem?.representedObject as? PrimerPart) }
 
-    /// Puts `bases` (as read on the typed strand) in at the cursor, as one undo step.
-    private func insert(_ bases: String?) {
-        guard let bases = bases, !bases.isEmpty else { NSSound.beep(); return }
-        let text = flipSwitch.state == .on ? PrimerParts.reverseComplement(bases) : bases
+    /// Puts a part in at the cursor, marked, as one undo step. With the
+    /// switch on it goes in reverse complemented, so it still reads on the
+    /// strand that was typed.
+    private func insert(_ part: PrimerPart?) {
+        guard let part = part else { NSSound.beep(); return }
         view.window?.makeFirstResponder(sequenceText)
-        sequenceText.insertText(text.lowercased(), replacementRange: sequenceText.selectedRange())
+        sequenceText.insertPart(part, forward: flipSwitch.state != .on)
     }
 
     @objc private func accept(_ sender: Any?) {
@@ -450,4 +457,156 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
 /// Top-down coordinates, so the inputs start at the top of their scroll view.
 private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
+}
+
+/// Something inserted into a primer: a codon, an enzyme site, a tag or a
+/// protease site.
+final class PrimerPart: NSObject {
+    enum Kind { case codon, enzymeSite, tag, proteaseSite }
+    let kind: Kind
+    let name: String    // shown on its mark: "Met", "EcoRI", "His6", "TEV"
+    let bases: String   // as it reads, 5'->3'
+
+    init(kind: Kind, name: String, bases: String) {
+        self.kind = kind
+        self.name = name
+        self.bases = bases
+    }
+
+    var color: NSColor {
+        switch kind {
+        case .codon: return .systemGreen
+        case .enzymeSite: return .systemPurple
+        case .tag: return .systemBlue
+        case .proteaseSite: return .systemOrange
+        }
+    }
+}
+
+/// One inserted part in the box: what it is and which way it reads there.
+private final class PartMark: NSObject {
+    let part: PrimerPart
+    let forward: Bool
+
+    init(part: PrimerPart, forward: Bool) {
+        self.part = part
+        self.forward = forward
+    }
+}
+
+/// The primer's bases, with a line under each inserted part: its colour says
+/// what kind it is, its arrow which way it reads, and its name sits under it.
+/// The marks ride on the text as an attribute, so they move with edits.
+final class PrimerTextView: NSTextView {
+    private static let markKey = NSAttributedString.Key("RestrictoPrimerPart")
+    private static let markFont = NSFont.systemFont(ofSize: 9, weight: .medium)
+    private let baseFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+
+    /// The bases' look, with room under each line for the marks.
+    private var baseAttributes: [NSAttributedString.Key: Any] {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 16
+        return [.font: baseFont, .foregroundColor: NSColor.textColor, .paragraphStyle: paragraph]
+    }
+
+    func setUpLook() {
+        font = baseFont
+        defaultParagraphStyle = baseAttributes[.paragraphStyle] as? NSParagraphStyle
+        typingAttributes = baseAttributes
+    }
+
+    /// Typing never extends a part's mark.
+    override var typingAttributes: [NSAttributedString.Key: Any] {
+        get {
+            var attributes = super.typingAttributes
+            attributes[Self.markKey] = nil
+            return attributes
+        }
+        set { super.typingAttributes = newValue }
+    }
+
+    /// Replaces the bases with unmarked ones.
+    func setPlain(_ bases: String) {
+        textStorage?.setAttributedString(NSAttributedString(string: bases, attributes: baseAttributes))
+        needsDisplay = true
+    }
+
+    /// Inserts a part at the cursor as one undo step, reading forward (as
+    /// typed) or, reverse complemented, backward.
+    func insertPart(_ part: PrimerPart, forward: Bool) {
+        let bases = (forward ? part.bases : PrimerParts.reverseComplement(part.bases)).uppercased()
+        let range = selectedRange()
+        guard shouldChangeText(in: range, replacementString: bases) else { return }
+        var attributes = baseAttributes
+        attributes[Self.markKey] = PartMark(part: part, forward: forward)
+        textStorage?.replaceCharacters(in: range, with: NSAttributedString(string: bases, attributes: attributes))
+        didChangeText()
+        setSelectedRange(NSRange(location: range.location + (bases as NSString).length, length: 0))
+        needsDisplay = true
+    }
+
+    /// Reverse complements the bases, keeping each mark on its bases with its
+    /// arrow turned round.
+    func flip() {
+        guard let storage = textStorage else { return }
+        let length = storage.length
+        var marks: [(NSRange, PartMark)] = []
+        storage.enumerateAttribute(Self.markKey, in: NSRange(location: 0, length: length)) { value, range, _ in
+            if let mark = value as? PartMark { marks.append((range, mark)) }
+        }
+        let flipped = NSMutableAttributedString(string: PrimerParts.reverseComplement(storage.string),
+                                                attributes: baseAttributes)
+        for (range, mark) in marks {
+            flipped.addAttribute(Self.markKey, value: PartMark(part: mark.part, forward: !mark.forward),
+                                 range: NSRange(location: length - range.location - range.length, length: range.length))
+        }
+        storage.setAttributedString(flipped)
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard let layout = layoutManager, let container = textContainer, let storage = textStorage else { return }
+        let origin = textContainerOrigin
+        let descent = abs(baseFont.descender)
+        storage.enumerateAttribute(Self.markKey, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+            guard let mark = value as? PartMark else { return }
+            let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            var first = true
+            layout.enumerateLineFragments(forGlyphRange: glyphs) { lineRect, _, _, lineGlyphs, _ in
+                let piece = NSIntersectionRange(glyphs, lineGlyphs)
+                guard piece.length > 0 else { return }
+                let box = layout.boundingRect(forGlyphRange: piece, in: container)
+                let baseline = origin.y + lineRect.minY + layout.location(forGlyphAt: piece.location).y
+                let y = baseline + descent + 3
+                let x0 = origin.x + box.minX + 1, x1 = origin.x + box.maxX - 1
+                let color = mark.part.color
+                color.setStroke()
+                color.setFill()
+                let line = NSBezierPath()
+                line.lineWidth = 1.5
+                line.move(to: NSPoint(x: x0, y: y))
+                line.line(to: NSPoint(x: x1, y: y))
+                line.stroke()
+                // The arrowhead where the part ends, the way it reads.
+                let lastPiece = NSMaxRange(piece) == NSMaxRange(glyphs)
+                if mark.forward ? lastPiece : first {
+                    let tip = mark.forward ? x1 : x0, back: CGFloat = mark.forward ? -5 : 5
+                    let head = NSBezierPath()
+                    head.move(to: NSPoint(x: tip, y: y))
+                    head.line(to: NSPoint(x: tip + back, y: y - 3))
+                    head.line(to: NSPoint(x: tip + back, y: y + 3))
+                    head.close()
+                    head.fill()
+                }
+                if first {
+                    let label = NSAttributedString(string: mark.part.name, attributes: [
+                        .font: Self.markFont, .foregroundColor: color,
+                    ])
+                    label.draw(at: NSPoint(x: x0, y: y + 2))
+                }
+                first = false
+            }
+        }
+    }
 }

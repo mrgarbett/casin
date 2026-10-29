@@ -102,7 +102,7 @@ enum UISmokeTest {
                 PrimerEditor.acceptAll()
                 guard let core = core, core.primers.count == before + 1,
                       core.primers.last?.start == 500, core.primers.last?.length == 22,
-                      core.primers.last?.bases.hasPrefix("catcatcaccaccatcac") == true,
+                      core.primers.last?.bases.hasPrefix("CATCATCACCACCATCAC") == true,
                       core.primers.last?.bases.count == 40,
                       !PrimerEditor.isAnyOpen,
                       !oc_document_has_pending_primer(core.handle) else {

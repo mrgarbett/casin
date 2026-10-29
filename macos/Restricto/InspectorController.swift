@@ -78,15 +78,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         // macOS 26 draws no line between the middle and the panel. Draw one
         // (with a grab handle) over the panel's edge; the drag stays the split
         // view's.
-        let edge = PanelEdgeLine()
-        edge.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(edge)
-        NSLayoutConstraint.activate([
-            edge.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            edge.topAnchor.constraint(equalTo: root.topAnchor),
-            edge.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            edge.widthAnchor.constraint(equalToConstant: 5),
-        ])
+        PanelEdgeLine.add(to: root, trailing: false)
         view = root
 
         document.observe { [weak self] what in
@@ -205,27 +197,27 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     private func buildPrimersTab() {
         let scroll = makeTable(primerTable, columns: [("name", "Primer", 120), ("tm", "Tm", 56),
                                                       ("location", "Binds", 96)])
-        // + adds a primer (here, in the pane), − deletes the selected one.
-        func small(_ symbol: String, _ label: String, _ action: Selector) -> NSButton {
-            let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label) ?? NSImage()
-            let button = NSButton(image: image, target: self, action: action)
-            button.isBordered = false
-            button.toolTip = label
-            return button
-        }
-        let add = small("plus", "Add Primer", #selector(addPrimerClicked(_:)))
-        let remove = small("minus", "Delete Primer", #selector(removePrimerClicked(_:)))
-        let bar = NSStackView(views: [add, remove, NSView()])
-        bar.spacing = 10
-        let list = NSStackView(views: [scroll, bar])
+        // Add Primer sits at the top, where it's seen; − deletes the selected primer.
+        let add = NSButton(title: "Add Primer", image: NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
+            ?? NSImage(), target: self, action: #selector(addPrimerClicked(_:)))
+        add.imagePosition = .imageLeading
+        add.controlSize = .small
+        add.bezelColor = .controlAccentColor
+        add.toolTip = "Add a primer: type it here and see where it binds"
+        let remove = NSButton(image: NSImage(systemSymbolName: "minus", accessibilityDescription: "Delete Primer")
+            ?? NSImage(), target: self, action: #selector(removePrimerClicked(_:)))
+        remove.isBordered = false
+        remove.toolTip = "Delete the selected primer"
+        let bar = NSStackView(views: [add, NSView(), remove])
+        bar.spacing = 8
+        bar.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 2, right: 10)
+        let list = NSStackView(views: [bar, scroll])
         list.orientation = .vertical
         list.alignment = .leading
         list.spacing = 4
-        list.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 8, right: 0)
         for v in [scroll, bar] as [NSView] {
             v.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
         }
-        bar.edgeInsets = NSEdgeInsets(top: 0, left: 8, bottom: 0, right: 8)
         list.translatesAutoresizingMaskIntoConstraints = false
         primerList = list
         primersHolder.addSubview(list)
@@ -583,15 +575,46 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     }
 }
 
-/// The line along the panel's left edge, with a small handle at its middle,
-/// like the map/sequence divider. It lets clicks through to the divider.
+/// The line along a side panel's inner edge (the right panel's left edge,
+/// the folder sidebar's right edge), with a small handle at its middle, like
+/// the map/sequence divider. Both panels use it, so their edges match. It
+/// lets clicks through to the divider.
 final class PanelEdgeLine: NSView {
+    /// The width to give it, pinned to the panel's inner edge.
+    static let width: CGFloat = 5
+    /// True when the line runs along the panel's trailing edge.
+    private let trailing: Bool
+
+    init(trailing: Bool = false) {
+        self.trailing = trailing
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
     override func draw(_ dirtyRect: NSRect) {
+        let x = trailing ? bounds.maxX - 1 : 0
         NSColor.separatorColor.setFill()
-        NSRect(x: 0, y: 0, width: 1, height: bounds.height).fill()
+        NSRect(x: x, y: 0, width: 1, height: bounds.height).fill()
         NSColor.tertiaryLabelColor.setFill()
-        NSBezierPath(roundedRect: NSRect(x: 0, y: bounds.midY - 16, width: 4, height: 32), xRadius: 2, yRadius: 2).fill()
+        let handleX = trailing ? bounds.maxX - 4 : 0
+        NSBezierPath(roundedRect: NSRect(x: handleX, y: bounds.midY - 16, width: 4, height: 32), xRadius: 2, yRadius: 2)
+            .fill()
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    /// Adds an edge line along `view`'s inner edge.
+    static func add(to view: NSView, trailing: Bool) {
+        let edge = PanelEdgeLine(trailing: trailing)
+        edge.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(edge)
+        NSLayoutConstraint.activate([
+            trailing ? edge.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+                     : edge.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            edge.topAnchor.constraint(equalTo: view.topAnchor),
+            edge.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            edge.widthAnchor.constraint(equalToConstant: width),
+        ])
+    }
 }

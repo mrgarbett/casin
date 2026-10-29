@@ -7,6 +7,8 @@ enum PrimerParts {
     struct AminoAcid {
         let name: String     // "Leu (L)"
         let codons: [String] // the one E. coli uses most first
+        /// "Leu", or "Stop".
+        var shortName: String { name.components(separatedBy: " (").first ?? name }
     }
 
     /// The standard genetic code, by amino acid, stops last.
@@ -41,6 +43,12 @@ enum PrimerParts {
         let name: String
         let protein: String  // what it encodes; "/" marks where a protease cuts
         let bases: String
+        var isProteaseSite: Bool { name.hasSuffix(" site") }
+        /// "His6", "TEV", "HRV 3C".
+        var shortName: String {
+            name.replacingOccurrences(of: " (PreScission)", with: "")
+                .replacingOccurrences(of: " tag", with: "").replacingOccurrences(of: " site", with: "")
+        }
     }
 
     /// Common tags and protease sites, as E. coli-friendly codons.
