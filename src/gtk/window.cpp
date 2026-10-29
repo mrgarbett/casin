@@ -231,6 +231,8 @@ Window::Window(Shell *shell) : m_shell(shell), m_window(shell->widget())
     buildUi();
     rebuildEnzymeSets();
     m_doc.onSequenceChanged([this] {
+        if (m_primerEditor)
+            m_primerEditor->sequenceChanged();
         rebuildFeatureList();
         rebuildPrimerList();
         rebuildEnzymeList();
@@ -260,6 +262,10 @@ Window::Window(Shell *shell) : m_shell(shell), m_window(shell->widget())
 
 Window::~Window()
 {
+    // Before the views: dropping the editor clears its preview, which they draw.
+    if (m_endPrimerIdle)
+        g_source_remove(m_endPrimerIdle);
+    m_primerEditor.reset();
     if (m_panelAnim) {
         g_signal_handlers_disconnect_by_data(m_panelAnim, this);
         adw_animation_reset(m_panelAnim);
@@ -302,7 +308,6 @@ void Window::addActions(GActionMap *map, Shell *shell)
         OC_ACT("gibson", actGibson),
         OC_ACT("design-primers", actDesignPrimers),
         OC_ACT("choose-enzymes", actChooseEnzymes),
-        OC_ACT("primer-by-sequence", actPrimerBySequence),
         OC_ACT("mutagenesis", actMutagenesis),
         OC_ACT("history", actHistory),
         OC_ACT("align", actAlign),
@@ -690,8 +695,29 @@ GtkWidget *Window::buildPanel()
                      })),
                      this);
     GtkWidget *pscroll = scrolled(m_primerList);
-    gtk_widget_set_margin_top(pscroll, 6);
-    gtk_stack_add_named(GTK_STACK(m_panelStack), pscroll, "primers");
+    gtk_widget_set_vexpand(pscroll, TRUE);
+    // Add Primer sits at the top, where it's seen.
+    GtkWidget *addPrimer = gtk_button_new();
+    GtkWidget *addContent = adw_button_content_new();
+    adw_button_content_set_icon_name(ADW_BUTTON_CONTENT(addContent), "list-add-symbolic");
+    adw_button_content_set_label(ADW_BUTTON_CONTENT(addContent), "Add Primer");
+    gtk_button_set_child(GTK_BUTTON(addPrimer), addContent);
+    gtk_widget_add_css_class(addPrimer, "suggested-action");
+    gtk_widget_set_halign(addPrimer, GTK_ALIGN_START);
+    gtk_widget_set_tooltip_text(addPrimer, "Add a primer: type it here and see where it binds");
+    gtk_widget_set_margin_start(addPrimer, 10);
+    gtk_widget_set_margin_top(addPrimer, 10);
+    gtk_widget_set_margin_bottom(addPrimer, 4);
+    g_signal_connect_swapped(addPrimer, "clicked", G_CALLBACK(+[](gpointer p) {
+                                 static_cast<Window *>(p)->beginAddingPrimer("");
+                             }),
+                             this);
+    GtkWidget *primerBox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_append(GTK_BOX(primerBox), addPrimer);
+    gtk_box_append(GTK_BOX(primerBox), pscroll);
+    m_primerStack = gtk_stack_new();
+    gtk_stack_add_named(GTK_STACK(m_primerStack), primerBox, "list");
+    gtk_stack_add_named(GTK_STACK(m_panelStack), m_primerStack, "primers");
 
     GtkWidget *panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_add_css_class(panel, "view");
@@ -1203,6 +1229,46 @@ void Window::rebuildPrimerList()
         g_object_set_data(G_OBJECT(row), "primer", GINT_TO_POINTER(int(i)));
         gtk_list_box_append(GTK_LIST_BOX(m_primerList), row);
     }
+}
+
+void Window::beginAddingPrimer(const std::string &bases)
+{
+    if (m_doc.isEmpty())
+        return;
+    m_tablePane = "primers";
+    showPane("primers");
+    if (!m_panelShown)
+        setPanelShown(true);
+    if (m_primerEditor) {
+        if (!bases.empty())
+            m_primerEditor->setBases(bases);
+        m_primerEditor->focus();
+        return;
+    }
+    m_primerEditor = std::make_unique<PrimerEditor>(&m_doc, bases);
+    m_primerEditor->onClose = [this] {
+        // Called from one of the editor's own buttons: let go of it once that
+        // click is over.
+        if (!m_endPrimerIdle)
+            m_endPrimerIdle = g_idle_add_once([](gpointer p) {
+                auto *self = static_cast<Window *>(p);
+                self->m_endPrimerIdle = 0;
+                self->endAddingPrimer();
+            }, this);
+    };
+    gtk_stack_add_named(GTK_STACK(m_primerStack), m_primerEditor->widget(), "editor");
+    gtk_stack_set_visible_child_name(GTK_STACK(m_primerStack), "editor");
+    m_primerEditor->focus();
+}
+
+void Window::endAddingPrimer()
+{
+    if (!m_primerEditor)
+        return;
+    gtk_stack_set_visible_child_name(GTK_STACK(m_primerStack), "list");
+    gtk_stack_remove(GTK_STACK(m_primerStack), m_primerEditor->widget());
+    m_primerEditor.reset();
+    rebuildPrimerList();
 }
 
 void Window::rebuildEnzymeList()
@@ -1822,7 +1888,7 @@ void Window::updateActions()
     enable("redo", m_doc.canRedo());
     for (const char *name : {"save", "save-as", "export-fasta", "export-genbank", "export-map", "copy-map", "go-to", "rename",
                              "annotate", "print", "paste", "select-all", "find", "copy", "copy-rc",
-                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "ta-cloning", "overlap-extension", "insertion", "choose-enzymes", "primer-by-sequence", "history", "align", "compare", "orfs", "protein", "map-options"})
+                             "reverse-complement", "circular", "digest", "pcr", "clone", "golden-gate", "gibson", "ta-cloning", "overlap-extension", "insertion", "choose-enzymes", "history", "align", "compare", "orfs", "protein", "map-options"})
         enable(name, has);
     enable("cut", sel);
     enable("add-feature", sel);
@@ -1985,16 +2051,13 @@ void Window::actDeleteFeature(GSimpleAction *, GVariant *, gpointer p)
     self->toast("Deleted " + name);
 }
 
-// One entry for both ways in: from the selection when there is one,
-// otherwise by pasting the primer's sequence.
+// Opens a new primer's inputs in the Primers pane, filled in with the
+// selected bases (top strand, so a forward primer) when there is a selection.
 void Window::actAddPrimer(GSimpleAction *, GVariant *, gpointer p)
 {
     auto *w = static_cast<Window *>(p);
     const bool sel = w->m_doc.hasSelection() && w->m_doc.selection().length > 0;
-    if (sel && !w->m_doc.selection().wraps(w->m_doc.sequence().length()))
-        w->primerDialog();
-    else
-        w->primerBySequenceDialog();
+    w->beginAddingPrimer(sel ? w->m_doc.selectedBases() : "");
 }
 
 void Window::actDigest(GSimpleAction *, GVariant *, gpointer p)
@@ -2030,11 +2093,6 @@ void Window::actDesignPrimers(GSimpleAction *, GVariant *, gpointer p)
 void Window::actChooseEnzymes(GSimpleAction *, GVariant *, gpointer p)
 {
     static_cast<Window *>(p)->chooseEnzymesDialog();
-}
-
-void Window::actPrimerBySequence(GSimpleAction *, GVariant *, gpointer p)
-{
-    static_cast<Window *>(p)->primerBySequenceDialog();
 }
 
 void Window::actMutagenesis(GSimpleAction *, GVariant *, gpointer p)

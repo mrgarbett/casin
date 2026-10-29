@@ -44,6 +44,34 @@ SequenceView::SequenceView(Document *doc) : m_doc(doc)
     GtkGesture *click = gtk_gesture_click_new();
     g_signal_connect(click, "pressed", G_CALLBACK(&SequenceView::pressed), this);
     gtk_widget_add_controller(m_area, GTK_EVENT_CONTROLLER(click));
+    // Right-click: Add Primer (from the selection, if any), as on the Mac.
+    GtkGesture *menu = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(menu), GDK_BUTTON_SECONDARY);
+    g_signal_connect(menu, "pressed", G_CALLBACK((+[](GtkGestureClick *, int, double x, double y, gpointer p) {
+                         auto *self = static_cast<SequenceView *>(p);
+                         if (self->m_doc->isEmpty())
+                             return;
+                         const bool sel = self->m_doc->hasSelection() && self->m_doc->selection().length > 0;
+                         GMenu *model = g_menu_new();
+                         g_menu_append(model, sel ? "Add Primer from Selection…" : "Add Primer…", "win.add-primer");
+                         if (sel)
+                             g_menu_append(model, "Copy", "win.copy");
+                         GtkWidget *pop = gtk_popover_menu_new_from_model(G_MENU_MODEL(model));
+                         g_object_unref(model);
+                         gtk_widget_set_parent(pop, self->m_area);
+                         gtk_popover_set_has_arrow(GTK_POPOVER(pop), FALSE);
+                         const GdkRectangle at = {int(x), int(y), 1, 1};
+                         gtk_popover_set_pointing_to(GTK_POPOVER(pop), &at);
+                         g_signal_connect(pop, "closed", G_CALLBACK(+[](GtkPopover *pop) {
+                                              // Unparent once it has finished closing.
+                                              g_idle_add_once([](gpointer w) { gtk_widget_unparent(GTK_WIDGET(w)); },
+                                                              pop);
+                                          }),
+                                          nullptr);
+                         gtk_popover_popup(GTK_POPOVER(pop));
+                     })),
+                     this);
+    gtk_widget_add_controller(m_area, GTK_EVENT_CONTROLLER(menu));
 
     gtk_widget_set_focusable(m_area, TRUE);
     gtk_widget_set_focus_on_click(m_area, TRUE);

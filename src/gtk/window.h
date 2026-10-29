@@ -3,6 +3,7 @@
 
 #include "mapview.h"
 #include "seqview.h"
+#include "primereditor.h"
 #include "core/abif.h"
 #include "core/seqio.h"
 #include "view/document.h"
@@ -132,7 +133,6 @@ private:
     static void actGibson(GSimpleAction *, GVariant *, gpointer self);
     static void actDesignPrimers(GSimpleAction *, GVariant *, gpointer self);
     static void actChooseEnzymes(GSimpleAction *, GVariant *, gpointer self);
-    static void actPrimerBySequence(GSimpleAction *, GVariant *, gpointer self);
     static void actMutagenesis(GSimpleAction *, GVariant *, gpointer self);
     static void actHistory(GSimpleAction *, GVariant *, gpointer self);
     static void actAlign(GSimpleAction *, GVariant *, gpointer self);
@@ -170,9 +170,15 @@ private:
     bool saveTo(const std::string &path, FileFormat format);
     void updateActions();
     void rebuildPrimerList();
+public:
+    // Opens the Primers pane with a new primer's inputs, filled in with
+    // `bases` if given. An editor already open keeps what was typed unless
+    // new bases come.
+    void beginAddingPrimer(const std::string &bases);
+private:
+    void endAddingPrimer();
     // Feature dialog: index < 0 adds a feature from the selection.
     void featureDialog(int index);
-    void primerDialog();
     void digestDialog();
     void pcrDialog();
     void cloningDialog();
@@ -180,7 +186,6 @@ private:
     void gibsonDialog();
     void designPrimersDialog();
     void chooseEnzymesDialog();
-    void primerBySequenceDialog();
     void mutagenesisDialog();
     void historyDialog();
     // compare = pick any open sequence (a parent construct), not just linear reads.
@@ -245,6 +250,10 @@ private:
     GtkWidget *m_featureList = nullptr;
     GtkWidget *m_enzymeList = nullptr;
     GtkWidget *m_primerList = nullptr;
+    // The Primers pane: the list, or a new primer's inputs while one is added.
+    GtkWidget *m_primerStack = nullptr;
+    std::unique_ptr<PrimerEditor> m_primerEditor;
+    guint m_endPrimerIdle = 0;
     bool m_closeConfirmed = false;
     GtkWidget *m_filter = nullptr;
     GtkWidget *m_setDrop = nullptr;

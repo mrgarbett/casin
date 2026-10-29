@@ -871,7 +871,6 @@ void Shell::rebuildMenu()
     GMenu *primerMenu = g_menu_new();
     GMenu *primerEdit = g_menu_new();
     g_menu_append(primerEdit, "Add Primer…", "win.add-primer");
-    g_menu_append(primerEdit, "Add Primer by Sequence…", "win.primer-by-sequence");
     g_menu_append(primerEdit, "Delete Primer…", "win.delete-primer");
     g_menu_append_section(primerMenu, nullptr, G_MENU_MODEL(primerEdit));
     GMenu *primerTools = g_menu_new();
