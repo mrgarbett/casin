@@ -38,6 +38,10 @@ final class SequenceView: NSView {
     /// layout is drawn and the new one waits until the width settles.
     private var lastWidthChange = Date.distantPast
     private var pendingRelayout: DispatchWorkItem?
+    /// While the width changes, the base kept in place (the caret's, when it
+    /// was in view, else the first one shown) and its height below the top
+    /// of the view, so the lines rewrap around it instead of scrolling away.
+    private var scrollAnchor: (position: Int, offset: CGFloat)?
 
     init(document: CoreDocument) {
         self.document = document
@@ -92,6 +96,7 @@ final class SequenceView: NSView {
         let width = Double(max(1, availableWidth - trailingInset))
         let dark = isDarkAppearance
         if let current = layout, layoutDark == dark, layoutWidth != width {
+            noteScrollAnchor(current)
             let now = Date()
             let changing = now.timeIntervalSince(lastWidthChange) < 0.25
             lastWidthChange = now
@@ -114,8 +119,30 @@ final class SequenceView: NSView {
             layoutWidth = width
             layoutDark = dark
             if let layout = layout { oc_seq_layout_set_hover_codon(layout, Int32(hoverCodon)) }
+            // Laid out while drawing: size and scroll once the draw is done.
+            if scrollAnchor != nil { DispatchQueue.main.async { [weak self] in self?.updateSize() } }
         }
         return layout
+    }
+
+    private var layoutIsCurrent: Bool {
+        layout != nil && layoutWidth == Double(max(1, availableWidth - trailingInset))
+    }
+
+    private func noteScrollAnchor(_ layout: OpaquePointer) {
+        guard scrollAnchor == nil else { return }
+        let visible = visibleRect
+        guard visible.height > 0 else { return }
+        var position = Int(oc_seq_layout_position_at(layout, 0, visible.minY + 1))
+        guard position >= 0 else { return }
+        if document.hasSelection {
+            let caret = Int32(document.selectionStart)
+            let top = CGFloat(oc_seq_layout_line_top(layout, caret))
+            if top >= visible.minY, top + CGFloat(oc_seq_layout_line_height(layout, caret)) <= visible.maxY {
+                position = Int(caret)
+            }
+        }
+        scrollAnchor = (position, CGFloat(oc_seq_layout_line_top(layout, Int32(position))) - visible.minY)
     }
 
     private func relayoutWhenSettled() {
@@ -131,6 +158,11 @@ final class SequenceView: NSView {
         let visibleHeight = enclosingScrollView?.contentSize.height ?? 0
         let size = NSSize(width: availableWidth, height: max(oc_seq_layout_total_height(layout) + 20, visibleHeight))
         if frame.size != size { setFrameSize(size) }
+        if let keep = scrollAnchor, layoutIsCurrent {
+            scrollAnchor = nil
+            let top = CGFloat(oc_seq_layout_line_top(layout, Int32(keep.position))) - keep.offset
+            scroll(NSPoint(x: 0, y: max(0, min(top, size.height - visibleHeight))))
+        }
     }
 
     func scrollToPosition(_ position: Int) {

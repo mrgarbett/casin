@@ -83,6 +83,20 @@ final class SequenceDocument: NSDocument {
         Self.postDocumentsChanged()
     }
 
+    /// The type a file was opened as may be another app's (SnapGene's own
+    /// .dna type, say), which the save panel doesn't list, so it would
+    /// default to GenBank. Name ours instead, so Save As keeps the format.
+    override var fileType: String? {
+        get {
+            switch fileURL?.pathExtension.lowercased() {
+            case "dna": return "io.github.mrgarbett.restricto.snapgene-dna"
+            case "embl", "emb": return "io.github.mrgarbett.restricto.embl"
+            default: return super.fileType
+            }
+        }
+        set { super.fileType = newValue }
+    }
+
     override func writableTypes(for saveOperation: NSDocument.SaveOperationType) -> [String] {
         ["io.github.mrgarbett.restricto.genbank", "io.github.mrgarbett.restricto.snapgene-dna", "io.github.mrgarbett.restricto.embl"]
     }

@@ -30,6 +30,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     private let primersHolder = NSView()
     private var primerList: NSView?
     private var primerEditor: PrimerEditor?
+    private var removePrimerButton: NSButton?
     private let filter = NSPopUpButton(frame: .zero, pullsDown: false)
     private let enzymeSearch = NSSearchField()
     private let onMapOnly = NSButton(checkboxWithTitle: "Only enzymes on the map", target: nil, action: nil)
@@ -206,8 +207,11 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         add.toolTip = "Add a primer: type it here and see where it binds"
         let remove = NSButton(image: NSImage(systemSymbolName: "minus", accessibilityDescription: "Delete Primer")
             ?? NSImage(), target: self, action: #selector(removePrimerClicked(_:)))
-        remove.isBordered = false
+        remove.controlSize = .small
         remove.toolTip = "Delete the selected primer"
+        // A clear button, enabled while a primer is selected.
+        remove.isEnabled = false
+        removePrimerButton = remove
         let bar = NSStackView(views: [add, NSView(), remove])
         bar.spacing = 8
         bar.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 2, right: 10)
@@ -347,6 +351,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     private func reloadPrimers() {
         primers = document.primers
         primerTable.reloadData()
+        removePrimerButton?.isEnabled = primerTable.selectedRow >= 0
     }
 
     private func reloadEnzymes() {
@@ -553,6 +558,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
+        removePrimerButton?.isEnabled = primerTable.selectedRow >= 0
         guard !syncing, let table = notification.object as? NSTableView, table.selectedRow >= 0 else { return }
         if table === featureTable {
             document.activateFeature(features[table.selectedRow].index)

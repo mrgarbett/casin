@@ -39,9 +39,15 @@ final class MapView: NSView {
         didSet { if trailingInset != oldValue { invalidateLayout() } }
     }
 
-    /// The size the map is laid out in: the view less the trailing inset.
+    /// Room kept free along the bottom (the status pill floats there when
+    /// the map is stacked over the sequence).
+    var bottomInset: CGFloat = 0 {
+        didSet { if bottomInset != oldValue { invalidateLayout() } }
+    }
+
+    /// The size the map is laid out in: the view less the insets.
     private var mapSize: CGSize {
-        CGSize(width: max(1, bounds.width - trailingInset), height: bounds.height)
+        CGSize(width: max(1, bounds.width - trailingInset), height: max(1, bounds.height - bottomInset))
     }
 
     /// An event's point in the map's own coordinates.

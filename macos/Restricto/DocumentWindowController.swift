@@ -318,6 +318,8 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         let statusUnderMap = mapStacked && !mapHidden
         let statusOverSequence = !sequenceInPanel && !statusUnderMap
         sequenceScroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: statusOverSequence ? 52 : 0, right: 0)
+        // Under the map, the map's labels keep clear of it.
+        mapView.bottomInset = statusUnderMap ? 46 : 0
         if let pill = statusPill, let root = detailRoot {
             pillBottom?.isActive = false
             pillBottom = statusUnderMap

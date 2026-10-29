@@ -21,8 +21,6 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
     private let colorWell = NSColorWell(style: .minimal)
     private var colorChosen = false
     private let sequenceText = PrimerTextView(usingTextLayoutManager: false)
-    /// The sequence box's own undo, apart from the document's.
-    private let textUndo = UndoManager()
     /// On when the bases are the reverse complement of what was typed, so the
     /// primer binds the other strand; inserts then go in reverse complemented
     /// too, so they still read on the strand they were typed on.
@@ -42,6 +40,10 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
     private let warnings = NSTextField(wrappingLabelWithString: "")
     private let addButton = NSButton(title: "Add", target: nil, action: nil)
     private let initialBases: String
+    /// The selection before the editor moved it, put back on Cancel, and
+    /// what the editor last selected.
+    private let selectionBefore: (start: Int, length: Int)
+    private var selectionShown: (start: Int, length: Int)?
 
     /// Editors showing now, for the launch check.
     private static var showing: [PrimerEditor] = []
@@ -50,6 +52,7 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
     init(document: CoreDocument, bases: String = "") {
         self.document = document
         initialBases = bases
+        selectionBefore = (document.selectionStart, document.hasSelection ? document.selectionLength : 0)
         super.init(nibName: nil, bundle: nil)
         Self.showing.append(self)
         document.observe { [weak self] what in
@@ -72,6 +75,7 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
 
     /// Puts the cursor in the sequence box.
     func focus() {
+        view.window?.undoManager?.removeAllActions()
         view.window?.makeFirstResponder(sequenceText)
     }
 
@@ -174,8 +178,9 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         tmField.action = #selector(tmFieldChanged(_:))
         tmField.widthAnchor.constraint(equalToConstant: 40).isActive = true
         tmStepper.controlSize = .small
-        tmStepper.minValue = 45
-        tmStepper.maxValue = 75
+        // Low enough to reach the 15-base floor on most primers.
+        tmStepper.minValue = 30
+        tmStepper.maxValue = 80
         tmStepper.increment = 1
         tmStepper.integerValue = 60
         tmStepper.valueWraps = false
@@ -343,7 +348,10 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
                 let annealing = String(typed.suffix(Int(s.length)))
                 var a = OCPrimerCheck()
                 oc_string_free(oc_primer_check(annealing, &a))
-                if !a.tm.isNaN { line += " · Tm \(String(format: "%.1f", a.tm)) °C" }
+                if !a.tm.isNaN {
+                    line += " · Tm \(String(format: "%.1f", a.tm)) °C"
+                    if typed.count > Int(s.length) { line += " annealing" }
+                }
             } else if !check.tm.isNaN {
                 line += " · Tm \(String(format: "%.1f", check.tm)) °C"
             }
@@ -368,6 +376,7 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
                 || document.selectionLength != shown.length {
                 document.select(start: shown.start, length: shown.length)
             }
+            if select { selectionShown = shown }
         } else {
             oc_document_clear_pending_primer(document.handle)
             if !typed.isEmpty {
@@ -377,13 +386,17 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
             }
         }
         if !checkWarnings.isEmpty {
-            warn.append(contentsOf: checkWarnings.split(separator: "\n").map { String($0) })
+            // With a tail, say the warned Tm is the whole primer's, not the annealing part's.
+            let tailed = site.map { typed.count > Int($0.length) } ?? false
+            warn.append(contentsOf: checkWarnings.split(separator: "\n").map {
+                tailed && $0.hasPrefix("Tm ") ? "Full-length " + String($0) : String($0)
+            })
         }
         // The 3' end: its last five bases tinted, green with one to three G/C.
         if typed.count >= 5 {
             let clamp = Int(check.clamp_gc)
             let good = (1...3).contains(clamp)
-            lines.append("3′ end …\(typed.suffix(5).uppercased()): \(clamp) G/C" + (good ? " ✓" : ""))
+            lines.append("Last 5 bases …\(typed.suffix(5).uppercased()): \(clamp) G/C" + (good ? " ✓" : ""))
             sequenceText.threePrimeTint = good ? .systemGreen : .systemOrange
         } else {
             sequenceText.threePrimeTint = nil
@@ -401,7 +414,7 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
     /// CDS the primer joins, and how to fix it when it doesn't.
     private func checkFrames(site s: OCPrimerSite, tail: Int, lines: inout [String], warnings: inout [String]) {
         var site = s
-        for mark in sequenceText.marks where mark.part.kind != .enzymeSite && mark.start + mark.length <= tail {
+        for mark in sequenceText.marks where mark.part.kind != .enzymeSite && mark.start < tail {
             var frame = OCFrameCheck()
             oc_primer_part_frame(document.handle, &site, Int32(tail), Int32(mark.start), Int32(mark.length),
                                  mark.forward, &frame)
@@ -461,20 +474,24 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         fitToTm(nil)
     }
 
-    @objc private func tmFieldChanged(_ sender: Any?) {
-        let value = min(75, max(45, tmField.integerValue))
+    @objc private func tmFieldChanged(_ sender: Any?) { fitToTm(nil) }
+
+    /// The target Tm as typed, kept within the stepper's range.
+    private func takeTargetTm() -> Int {
+        let value = min(Int(tmStepper.maxValue), max(Int(tmStepper.minValue), tmField.integerValue))
         tmField.integerValue = value
         tmStepper.integerValue = value
-        fitToTm(nil)
+        return value
     }
 
     /// Grows or shrinks the annealing part along the template to the target Tm.
     @objc private func fitToTm(_ sender: Any?) {
+        let target = takeTargetTm()
         guard var s = site else { NSSound.beep(); return }
         sequenceText.removeWhitespace()
         let typed = bases
         var fitted = OCPrimerSite()
-        let result = takeString(oc_primer_fit_tm(document.handle, typed, &s, Double(tmStepper.integerValue), &fitted))
+        let result = takeString(oc_primer_fit_tm(document.handle, typed, &s, Double(target), &fitted))
         guard fitted.length > 0, result.count >= Int(fitted.length) else { return }
         let total = (typed as NSString).length
         sequenceText.replaceBases(in: NSRange(location: total - Int(s.length), length: Int(s.length)),
@@ -484,7 +501,7 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
 
     private func nextPrimerName() -> String {
         let names = Set(document.primers.map { $0.name })
-        var i = names.count + 1
+        var i = 1
         while names.contains("primer\(i)") { i += 1 }
         return "primer\(i)"
     }
@@ -493,8 +510,6 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
 
     func textDidChange(_ notification: Notification) { refresh() }
     func controlTextDidChange(_ obj: Notification) { refresh() }
-
-    func undoManager(for view: NSTextView) -> UndoManager? { textUndo }
 
     /// Return adds the primer and Esc cancels, from the sequence box…
     func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
@@ -519,13 +534,21 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         }
     }
 
-    /// Edit > Undo while the editor has the focus: the sequence box's typing first.
+    /// Edit > Undo while the editor has the focus undoes typing in the field
+    /// with the focus, never an edit to the document.
     @objc func undoEdit(_ sender: Any?) {
-        if textUndo.canUndo { textUndo.undo() } else { oc_document_undo(document.handle) }
+        guard let undo = focusedUndo, undo.canUndo else { NSSound.beep(); return }
+        undo.undo()
     }
 
     @objc func redoEdit(_ sender: Any?) {
-        if textUndo.canRedo { textUndo.redo() } else { oc_document_redo(document.handle) }
+        guard let undo = focusedUndo, undo.canRedo else { NSSound.beep(); return }
+        undo.redo()
+    }
+
+    /// The sequence box's own undo, or the name or description field's.
+    private var focusedUndo: UndoManager? {
+        (view.window?.firstResponder as? NSTextView)?.undoManager
     }
 
     @objc private func colorChanged(_ sender: Any?) {
@@ -538,9 +561,18 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         let length = (sequenceText.string as NSString).length
         let caret = sequenceText.selectedRange()
         sequenceText.flip()
+        noteFlipForUndo()
         sequenceText.setSelectedRange(NSRange(location: max(0, length - caret.location - caret.length),
                                               length: caret.length))
         refresh()
+    }
+
+    /// Undoing a flip in the box turns the switch back too (and redoing it, on).
+    private func noteFlipForUndo() {
+        sequenceText.undoManager?.registerUndo(withTarget: self) { editor in
+            editor.flipSwitch.state = editor.flipSwitch.state == .on ? .off : .on
+            editor.noteFlipForUndo()
+        }
     }
 
     @objc private func aminoAcidChanged(_ sender: Any?) { fillCodons() }
@@ -582,10 +614,22 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
     @objc private func cancel(_ sender: Any?) {
         finished = true
         oc_document_clear_pending_primer(document.handle)
+        // Put back the selection the preview moved, unless it was changed since.
+        if let shown = selectionShown, document.hasSelection, document.selectionStart == shown.start,
+           document.selectionLength == shown.length {
+            if selectionBefore.length > 0 {
+                document.select(start: selectionBefore.start, length: selectionBefore.length)
+            } else {
+                oc_document_clear_selection(document.handle)
+            }
+        }
         close()
     }
 
     private func close() {
+        // Typing in the name and description fields goes on the window's
+        // undo; it means nothing once the editor is gone.
+        view.window?.undoManager?.removeAllActions()
         Self.showing.removeAll { $0 === self }
         onClose?()
     }
@@ -669,6 +713,15 @@ final class PrimerTextView: NSTextView {
         return [.font: baseFont, .foregroundColor: NSColor.textColor, .paragraphStyle: paragraph]
     }
 
+    /// The box's own undo, apart from the document's and the window's, so it
+    /// starts empty each time and ⌘Z here never reaches the document.
+    private let ownUndo = UndoManager()
+    override var undoManager: UndoManager? { ownUndo }
+
+    /// The Tag colour well is for the primer, not these bases: with the box
+    /// still focused, the colour panel would otherwise recolour its text.
+    override func changeColor(_ sender: Any?) {}
+
     func setUpLook() {
         font = baseFont
         defaultParagraphStyle = baseAttributes[.paragraphStyle] as? NSParagraphStyle
@@ -688,6 +741,7 @@ final class PrimerTextView: NSTextView {
     /// Replaces the bases with unmarked ones.
     func setPlain(_ bases: String) {
         textStorage?.setAttributedString(NSAttributedString(string: bases, attributes: baseAttributes))
+        ownUndo.removeAllActions()
         needsDisplay = true
     }
 
@@ -726,16 +780,26 @@ final class PrimerTextView: NSTextView {
     /// Deletes spaces and line breaks, keeping the marks on their bases.
     func removeWhitespace() {
         guard let storage = textStorage else { return }
-        let text = storage.string as NSString
+        let stripped = NSMutableAttributedString(attributedString: storage)
+        let text = stripped.string as NSString
         var i = text.length - 1
-        storage.beginEditing()
         while i >= 0 {
             if let scalar = UnicodeScalar(text.character(at: i)), CharacterSet.whitespacesAndNewlines.contains(scalar) {
-                storage.deleteCharacters(in: NSRange(location: i, length: 1))
+                stripped.deleteCharacters(in: NSRange(location: i, length: 1))
             }
             i -= 1
         }
-        storage.endEditing()
+        guard stripped.length != storage.length else { return }
+        replaceAll(with: stripped)
+    }
+
+    /// Replaces all the text, as an undo step.
+    private func replaceAll(with text: NSAttributedString) {
+        guard let storage = textStorage else { return }
+        let all = NSRange(location: 0, length: storage.length)
+        guard shouldChangeText(in: all, replacementString: text.string) else { return }
+        storage.replaceCharacters(in: all, with: text)
+        didChangeText()
     }
 
     /// Replaces some bases with unmarked ones, as one undo step.
@@ -794,26 +858,28 @@ final class PrimerTextView: NSTextView {
             flipped.addAttribute(Self.markKey, value: PartMark(part: mark.part, forward: !mark.forward),
                                  range: NSRange(location: length - range.location - range.length, length: range.length))
         }
-        storage.setAttributedString(flipped)
+        replaceAll(with: flipped)
         needsDisplay = true
     }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard let storage = textStorage else { return }
+        // The annealing part: a grey line along the bases that bind, named at
+        // its 3' end so a part that runs into it keeps its own name clear.
+        // Drawn first, so a part's line shows over it.
+        if annealingLength > 0, let range = lastBases(annealingLength) {
+            drawMark(range, color: .tertiaryLabelColor, name: "anneals", forward: true, nameAtEnd: true)
+        }
         storage.enumerateAttribute(Self.markKey, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
             guard let mark = value as? PartMark else { return }
             drawMark(range, color: mark.part.color, name: mark.part.name, forward: mark.forward)
         }
-        // The annealing part: a grey line along the bases that bind.
-        if annealingLength > 0, let range = lastBases(annealingLength) {
-            drawMark(range, color: .tertiaryLabelColor, name: "anneals", forward: true)
-        }
     }
 
     /// A line under the characters in `range`, with an arrowhead the way it
-    /// reads and `name` under its start.
-    private func drawMark(_ range: NSRange, color: NSColor, name: String, forward: Bool) {
+    /// reads and `name` under its start (or its end).
+    private func drawMark(_ range: NSRange, color: NSColor, name: String, forward: Bool, nameAtEnd: Bool = false) {
         guard let layout = layoutManager, let container = textContainer else { return }
         let origin = textContainerOrigin
         let descent = abs(baseFont.descender)
@@ -844,9 +910,9 @@ final class PrimerTextView: NSTextView {
                 head.close()
                 head.fill()
             }
-            if first {
-                NSAttributedString(string: name, attributes: [.font: Self.markFont, .foregroundColor: color])
-                    .draw(at: NSPoint(x: x0, y: y + 2))
+            let label = NSAttributedString(string: name, attributes: [.font: Self.markFont, .foregroundColor: color])
+            if nameAtEnd ? lastPiece : first {
+                label.draw(at: NSPoint(x: nameAtEnd ? max(x0, x1 - label.size().width) : x0, y: y + 2))
             }
             first = false
         }

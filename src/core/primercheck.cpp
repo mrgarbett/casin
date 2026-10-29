@@ -102,7 +102,7 @@ PrimerCheck checkPrimer(const std::string &raw)
         c.warnings.push_back(fmt("Tm %.1f °C; 52–65 °C is typical", c.tm));
     const char last = p.back();
     if (last != 'G' && last != 'C')
-        c.warnings.push_back("No G or C at the 3′ end");
+        c.warnings.push_back("The last base isn’t G or C");
     if (c.clampGC > 3)
         c.warnings.push_back(std::to_string(c.clampGC) + " G/C in the last 5 bases can prime off-target");
     if (c.longestRun >= 5)
@@ -456,7 +456,11 @@ FrameCheck checkPartFrame(const Sequence &seq, const PrimerSite &site, int tailL
     const bool primerForward = site.strand != Strand::Reverse;
     // Where the tail meets the annealing part, on the top strand.
     const int junction = primerForward ? site.binding.start : site.binding.end;
+    // The CDS the junction falls in; failing that, one the annealing part
+    // runs into (a primer whose tail ends on the base before a start codon
+    // anneals from that base on, so its junction sits just outside the CDS).
     const Feature *cds = nullptr;
+    const Feature *overlapping = nullptr;
     for (const Feature &f : seq.features) {
         if (f.type != "CDS" || f.ranges.empty() || f.strand == Strand::None)
             continue;
@@ -469,7 +473,11 @@ FrameCheck checkPartFrame(const Sequence &seq, const PrimerSite &site, int tailL
             cds = &f;
             break;
         }
+        if (!overlapping && site.binding.start < hi && site.binding.end > lo)
+            overlapping = &f;
     }
+    if (!cds)
+        cds = overlapping;
     if (!cds)
         return out;
     out.applies = true;

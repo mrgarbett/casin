@@ -1223,6 +1223,14 @@ static void testPrimerHelpers()
     // The same tag not reverse complemented reads against the CDS.
     fc = checkPartFrame(s, r, 18, 0, 18, true);
     CHECK(fc.applies && fc.againstCds);
+    // His6 whose last base also anneals: the site starts a base before the
+    // CDS, so the junction is outside it; still in frame.
+    PrimerSite early{{f.binding.start - 1, f.binding.end}, Strand::Forward, 0};
+    fc = checkPartFrame(s, early, 17, 0, 18, true);
+    CHECK(fc.applies && fc.inFrame && fc.cds == "gene");
+    // Three spacer bases, the last annealing: still in frame.
+    fc = checkPartFrame(s, early, 20, 0, 18, true);
+    CHECK(fc.applies && fc.inFrame);
     // No CDS where a primer joins.
     PrimerSite outside{{200, 220}, Strand::Forward, 0};
     CHECK(!checkPartFrame(s, outside, 18, 0, 18, true).applies);
