@@ -97,8 +97,13 @@ final class SequenceDocument: NSDocument {
         set { super.fileType = newValue }
     }
 
+    /// The file's own format first: the save panel's format popup starts on
+    /// the first one when the type the file was opened as isn't listed.
     override func writableTypes(for saveOperation: NSDocument.SaveOperationType) -> [String] {
-        ["io.github.mrgarbett.restricto.genbank", "io.github.mrgarbett.restricto.snapgene-dna", "io.github.mrgarbett.restricto.embl"]
+        let types = ["io.github.mrgarbett.restricto.genbank", "io.github.mrgarbett.restricto.snapgene-dna",
+                     "io.github.mrgarbett.restricto.embl"]
+        guard let own = fileType, let i = types.firstIndex(of: own) else { return types }
+        return [types[i]] + types.enumerated().filter { $0.offset != i }.map { $0.element }
     }
 
     override func write(to url: URL, ofType typeName: String) throws {

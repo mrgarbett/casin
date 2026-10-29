@@ -94,7 +94,8 @@ PrimerCheck checkPrimer(const std::string &raw)
         c.warnings.push_back("Short (" + std::to_string(c.length) + " nt); 18–30 is typical");
     else if (c.length > 30)
         c.warnings.push_back("Long (" + std::to_string(c.length) + " nt); check for a 5′ tail");
-    if (c.gc < 0.4 || c.gc > 0.6)
+    // As shown, rounded: 60% exactly is fine.
+    if (std::round(c.gc * 100) < 40 || std::round(c.gc * 100) > 60)
         c.warnings.push_back(fmt("GC %.0f%%; 40–60%% is typical", c.gc * 100));
     if (std::isnan(c.tm))
         c.warnings.push_back("Tm can't be computed for ambiguous bases");

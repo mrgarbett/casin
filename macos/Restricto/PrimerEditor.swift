@@ -121,6 +121,9 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         sequenceText.isAutomaticTextReplacementEnabled = false
         sequenceText.allowsUndo = true
         sequenceText.delegate = self
+        // A well left active after its popover closes takes the text's colour
+        // when the box gets the focus; let go of it first.
+        sequenceText.onFocus = { [weak self] in self?.colorWell.deactivate() }
         sequenceText.textContainerInset = NSSize(width: 4, height: 6)
         sequenceText.setUpLook()
         let textScroll = NSScrollView()
@@ -364,7 +367,7 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
             let tail = typed.count - Int(s.length)
             if tail > 0 { lines.append("\(tail)-nt 5′ tail") }
             if s.mismatches > 0 { warn.append("\(s.mismatches) mismatch\(s.mismatches == 1 ? "" : "es") where it anneals.") }
-            if count > 1 { warn.append("Also binds \(count - 1) other place\(count == 2 ? "" : "s"); the best site is shown.") }
+            if count > 1 { warn.append(otherSites(Array(sites[1..<min(count, sites.count)]), total: count - 1, best: s, tail: tail)) }
             checkFrames(site: s, tail: tail, lines: &lines, warnings: &warn)
             // With a partner the selection shows the product; alone, the site.
             var shown = (start: Int(s.start), length: Int(s.length))
@@ -388,9 +391,10 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         if !checkWarnings.isEmpty {
             // With a tail, say the warned Tm is the whole primer's, not the annealing part's.
             let tailed = site.map { typed.count > Int($0.length) } ?? false
-            warn.append(contentsOf: checkWarnings.split(separator: "\n").map {
-                tailed && $0.hasPrefix("Tm ") ? "Full-length " + String($0) : String($0)
-            })
+            // A long primer is expected once it has a tail.
+            warn.append(contentsOf: checkWarnings.split(separator: "\n")
+                .filter { !(tailed && $0.hasPrefix("Long (")) }
+                .map { tailed && $0.hasPrefix("Tm ") ? "Full-length " + String($0) : String($0) })
         }
         // The 3' end: its last five bases tinted, green with one to three G/C.
         if typed.count >= 5 {
@@ -408,6 +412,30 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         warnings.isHidden = warn.isEmpty
         info.isHidden = lines.isEmpty
         addButton.isEnabled = site != nil
+    }
+
+    /// Where else the primer binds, and whether it binds the other strand
+    /// facing itself, so it can make a product on its own.
+    private func otherSites(_ others: [OCPrimerSite], total: Int, best: OCPrimerSite, tail: Int) -> String {
+        func place(_ o: OCPrimerSite) -> String {
+            "\((Int(o.start) + 1).formatted())–\(Int(o.start + o.length).formatted())"
+                + (o.strand == Int32(OC_STRAND_REVERSE) ? " ←" : " →")
+                + (o.mismatches > 0 ? " (\(o.mismatches) mismatch\(o.mismatches == 1 ? "" : "es"))" : "")
+        }
+        var text = "Also binds " + others.prefix(3).map(place).joined(separator: ", ")
+        if total > 3 { text += " and \(total - 3) more" }
+        text += "; the best site is shown."
+        var mine = best
+        for o in others where o.strand != best.strand {
+            var other = o
+            let product = Int(oc_pcr_product_length(document.handle, &mine, Int32(tail), &other, Int32(tail)))
+            if product > 0 {
+                text += " It binds both strands facing itself, so on its own it can make a "
+                    + "\(product.formatted()) bp product."
+                break
+            }
+        }
+        return text
     }
 
     /// For each codon or tag in the tail: whether it lands in frame with the
@@ -457,7 +485,8 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         }
         lines.append(line)
         let pair = takeString(oc_primer_pair_check(typed, partner.bases))
-        if !pair.isEmpty { warnings.append(contentsOf: pair.split(separator: "\n").map { String($0) }) }
+        // The Tm gap above is the annealing parts'; the pair check's own is the full primers'.
+        warnings.append(contentsOf: pair.split(separator: "\n").filter { !$0.hasPrefix("Tm differs") }.map { String($0) })
         guard product > 0 else { return nil }
         // The template stretch the product covers (tails aside).
         let forwardSite = s.strand == Int32(OC_STRAND_FORWARD) ? (Int(s.start), Int(s.length)) : (partner.start, partner.length)
@@ -509,6 +538,22 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
     // MARK: Actions
 
     func textDidChange(_ notification: Notification) { refresh() }
+
+    /// Base letters (IUPAC codes included); anything else typed or pasted,
+    /// such as GenBank base numbers, is left out.
+    private static let baseLetters = Set("ACGTURYKMSWBDHVNacgturykmswbdhvn")
+
+    func textView(_ textView: NSTextView, shouldChangeTextIn range: NSRange, replacementString text: String?) -> Bool {
+        guard let text = text else { return true }
+        let clean = text.filter { Self.baseLetters.contains($0) }
+        guard clean.count != text.count else { return true }
+        if clean.isEmpty && range.length == 0 {
+            NSSound.beep()
+        } else {
+            textView.insertText(clean, replacementRange: range)
+        }
+        return false
+    }
     func controlTextDidChange(_ obj: Notification) { refresh() }
 
     /// Return adds the primer and Esc cancels, from the sequence box…
@@ -721,6 +766,15 @@ final class PrimerTextView: NSTextView {
     /// The Tag colour well is for the primer, not these bases: with the box
     /// still focused, the colour panel would otherwise recolour its text.
     override func changeColor(_ sender: Any?) {}
+
+    /// Called as the box takes the focus, before AppKit hands the colour
+    /// panel the text's colour (which an active well would take too).
+    var onFocus: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        onFocus?()
+        return super.becomeFirstResponder()
+    }
 
     func setUpLook() {
         font = baseFont

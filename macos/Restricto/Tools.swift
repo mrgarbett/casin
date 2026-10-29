@@ -479,7 +479,8 @@ extension DocumentWindowController {
              + names.joined(separator: ", ") + ". Undo (⌘Z) takes them all off again.")
     }
 
-    /// ⌘L: puts the caret at a base number and shows it.
+    /// ⌘L: selects the base at a base number and shows it (a bare caret
+    /// sits between bases, so the status would name the base before it).
     @objc func goToPosition(_ sender: Any?) {
         guard let d = doc, !d.isEmpty else { return }
         let form = Form("Go to Position", "A base number from 1 to \(d.length.formatted()).")
@@ -488,7 +489,7 @@ extension DocumentWindowController {
             let digits = field.stringValue.filter { $0.isNumber }
             guard let base = Int(digits), base >= 1, base <= d.length else { NSSound.beep(); return }
             self?.revealSequence()
-            d.select(start: base - 1, length: 0)
+            d.select(start: base - 1, length: 1)
         }
     }
 
