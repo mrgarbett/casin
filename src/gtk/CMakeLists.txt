@@ -7,7 +7,20 @@ pkg_check_modules(PANGOCAIRO REQUIRED IMPORTED_TARGET pangocairo cairo)
 add_library(restricto_cairo STATIC ${PROJECT_SOURCE_DIR}/src/view/cairo_render.cpp)
 target_link_libraries(restricto_cairo PUBLIC restricto_view PkgConfig::PANGOCAIRO)
 
+# The app's own symbolic icons (pill, toggles, header), compiled in so they
+# don't depend on which icons the installed Adwaita theme still ships.
+find_program(GLIB_COMPILE_RESOURCES glib-compile-resources REQUIRED)
+set(RESTRICTO_GRESOURCE_XML ${CMAKE_CURRENT_SOURCE_DIR}/restricto.gresource.xml)
+file(GLOB RESTRICTO_ICONS ${CMAKE_CURRENT_SOURCE_DIR}/icons/*.svg)
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/resources.c
+    COMMAND ${GLIB_COMPILE_RESOURCES} --target=${CMAKE_CURRENT_BINARY_DIR}/resources.c --generate-source
+            --sourcedir=${CMAKE_CURRENT_SOURCE_DIR} ${RESTRICTO_GRESOURCE_XML}
+    DEPENDS ${RESTRICTO_GRESOURCE_XML} ${RESTRICTO_ICONS}
+    VERBATIM)
+
 add_executable(restricto
+    ${CMAKE_CURRENT_BINARY_DIR}/resources.c
     main.cpp
     window.cpp
     shell.cpp

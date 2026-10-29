@@ -203,6 +203,10 @@ void Shell::loadStyles()
 .restricto-subtitle { font-size: smaller; opacity: 0.55; }
 .restricto-browser-header { font-size: smaller; font-weight: bold; opacity: 0.55; margin-top: 6px; }
 )";
+    // Our own icons (compiled in from src/gtk/icons): Fedora's Adwaita no
+    // longer ships some of the generic ones the map toggle used.
+    gtk_icon_theme_add_resource_path(gtk_icon_theme_get_for_display(gdk_display_get_default()),
+                                     "/io/github/mrgarbett/Restricto/icons");
     GtkCssProvider *provider = gtk_css_provider_new();
     gtk_css_provider_load_from_string(provider, css);
     gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider),
@@ -310,9 +314,9 @@ void Shell::buildUi()
     gtk_menu_button_set_primary(GTK_MENU_BUTTON(m_menuButton), TRUE);
     gtk_widget_set_tooltip_text(m_menuButton, "Main menu");
     adw_header_bar_pack_end(ADW_HEADER_BAR(header), m_menuButton);
-    for (const Btn &b : {Btn{"sidebar-show-right-symbolic", "Show or hide the right panel (Ctrl+Alt+I)", "win.show-panel"},
-                         Btn{"view-dual-symbolic", "Stack the map above the sequence, or put it beside", "win.stack-map"},
-                         Btn{"media-record-symbolic", "Show or hide the map", "win.show-map"}}) {
+    for (const Btn &b : {Btn{"restricto-panel-symbolic", "Show or hide the right panel (Ctrl+Alt+I)", "win.show-panel"},
+                         Btn{"restricto-stack-symbolic", "Stack the map above the sequence, or put it beside", "win.stack-map"},
+                         Btn{"restricto-map-symbolic", "Show or hide the map", "win.show-map"}}) {
         GtkWidget *t = gtk_toggle_button_new();
         gtk_button_set_icon_name(GTK_BUTTON(t), b.icon);
         gtk_widget_set_tooltip_text(t, b.tip);

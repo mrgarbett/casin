@@ -401,10 +401,10 @@ void Window::buildUi()
     gtk_widget_set_margin_top(m_pill, 10);
     gtk_widget_set_margin_end(m_pill, 8);
     struct PillEntry { const char *pane, *icon, *tip; };
-    for (const PillEntry &e : {PillEntry{"sequence", "format-justify-left-symbolic", "Sequence"},
-                               PillEntry{"enzymes", "edit-cut-symbolic", "Enzymes"},
-                               PillEntry{"features", "view-list-bullet-symbolic", "Features"},
-                               PillEntry{"primers", "go-next-symbolic", "Primers"}}) {
+    for (const PillEntry &e : {PillEntry{"sequence", "restricto-sequence-symbolic", "Sequence"},
+                               PillEntry{"enzymes", "restricto-enzymes-symbolic", "Enzymes"},
+                               PillEntry{"features", "restricto-features-symbolic", "Features"},
+                               PillEntry{"primers", "restricto-primers-symbolic", "Primers"}}) {
         GtkWidget *b = capsuleButton(e.icon, e.tip);
         g_object_set_data(G_OBJECT(b), "pane", const_cast<char *>(e.pane));
         g_signal_connect(b, "clicked", G_CALLBACK((+[](GtkButton *b, gpointer p) {
@@ -422,11 +422,11 @@ void Window::buildUi()
     gtk_widget_add_css_class(toggles, "restricto-capsule");
     struct ToggleEntry { const char *icon, *tip; };
     int which = 0;
-    for (const ToggleEntry &e : {ToggleEntry{"object-flip-horizontal-symbolic", "Complement strand"},
-                                 ToggleEntry{"format-text-bold-symbolic",
+    for (const ToggleEntry &e : {ToggleEntry{"restricto-complement-symbolic", "Complement strand"},
+                                 ToggleEntry{"restricto-translation-symbolic",
                                              "Translation of open reading frames (green forward, red reverse)"},
-                                 ToggleEntry{"edit-cut-symbolic", "Restriction sites"},
-                                 ToggleEntry{"view-list-bullet-symbolic", "Features"}}) {
+                                 ToggleEntry{"restricto-enzymes-symbolic", "Restriction sites"},
+                                 ToggleEntry{"restricto-features-symbolic", "Features"}}) {
         GtkWidget *b = capsuleButton(e.icon, e.tip);
         g_object_set_data(G_OBJECT(b), "toggle", GINT_TO_POINTER(which++));
         g_signal_connect(b, "clicked", G_CALLBACK((+[](GtkButton *b, gpointer p) {
