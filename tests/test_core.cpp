@@ -784,6 +784,19 @@ static void testSnapGeneWriter()
         CHECK(r.primers[1].strand == Strand::Reverse);
         CHECK_EQ(r.primers[0].bases, std::string("ATGAAACCC"));
     }
+
+    // Packets we don't read come back on save while the bases are unchanged,
+    // and are dropped once they change (they may refer to positions).
+    std::string withExtra = data;
+    withExtra += char(99);
+    withExtra += std::string("\0\0\0\x07", 4) + "ignored";
+    Sequence e;
+    CHECK(readSnapGene(withExtra, &e, &err));
+    CHECK_EQ(e.snapgeneExtra.size(), size_t(1));
+    e.features.pop_back();
+    CHECK(writeSnapGene(e).find(std::string(1, char(99)) + std::string("\0\0\0\x07", 4) + "ignored") != std::string::npos);
+    e.bases[0] = 'C';
+    CHECK(writeSnapGene(e).find("ignored") == std::string::npos);
 }
 
 static void testPcr()

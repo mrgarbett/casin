@@ -290,22 +290,10 @@ void MapLayout::buildLabels(TextMeasurer &tm)
 void MapLayout::layoutCircular(TextMeasurer &tm)
 {
     buildLabels(tm);
-    double maxLabelW = 0;
+    double enzymeLabelW = 0;
     for (const LabelGlyph &g : m_labels)
-        maxLabelW = std::max(maxLabelW, g.rect.w);
-    // Without enzyme labels, still leave room for feature and primer callouts.
-    // (With them, a longer callout is pulled inward to stay on the map.)
+        enzymeLabelW = std::max(enzymeLabelW, g.rect.w);
     const Font calloutFont{11, false, false};
-    if (m_labels.empty()) {
-        for (const Feature &f : m_seq.features)
-            if (shows(f) && !f.ranges.empty())
-                maxLabelW = std::max(maxLabelW, tm.width(f.name, calloutFont) + 12);
-        for (const Primer &pr : m_seq.primers)
-            if (m_options.primers && pr.binding.length() > 0)
-                maxLabelW = std::max(maxLabelW, tm.width(pr.name, calloutFont) + 12);
-    }
-    maxLabelW = std::min(maxLabelW, 160.0);
-    const double colW = maxLabelW > 0 ? maxLabelW + 26 : 0;
 
     // Lanes: longest features first so short ones can stack outside them.
     std::vector<int> order;
@@ -318,10 +306,38 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
     int laneCount = 0;
     const std::vector<int> lanes = assignLanes(order, &laneCount);
 
+    // The label columns need room for the widest label. Without enzyme
+    // labels, that is the feature and primer callouts: only features whose
+    // names don't fit on their arrows get one, which depends on the radius.
+    // (With enzyme labels, a longer callout is pulled inward to stay on the map.)
+    auto columnWidth = [&](double r, double laneH) {
+        double w = enzymeLabelW;
+        if (m_labels.empty()) {
+            for (int fi : order) {
+                const Feature &f = m_seq.features[size_t(fi)];
+                const double rMid = r + 6 + lanes[size_t(fi)] * (laneH + kLaneGap) + laneH / 2;
+                const double arc = 2 * kPi * rMid * f.span(m_n, true).length / std::max(1, m_n) - laneH;
+                const Font font{std::min(10.5, laneH * 0.72), true, false};
+                if (tm.width(f.name, font) + 8 >= arc)
+                    w = std::max(w, tm.width(f.name, calloutFont) + 12);
+            }
+            for (const Primer &pr : m_seq.primers)
+                if (m_options.primers && pr.binding.length() > 0)
+                    w = std::max(w, tm.width(pr.name, calloutFont) + 12);
+        }
+        // Callouts alone reserve no more than a typical enzyme label, so the
+        // map doesn't shrink when the enzymes are hidden.
+        // A narrow pane keeps most of its width for the circle; a longer
+        // label is pulled inward to stay on the map.
+        w = std::min({w, m_labels.empty() ? 70.0 : 160.0, m_w * 0.18});
+        return w > 0 ? w + 26 : 0.0;
+    };
+
     m_c = {m_w / 2, m_h / 2};
     double r = std::min(m_w, m_h) / 3;
     for (int iter = 0; iter < 4; ++iter) {
         m_laneH = clampd(r * 0.075, 9, 17);
+        const double colW = columnWidth(r, m_laneH);
         const double extent = 6 + laneCount * (m_laneH + kLaneGap);
         const double horiz = m_w / 2 - kMargin - colW - 20 - extent;
         const double vert = m_h / 2 - kMargin - 22 - extent;
@@ -512,6 +528,42 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
         g.side = a <= kPi ? 1 : -1;
         g.ideal = m_c.y - rLabel * std::cos(a);
     }
+    // Labels near the bottom (or top) of the circle would all stack in one
+    // column under (or over) it, e.g. the sites of an MCS. Share such a band
+    // between the two columns, keeping their order so leaders don't cross:
+    // at the bottom, smaller angles go right; at the top, larger ones do.
+    for (bool bottom : {true, false}) {
+        auto offset = [&](double a) {   // signed angle from the band's centre, right side positive
+            const double c = bottom ? kPi : 0;
+            double d = std::remainder(a - c, 2 * kPi);
+            return bottom ? -d : d;
+        };
+        std::vector<LabelGlyph *> band;
+        int right = 0, left = 0;   // labels in this half outside the band
+        for (LabelGlyph &g : m_labels) {
+            const double d = offset(g.angle);
+            if (std::fabs(d) <= kPi / 9)
+                band.push_back(&g);
+            else if (std::fabs(d) < kPi / 2)
+                ++(d > 0 ? right : left);
+        }
+        if (band.size() < 2)
+            continue;
+        std::stable_sort(band.begin(), band.end(),
+                         [&](const LabelGlyph *a, const LabelGlyph *b) { return offset(a->angle) > offset(b->angle); });
+        const int m = int(band.size());
+        int natural = 0;
+        for (const LabelGlyph *g : band)
+            natural += offset(g->angle) >= 0;
+        int best = natural;
+        for (int k = 0; k <= m; ++k) {
+            const auto load = [&](int kk) { return std::max(right + kk, left + m - kk); };
+            if (load(k) < load(best) || (load(k) == load(best) && std::abs(k - natural) < std::abs(best - natural)))
+                best = k;
+        }
+        for (int i = 0; i < m; ++i)
+            band[size_t(i)]->side = i < best ? 1 : -1;
+    }
     const double lh = tm.height(m_labelFont) + 2;
     const double top = kMargin + lh / 2, bottom = m_h - kMargin - lh / 2;
     const int capacity = std::max(1, int((bottom - top) / lh) + 1);
@@ -545,9 +597,13 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
             const double dx = std::fabs(dy) < rr ? std::sqrt(rr * rr - dy * dy) : 0;
             // Keep the whole label inside the map when the pane is narrow.
             const double room = m_w - 2 * kMargin;
-            const double x = side > 0 ? std::min(m_c.x + dx + 6, kMargin + std::max(0.0, room - g.rect.w))
-                                      : std::max(m_c.x - dx - 6, m_w - kMargin - std::max(0.0, room - g.rect.w));
             const double a = g.angle;
+            // A label pushed down (or up) past the circle stays out beside its
+            // site, so its leader runs outside the circle instead of across it.
+            const double elbowX = m_c.x + elbowR * std::sin(a);
+            const double near = side > 0 ? std::max(m_c.x + dx, elbowX) + 6 : std::min(m_c.x - dx, elbowX) - 6;
+            const double x = side > 0 ? std::min(near, kMargin + std::max(0.0, room - g.rect.w))
+                                      : std::max(near, m_w - kMargin - std::max(0.0, room - g.rect.w));
             g.leader = {polar(a, g.anchorR), polar(a, elbowR), {x - side * 3, y[i]}};
             g.align = side > 0 ? HAlign::Left : HAlign::Right;
             g.textPos = {x, y[i]};
