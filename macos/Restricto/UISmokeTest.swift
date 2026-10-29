@@ -6,10 +6,12 @@
 // and hides the map, walks the right panel's panes (the sequence among them
 // with the map beside it), hides and shows the inspector, opens Find (which
 // reopens a hidden panel on the sequence), selects bases (the status splits),
-// copies the map image, and saves a PNG of the
+// copies the map image, adds a primer through the Add Primer wizard, and
+// saves a PNG of the
 // window after each step. It exits 0 when every step got
 // through layout; a layout loop or other exception aborts the process instead.
 import AppKit
+import RestrictoCore
 
 enum UISmokeTest {
     static func startIfRequested() {
@@ -89,6 +91,23 @@ enum UISmokeTest {
             ("9g-caret", { (controller?.document as? SequenceDocument)?.core.select(start: 10, length: 0) }),
             ("9e-translation-on-map", { (controller?.document as? SequenceDocument)?.core.frames = 6 }),
             ("9e-translation-off", { (controller?.document as? SequenceDocument)?.core.frames = 0 }),
+            ("9h-primer-wizard", {
+                // Right-click > Add Primer from Selection on bases 501-522.
+                (controller?.document as? SequenceDocument)?.core.select(start: 500, length: 22)
+                controller?.addPrimer(nil)
+            }),
+            ("9h-primer-added", {
+                let core = (controller?.document as? SequenceDocument)?.core
+                let before = core?.primers.count ?? 0
+                PrimerWizard.acceptAll()
+                guard let core = core, core.primers.count == before + 1,
+                      core.primers.last?.start == 500, core.primers.last?.length == 22,
+                      PrimerWizard.openWindows.isEmpty else {
+                    FileHandle.standardError.write("ui-smoke: the primer wizard didn't add the primer\n".data(using: .utf8)!)
+                    exit(5)
+                }
+                oc_document_undo(core.handle)
+            }),
             ("9e-edited", { (controller?.document as? NSDocument)?.updateChangeCount(.changeDone) }),
             ("9f-saved", { (controller?.document as? NSDocument)?.updateChangeCount(.changeCleared) }),
             ("10-below-minimum", { resize(NSSize(width: 600, height: 400)) }),
@@ -108,6 +127,9 @@ enum UISmokeTest {
         // Let a few display cycles run, as a real launch would.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             capture(window, to: out.appendingPathComponent("\(name).png"))
+            for (i, w) in PrimerWizard.openWindows.enumerated() {
+                capture(w, to: out.appendingPathComponent("\(name)-wizard\(i).png"))
+            }
             let split = window.contentViewController as? NSSplitViewController
             let sidebar = split?.splitViewItems.first?.viewController.view.frame.width ?? -1
             let inspector = split?.splitViewItems.last?.viewController.view.frame.width ?? -1

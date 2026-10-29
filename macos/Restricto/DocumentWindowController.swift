@@ -208,6 +208,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         let edit: (Int) -> Void = { [weak self] index in self?.editFeature(at: index) }
         inspector.onEditFeature = edit
         sequenceView.onEditFeature = edit
+        sequenceView.onAddPrimer = { [weak self] in self?.addPrimer(nil) }
         mapView.onEditFeature = edit
         inspector.onPick = { [weak self] _, wasShowing in
             guard let item = self?.inspectorItem else { return }

@@ -30,6 +30,10 @@ final class SequenceView: NSView {
     var onHoverBase: ((Int) -> Void)?
     /// Called with a feature's index when it is double-clicked.
     var onEditFeature: ((Int) -> Void)?
+    /// Right-click > Add Primer… (with the selection, if any).
+    var onAddPrimer: (() -> Void)?
+    /// False for a preview: typing, paste, cut and delete don't change it.
+    var isEditable = true
     /// While the width keeps changing (a side panel sliding open), the old
     /// layout is drawn and the new one waits until the width settles.
     private var lastWidthChange = Date.distantPast
@@ -154,7 +158,7 @@ final class SequenceView: NSView {
     override var acceptsFirstResponder: Bool { true }
 
     override func keyDown(with event: NSEvent) {
-        guard !document.isEmpty else { super.keyDown(with: event); return }
+        guard !document.isEmpty, isEditable else { super.keyDown(with: event); return }
         let flags = event.modifierFlags.intersection([.command, .control, .option])
         guard flags.isEmpty, let chars = event.charactersIgnoringModifiers, !chars.isEmpty else {
             super.keyDown(with: event)
@@ -184,11 +188,12 @@ final class SequenceView: NSView {
     }
 
     @objc func paste(_ sender: Any?) {
-        guard let text = NSPasteboard.general.string(forType: .string), !document.isEmpty else { return }
+        guard isEditable, let text = NSPasteboard.general.string(forType: .string), !document.isEmpty else { return }
         if !oc_document_type_bases(document.handle, text) { NSSound.beep() }
     }
 
     @objc func cut(_ sender: Any?) {
+        guard isEditable else { NSSound.beep(); return }
         let bases = document.selectedBases
         guard !bases.isEmpty else { NSSound.beep(); return }
         NSPasteboard.general.clearContents()
@@ -197,7 +202,7 @@ final class SequenceView: NSView {
     }
 
     @objc func delete(_ sender: Any?) {
-        guard document.hasSelection && document.selectionLength > 0 else { NSSound.beep(); return }
+        guard isEditable, document.hasSelection && document.selectionLength > 0 else { NSSound.beep(); return }
         oc_document_delete_selection(document.handle)
     }
 
@@ -207,6 +212,19 @@ final class SequenceView: NSView {
     }
 
     // MARK: Mouse
+
+    /// Right-click: Add Primer…, pre-filled with the selected bases.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard onAddPrimer != nil, !document.isEmpty else { return super.menu(for: event) }
+        let menu = NSMenu()
+        let title = document.hasSelection && document.selectionLength > 0 ? "Add Primer from Selection…" : "Add Primer…"
+        let item = NSMenuItem(title: title, action: #selector(addPrimerFromMenu(_:)), keyEquivalent: "")
+        item.target = self
+        menu.addItem(item)
+        return menu
+    }
+
+    @objc private func addPrimerFromMenu(_ sender: Any?) { onAddPrimer?() }
 
     override func mouseDown(with event: NSEvent) {
         guard let layout = ensureLayout(), !document.isEmpty else { return }

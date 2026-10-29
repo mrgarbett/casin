@@ -112,7 +112,7 @@ struct OCDocument {
     Document doc;
     OCChangeCallback cb = nullptr;
     void *ctx = nullptr;
-    std::string scratch1, scratch2;   // backing for const char * results
+    std::string scratch1, scratch2, scratch3;   // backing for const char * results
 };
 
 struct OCMapLayout {
@@ -232,6 +232,16 @@ bool oc_document_save(OCDocument *doc, const char *path, int format, char **erro
         doc->doc.setPath(path);
         doc->doc.markSaved();
     }
+    return true;
+}
+
+bool oc_document_copy(const OCDocument *src, OCDocument *out)
+{
+    if (!src || !out)
+        return false;
+    out->doc.setSequence(src->doc.sequence());
+    out->doc.markUnsaved();
+    out->doc.setSelection(src->doc.selection());
     return true;
 }
 
@@ -406,6 +416,8 @@ bool oc_document_primer(OCDocument *doc, int index, OCPrimerInfo *out)
     out->start = p.binding.start;
     out->length = p.binding.length();
     out->strand = p.strand == Strand::Reverse ? OC_STRAND_REVERSE : OC_STRAND_FORWARD;
+    doc->scratch3 = p.color;
+    out->color = doc->scratch3.c_str();
     return true;
 }
 
@@ -433,6 +445,37 @@ int oc_document_add_primer_sequence(OCDocument *doc, const char *name, const cha
     p.bases = typed;
     p.binding = sites.front().binding;
     p.strand = sites.front().strand;
+    doc->doc.addPrimers({p}, "Add Primer");
+    return int(doc->doc.sequence().primers.size()) - 1;
+}
+
+int oc_primer_sites(const OCDocument *doc, const char *bases, OCPrimerSite *out, int max)
+{
+    const std::string b = cleanBases(cleanPrimerBases(bases ? bases : ""));
+    if (b.empty())
+        return 0;
+    const std::vector<PrimerSite> sites = findPrimerSites(doc->doc.sequence(), b);
+    for (int i = 0; out && i < max && i < int(sites.size()); ++i)
+        out[i] = {sites[size_t(i)].binding.start, sites[size_t(i)].binding.length(),
+                  sites[size_t(i)].strand == Strand::Reverse ? OC_STRAND_REVERSE : OC_STRAND_FORWARD,
+                  sites[size_t(i)].mismatches};
+    return int(sites.size());
+}
+
+int oc_document_add_primer_at(OCDocument *doc, const char *name, const char *bases, const char *color,
+                              const OCPrimerSite *site)
+{
+    const std::string typed = cleanPrimerBases(bases ? bases : "");
+    const int n = doc->doc.sequence().length();
+    if (typed.empty() || !site || site->length <= 0 || site->start < 0 || site->start + site->length > n
+        || site->length > int(typed.size()))
+        return -1;
+    Primer p;
+    p.name = name && *name ? name : "primer";
+    p.bases = typed;
+    p.binding = {site->start, site->start + site->length};
+    p.strand = site->strand == OC_STRAND_REVERSE ? Strand::Reverse : Strand::Forward;
+    p.color = color ? color : "";
     doc->doc.addPrimers({p}, "Add Primer");
     return int(doc->doc.sequence().primers.size()) - 1;
 }

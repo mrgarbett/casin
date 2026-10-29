@@ -55,6 +55,9 @@ bool oc_document_save(OCDocument *doc, const char *path, int format, char **erro
 /* Starts the document over with typed or pasted bases (cleaned to IUPAC).
  * The result counts as unsaved. Returns false when `bases` holds no DNA. */
 bool oc_document_new_sequence(OCDocument *doc, const char *name, const char *bases, bool circular);
+/* Copies `src`'s sequence (with its features and primers) and selection into
+ * `out`, as an unsaved document; for previews. */
+bool oc_document_copy(const OCDocument *src, OCDocument *out);
 
 bool oc_document_is_empty(const OCDocument *doc);
 const char *oc_document_name(OCDocument *doc);
@@ -159,6 +162,7 @@ typedef struct {
     int start;           /* binding site, 0-based; length 0 when it doesn't bind */
     int length;
     int strand;          /* OC_STRAND_FORWARD or OC_STRAND_REVERSE */
+    const char *color;   /* "#rrggbb", or "" for the default primer colour */
 } OCPrimerInfo;
 
 /* How the construct was made, oldest step first ("2026-10-27 PCR with ..."). */
@@ -173,6 +177,19 @@ void oc_document_remove_primer(OCDocument *doc, int index);
 /* Adds a primer by its sequence where its 3' part binds best (a 5' tail is
  * allowed); returns its index, or -1 with *error when it doesn't bind. */
 int oc_document_add_primer_sequence(OCDocument *doc, const char *name, const char *bases, char **error);
+
+typedef struct {
+    int start, length;   /* the annealing part, on the top strand, 0-based */
+    int strand;          /* OC_STRAND_FORWARD or OC_STRAND_REVERSE */
+    int mismatches;      /* in the annealing part */
+} OCPrimerSite;
+/* Where a primer (5'->3', a 5' tail allowed) anneals, best first; returns how
+ * many sites there are and fills up to `max`. */
+int oc_primer_sites(const OCDocument *doc, const char *bases, OCPrimerSite *out, int max);
+/* Adds a primer at a site from oc_primer_sites as one undo step; `color` may
+ * be NULL or "". Returns its index, or -1 for an empty primer or bad site. */
+int oc_document_add_primer_at(OCDocument *doc, const char *name, const char *bases, const char *color,
+                              const OCPrimerSite *site);
 
 /* ---- text metrics supplied by the frontend ------------------------------ */
 

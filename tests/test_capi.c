@@ -261,6 +261,23 @@ int main(int argc, char **argv)
     const int ti = oc_document_add_primer_sequence(doc, "tailed", tailed, NULL);
     CHECK(ti >= 0 && oc_document_primer(doc, ti, &pinf) && strncmp(pinf.bases, "gaattc", 6) == 0
           && pinf.length == 22);
+    /* The wizard's path: sites first (a preview on a copy), then the add. */
+    OCPrimerSite sites[4];
+    CHECK(oc_primer_sites(doc, tailed, sites, 4) >= 1 && sites[0].start == 500 && sites[0].length == 22
+          && sites[0].strand == OC_STRAND_FORWARD && sites[0].mismatches == 0);
+    OCDocument *copy = oc_document_new();
+    CHECK(oc_document_copy(doc, copy) && oc_document_length(copy) == oc_document_length(doc)
+          && oc_document_primer_count(copy) == oc_document_primer_count(doc));
+    const int ci = oc_document_add_primer_at(copy, "wiz", tailed, "#ff8800", &sites[0]);
+    CHECK(ci == oc_document_primer_count(doc) && oc_document_primer(copy, ci, &pinf)
+          && strcmp(pinf.color, "#ff8800") == 0 && pinf.start == 500 && pinf.length == 22);
+    CHECK(oc_document_primer_count(doc) == ci);   /* the original is untouched */
+    oc_document_undo(copy);
+    CHECK(oc_document_primer_count(copy) == ci);
+    OCPrimerSite bad = {oc_document_length(doc) - 5, 22, OC_STRAND_FORWARD, 0};
+    CHECK(oc_document_add_primer_at(copy, "bad", tailed, NULL, &bad) == -1);
+    CHECK(oc_primer_sites(doc, "", sites, 4) == 0);
+    oc_document_free(copy);
     oc_string_free(pb);
     CHECK(oc_document_add_primer_sequence(doc, "short", "ACGT", NULL) == -1);
     char *hits = oc_search_folder(argv[1], "GAATTC");

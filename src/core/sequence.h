@@ -63,6 +63,7 @@ struct Primer {
     std::string bases;
     Range binding;
     Strand strand = Strand::Forward;
+    std::string color = {};   // "#rrggbb", or empty for the theme's primer colour
 };
 
 class Sequence {

@@ -560,32 +560,11 @@ extension DocumentWindowController {
 
     // MARK: Primers
 
-    /// One entry for both ways in: from the selection when there is one,
-    /// otherwise by pasting the primer's sequence.
+    /// Opens the Add Primer wizard, filled in with the selected bases (top
+    /// strand, so a forward primer) when there is a selection.
     @objc func addPrimer(_ sender: Any?) {
-        guard let d = doc else { return }
-        guard hasRange else { addPrimerBySequence(); return }
-        let form = Form("Add Primer", "Binds \(d.selectionStart + 1)–\(d.selectionStart + d.selectionLength).")
-        let name = form.text("Name", "primer")
-        let strand = form.popup("Reads", ["Top strand (forward)", "Bottom strand (reverse)"])
-        form.run(in: window, ok: "Add") {
-            oc_document_add_primer_from_selection(d.handle, name.stringValue,
-                                                  Int32(strand.indexOfSelectedItem == 0 ? OC_STRAND_FORWARD
-                                                                                         : OC_STRAND_REVERSE))
-        }
-    }
-
-    private func addPrimerBySequence() {
         guard let d = doc, !d.isEmpty else { return }
-        let form = Form("Add Primer", "Paste the primer. It is placed where its 3′ end binds best; a 5′ tail is fine. To add one from bases instead, select them first.")
-        let name = form.text("Name", "primer")
-        let bases = form.text("Sequence", "", placeholder: "5′ → 3′", width: 320)
-        form.run(in: window, ok: "Add") { [weak self] in
-            var err: UnsafeMutablePointer<CChar>?
-            if oc_document_add_primer_sequence(d.handle, name.stringValue, bases.stringValue, &err) < 0 {
-                showError("Add Primer", err, in: self?.window)
-            }
-        }
+        PrimerWizard.show(for: d, bases: hasRange ? d.selectedBases : "", near: window)
     }
 
     @objc func deletePrimer(_ sender: Any?) {
