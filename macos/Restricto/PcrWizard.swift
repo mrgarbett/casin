@@ -22,6 +22,8 @@ final class PcrWizard: NSWindowController, NSWindowDelegate {
     private let openButton = NSButton(title: "Open Product", target: nil, action: nil)
     private let addPrimerButton = NSButton(title: "Add Primer", target: nil, action: nil)
     private let emptyLabel = NSTextField(wrappingLabelWithString: "")
+    private let productHeading = NSTextField(labelWithString: "PRODUCT")
+    private let programRow = NSStackView()
     private var mapView: MapView!
     private var sequenceView: SequenceView!
     private let productSplit = NSSplitView()
@@ -43,10 +45,15 @@ final class PcrWizard: NSWindowController, NSWindowDelegate {
         wizard.parentWindow = parent
         showing.append(wizard)
         if let parent = parent, let window = wizard.window {
-            // Over the template's window, a little down and right.
+            // Over the template's window, a little down and right, named as it is.
             window.setFrameTopLeftPoint(NSPoint(x: parent.frame.minX + 40, y: parent.frame.maxY - 40))
+            window.title = "PCR · \(parent.title)"
         }
         wizard.showWindow(nil)
+        // The map takes a little over half the height, the sequence the rest.
+        wizard.window?.layoutIfNeeded()
+        let split = wizard.productSplit
+        split.setPosition(split.bounds.height * 0.55, ofDividerAt: 0)
     }
 
     private init(template: CoreDocument, onAddPrimer: @escaping () -> Void) {
@@ -113,20 +120,29 @@ final class PcrWizard: NSWindowController, NSWindowDelegate {
         addPrimerButton.controlSize = .small
         addPrimerButton.toolTip = "Add a primer in the template's Primers pane"
 
+        for label in [productHeading] {
+            label.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+            label.textColor = .secondaryLabelColor
+        }
+        // The program's heading, with a button to copy it for the cycler's notes.
+        let copy = NSButton(title: "Copy", target: self, action: #selector(copyProgram(_:)))
+        copy.controlSize = .small
+        copy.toolTip = "Copy the program as text"
+        programRow.setViews([heading("SUGGESTED PROGRAM"), NSView(), copy], in: .leading)
         let inputs = NSStackView(views: [
             header,
             heading("FORWARD PRIMER"), forwardPopup,
             heading("REVERSE PRIMER"), reversePopup,
-            heading("POLYMERASE"), polymerasePopup,
-            heading("PRODUCT"), info, warnings,
-            heading("SUGGESTED PROGRAM"), program,
             addPrimerButton,
+            heading("POLYMERASE"), polymerasePopup,
+            productHeading, info, warnings,
+            programRow, program,
         ])
         inputs.orientation = .vertical
         inputs.alignment = .leading
         inputs.spacing = 6
         inputs.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 16, right: 16)
-        for v in [header, forwardPopup, reversePopup, polymerasePopup, info, warnings, program] as [NSView] {
+        for v in [header, forwardPopup, reversePopup, polymerasePopup, info, warnings, programRow, program] as [NSView] {
             v.widthAnchor.constraint(equalTo: inputs.widthAnchor, constant: -32).isActive = true
         }
         inputs.setCustomSpacing(14, after: header)
@@ -158,6 +174,9 @@ final class PcrWizard: NSWindowController, NSWindowDelegate {
         productSplit.dividerStyle = .thin
         productSplit.addArrangedSubview(mapView)
         productSplit.addArrangedSubview(scroll)
+        // Extra height goes to both; the sequence gives way last.
+        productSplit.setHoldingPriority(.defaultLow, forSubviewAt: 0)
+        productSplit.setHoldingPriority(.defaultLow - 1, forSubviewAt: 1)
         mapView.heightAnchor.constraint(greaterThanOrEqualToConstant: 200).isActive = true
         scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
 
@@ -286,8 +305,9 @@ final class PcrWizard: NSWindowController, NSWindowDelegate {
             if let a = tmF, let b = tmR {
                 lines.append("Tm \(String(format: "%.1f", a)) °C (\(fp.name)) · \(String(format: "%.1f", b)) °C (\(rp.name))")
                 if abs(a - b) > 5 {
+                    let hotter = a > b ? fp.name : rp.name
                     warn.append("The annealing Tms differ by \(String(format: "%.1f", abs(a - b))) °C; "
-                                + "fit the hotter one closer in the Primers pane.")
+                                + "fit \(hotter) closer in the Primers pane.")
                 }
                 program.stringValue = polymerase.program(tmLow: min(a, b), length: length)
             } else {
@@ -318,6 +338,8 @@ final class PcrWizard: NSWindowController, NSWindowDelegate {
         warnings.stringValue = warn.joined(separator: "\n")
         warnings.isHidden = warn.isEmpty
         program.isHidden = program.stringValue.isEmpty
+        programRow.isHidden = program.isHidden
+        productHeading.isHidden = info.isHidden && warnings.isHidden
         openButton.isEnabled = hasProduct
     }
 
@@ -341,6 +363,12 @@ final class PcrWizard: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func cancel(_ sender: Any?) { close() }
+
+    @objc private func copyProgram(_ sender: Any?) {
+        guard !program.stringValue.isEmpty else { NSSound.beep(); return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(program.stringValue, forType: .string)
+    }
 
     @objc private func addPrimer(_ sender: Any?) { onAddPrimer() }
 
@@ -375,14 +403,16 @@ private struct Polymerase {
     let secondsPerKb: Int
     let minExtendSeconds: Int
     let maxLength: Int
+    let finalMinutes: Int
 
     static let defaultName = "Q5 / Phusion (high fidelity)"
     static let all: [Polymerase] = [
         Polymerase(name: "Q5 / Phusion (high fidelity)", denature: 98, initialSeconds: 30, denatureSeconds: 10,
                    annealOffset: 3, annealSeconds: 20, extend: 72, secondsPerKb: 30, minExtendSeconds: 15,
-                   maxLength: 20_000),
+                   maxLength: 20_000, finalMinutes: 2),
         Polymerase(name: "Taq", denature: 95, initialSeconds: 120, denatureSeconds: 30, annealOffset: -5,
-                   annealSeconds: 30, extend: 68, secondsPerKb: 60, minExtendSeconds: 30, maxLength: 5_000),
+                   annealSeconds: 30, extend: 68, secondsPerKb: 60, minExtendSeconds: 30, maxLength: 5_000,
+                   finalMinutes: 5),
     ]
 
     /// The cycling for a product of `length` bp whose primers' lower annealing Tm is `tmLow`.
@@ -397,7 +427,7 @@ private struct Polymerase {
           \(denature) °C  \(time(denatureSeconds))
           \(anneal) °C  \(time(annealSeconds))
           \(extend) °C  \(time(extendSeconds))
-        \(extend) °C  2 min
+        \(extend) °C  \(finalMinutes) min
         """
     }
 }
