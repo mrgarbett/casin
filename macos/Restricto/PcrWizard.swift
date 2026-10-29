@@ -27,6 +27,8 @@ final class PcrWizard: NSWindowController, NSWindowDelegate {
     private let productSplit = NSSplitView()
     /// Opens the template's Primers pane to add a primer.
     private let onAddPrimer: () -> Void
+    /// The template's window: the product opens as a tab there.
+    private weak var parentWindow: NSWindow?
 
     /// Wizards open now, one per template.
     private static var showing: [PcrWizard] = []
@@ -38,6 +40,7 @@ final class PcrWizard: NSWindowController, NSWindowDelegate {
             return
         }
         let wizard = PcrWizard(template: template, onAddPrimer: onAddPrimer)
+        wizard.parentWindow = parent
         showing.append(wizard)
         if let parent = parent, let window = wizard.window {
             // Over the template's window, a little down and right.
@@ -55,6 +58,9 @@ final class PcrWizard: NSWindowController, NSWindowDelegate {
         window.title = "PCR · \(template.name)"
         window.minSize = NSSize(width: 760, height: 480)
         window.isReleasedWhenClosed = false
+        // A tool window, never a tab: document windows tab together, and one
+        // opening while this is key must not try to join it.
+        window.tabbingMode = .disallowed
         super.init(window: window)
         window.delegate = self
         window.contentView = buildView()
@@ -328,8 +334,10 @@ final class PcrWizard: NSWindowController, NSWindowDelegate {
         let product = CoreDocument()
         oc_document_copy(preview.handle, product.handle)
         oc_document_clear_selection(product.handle)
-        close()
+        // Open it from the template's window, so it tabs there, then close.
+        parentWindow?.makeKeyAndOrderFront(nil)
         SequenceDocument.open(product)
+        close()
     }
 
     @objc private func cancel(_ sender: Any?) { close() }
