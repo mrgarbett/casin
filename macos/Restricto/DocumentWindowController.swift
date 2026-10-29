@@ -665,7 +665,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private func refreshToolbarToggles() {
         let on: [NSToolbarItem.Identifier: Bool] = [
             mapItem: !mapHidden, layoutItem: mapStacked,
-            inspectorToolbarItem: !(inspectorItem?.isCollapsed ?? true),
+            inspectorToolbarItem: !(inspectorItem?.isCollapsed ?? true) && !inspectorIsZeroWidth,
             complementItem: sequenceView.showComplement,
         ]
         for (id, entry) in toolbarToggles {
@@ -795,7 +795,25 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     /// responder chain and never retitles the menu item.
     @objc func toggleInspectorPanel(_ sender: Any?) {
         guard let item = inspectorItem else { return }
+        if inspectorIsZeroWidth {
+            showZeroWidthInspector()
+            return
+        }
         item.animator().isCollapsed = !item.isCollapsed
+    }
+
+    /// The split view can restore the panel open but 0 points wide: not
+    /// collapsed, so the menu says Hide, yet nothing shows.
+    private var inspectorIsZeroWidth: Bool {
+        guard let item = inspectorItem, !item.isCollapsed else { return false }
+        return item.viewController.view.frame.width < 1
+    }
+
+    private func showZeroWidthInspector() {
+        guard let item = inspectorItem, let split = splitController?.splitView,
+              split.arrangedSubviews.count == 3 else { return }
+        let width = max(item.minimumThickness, 300)
+        split.setPosition(split.bounds.width - width - split.dividerThickness, ofDividerAt: 1)
     }
 
     @objc func chooseBrowserFolder(_ sender: Any?) {
@@ -871,7 +889,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             item.state = mapStacked ? .on : .off
             return true
         case #selector(toggleInspectorPanel(_:)):
-            item.title = inspectorItem?.isCollapsed == true ? "Show Inspector" : "Hide Inspector"
+            item.title = inspectorItem?.isCollapsed == true || inspectorIsZeroWidth ? "Show Inspector" : "Hide Inspector"
             return true
         case #selector(setFrames(_:)):
             item.state = core.frames == item.tag ? .on : .off

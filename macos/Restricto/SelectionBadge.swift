@@ -48,7 +48,8 @@ final class SelectionBadge {
         let start = document.selectionStart + 1
         var end = document.selectionStart + length
         if end > n { end -= n }
-        var parts = ["\(start.formatted())–\(end.formatted())", "\(length.formatted()) bp"]
+        var parts = [length == 1 ? start.formatted() : "\(start.formatted())–\(end.formatted())",
+                     "\(length.formatted()) bp"]
         // Below 8 bases the Tm formula means nothing (it goes negative).
         if length >= 8, length <= maxTmLength {
             var check = OCPrimerCheck()

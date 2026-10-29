@@ -610,8 +610,9 @@ std::string Document::statusText(bool withLength) const
     int end = m_selection.end();
     if (end > n)
         end -= n;
-    s += sep + "selected " + view::withThousands(m_selection.start + 1) + "–" + view::withThousands(end) + " ("
-       + view::formatBp(m_selection.length) + ")";
+    s += sep + "selected " + view::withThousands(m_selection.start + 1)
+       + (m_selection.length == 1 ? "" : "–" + view::withThousands(end)) + " (" + view::formatBp(m_selection.length)
+       + ")";
     const std::string bases = selectedBases();
     char buf[64];
     std::snprintf(buf, sizeof buf, "  ·  GC %.1f%%", gcFraction(bases) * 100.0);

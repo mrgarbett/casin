@@ -121,6 +121,9 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         sequenceText.isAutomaticTextReplacementEnabled = false
         sequenceText.allowsUndo = true
         sequenceText.delegate = self
+        // The box's text colour isn't the user's to set, so it never hands
+        // it to the font or colour panels.
+        sequenceText.usesFontPanel = false
         // A well left active after its popover closes takes the text's colour
         // when the box gets the focus; let go of it first.
         sequenceText.onFocus = { [weak self] in self?.colorWell.deactivate() }
@@ -598,6 +601,9 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
 
     @objc private func colorChanged(_ sender: Any?) {
         colorChosen = true
+        // Let go of the colour as soon as it's picked: an active well takes
+        // the text's colour whenever the box's caret moves.
+        colorWell.deactivate()
         refresh()
     }
 
