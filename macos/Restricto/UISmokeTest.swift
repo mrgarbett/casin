@@ -18,6 +18,17 @@ enum UISmokeTest {
         guard let i = args.firstIndex(of: "--ui-smoke"), i + 1 < args.count else { return }
         let out = URL(fileURLWithPath: args[i + 1], isDirectory: true)
         try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        // A crash prints its stack, as CI keeps no crash reports.
+        for sig in [SIGSEGV, SIGBUS, SIGILL, SIGTRAP, SIGABRT] {
+            signal(sig) { code in
+                var frames = [UnsafeMutableRawPointer?](repeating: nil, count: 80)
+                let count = backtrace(&frames, Int32(frames.count))
+                let header = "ui-smoke: crashed with signal \(code)\n"
+                _ = header.withCString { write(2, $0, strlen($0)) }
+                backtrace_symbols_fd(&frames, count, 2)
+                _exit(128 + code)
+            }
+        }
         // Give up rather than hang CI if the window never appears.
         DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
             FileHandle.standardError.write("ui-smoke: timed out\n".data(using: .utf8)!)
