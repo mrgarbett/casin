@@ -479,7 +479,8 @@ extension DocumentWindowController {
              + names.joined(separator: ", ") + ". Undo (⌘Z) takes them all off again.")
     }
 
-    /// ⌘L: puts the caret at a base number and shows it.
+    /// ⌘L: selects the base at a base number and shows it (a bare caret
+    /// sits between bases, so the status would name the base before it).
     @objc func goToPosition(_ sender: Any?) {
         guard let d = doc, !d.isEmpty else { return }
         let form = Form("Go to Position", "A base number from 1 to \(d.length.formatted()).")
@@ -488,7 +489,7 @@ extension DocumentWindowController {
             let digits = field.stringValue.filter { $0.isNumber }
             guard let base = Int(digits), base >= 1, base <= d.length else { NSSound.beep(); return }
             self?.revealSequence()
-            d.select(start: base - 1, length: 0)
+            d.select(start: base - 1, length: 1)
         }
     }
 
@@ -560,32 +561,12 @@ extension DocumentWindowController {
 
     // MARK: Primers
 
-    /// One entry for both ways in: from the selection when there is one,
-    /// otherwise by pasting the primer's sequence.
+    /// Opens a new primer's inputs in the right panel's Primers pane, filled in
+    /// with the selected bases (top strand, so a forward primer) when there is
+    /// a selection.
     @objc func addPrimer(_ sender: Any?) {
-        guard let d = doc else { return }
-        guard hasRange else { addPrimerBySequence(); return }
-        let form = Form("Add Primer", "Binds \(d.selectionStart + 1)–\(d.selectionStart + d.selectionLength).")
-        let name = form.text("Name", "primer")
-        let strand = form.popup("Reads", ["Top strand (forward)", "Bottom strand (reverse)"])
-        form.run(in: window, ok: "Add") {
-            oc_document_add_primer_from_selection(d.handle, name.stringValue,
-                                                  Int32(strand.indexOfSelectedItem == 0 ? OC_STRAND_FORWARD
-                                                                                         : OC_STRAND_REVERSE))
-        }
-    }
-
-    private func addPrimerBySequence() {
         guard let d = doc, !d.isEmpty else { return }
-        let form = Form("Add Primer", "Paste the primer. It is placed where its 3′ end binds best; a 5′ tail is fine. To add one from bases instead, select them first.")
-        let name = form.text("Name", "primer")
-        let bases = form.text("Sequence", "", placeholder: "5′ → 3′", width: 320)
-        form.run(in: window, ok: "Add") { [weak self] in
-            var err: UnsafeMutablePointer<CChar>?
-            if oc_document_add_primer_sequence(d.handle, name.stringValue, bases.stringValue, &err) < 0 {
-                showError("Add Primer", err, in: self?.window)
-            }
-        }
+        beginAddingPrimer(bases: hasRange ? d.selectedBases : "")
     }
 
     @objc func deletePrimer(_ sender: Any?) {

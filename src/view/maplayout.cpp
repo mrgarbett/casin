@@ -503,7 +503,7 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
         g.text = pr.name;
         g.font = calloutFont;
         g.color = m_theme.text;
-        g.swatch = m_theme.primer;
+        g.swatch = Color::parse(pr.color, m_theme.primer);
         g.priority = -1;
         g.angle = angleOfPos((pr.binding.start + pr.binding.end) / 2.0);
         g.anchorR = m_featureOuter + 10;
@@ -865,7 +865,8 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
             poly.push_back(polar(a1, rm));
             arcPoints(poly, a1 - head, a0, r0);
         }
-        s.polygon(poly, m_theme.primer.withAlpha(0.12), m_theme.primer, 1.4);
+        const Color pc = Color::parse(pr.color, m_theme.primer);
+        s.polygon(poly, pc.withAlpha(0.12), pc, 1.4);
         // A 5' tail that doesn't anneal: a short stub kinked off the arrow's
         // 5' end, away from the sequence, about as long as the tail.
         const int tail = std::max(0, int(pr.bases.size()) - pr.binding.length());
@@ -873,11 +874,11 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
             const double len = std::clamp(tail * 2 * kPi / std::max(1, m_n), 4.0 / rm, 24.0 / rm);
             const bool rev = pr.strand == Strand::Reverse;
             const double a5 = rev ? a1 : a0, out = rev ? a1 + len : a0 - len;
-            s.line(polar(a5, rm), polar(a5 + (out - a5) * 0.25, r1 + 4), m_theme.primer, 1.4);
+            s.line(polar(a5, rm), polar(a5 + (out - a5) * 0.25, r1 + 4), pc, 1.4);
             std::vector<Point> stub;
             arcPoints(stub, a5 + (out - a5) * 0.25, out, r1 + 4);
             for (size_t i = 1; i < stub.size(); ++i)
-                s.line(stub[i - 1], stub[i], m_theme.primer, 1.4);
+                s.line(stub[i - 1], stub[i], pc, 1.4);
         }
     }
 

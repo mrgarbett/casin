@@ -30,17 +30,25 @@ final class SequenceView: NSView {
     var onHoverBase: ((Int) -> Void)?
     /// Called with a feature's index when it is double-clicked.
     var onEditFeature: ((Int) -> Void)?
+    /// Right-click > Add Primer… (with the selection, if any).
+    var onAddPrimer: (() -> Void)?
+    /// False for a preview: typing, paste, cut and delete don't change it.
+    var isEditable = true
     /// While the width keeps changing (a side panel sliding open), the old
     /// layout is drawn and the new one waits until the width settles.
     private var lastWidthChange = Date.distantPast
     private var pendingRelayout: DispatchWorkItem?
+    /// While the width changes, the base kept in place (the caret's, when it
+    /// was in view, else the first one shown) and its height below the top
+    /// of the view, so the lines rewrap around it instead of scrolling away.
+    private var scrollAnchor: (position: Int, offset: CGFloat)?
 
     init(document: CoreDocument) {
         self.document = document
         super.init(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
         document.observe { [weak self] what in
             guard let self = self else { return }
-            if what & (Change.sequence | Change.enzymes) != 0 { self.invalidateLayout() }
+            if what & (Change.sequence | Change.enzymes | Change.pending) != 0 { self.invalidateLayout() }
             if what & Change.selection != 0, !self.dragging, self.document.hasSelection {
                 self.scrollToPosition(self.document.selectionStart)
             }
@@ -88,6 +96,7 @@ final class SequenceView: NSView {
         let width = Double(max(1, availableWidth - trailingInset))
         let dark = isDarkAppearance
         if let current = layout, layoutDark == dark, layoutWidth != width {
+            noteScrollAnchor(current)
             let now = Date()
             let changing = now.timeIntervalSince(lastWidthChange) < 0.25
             lastWidthChange = now
@@ -110,8 +119,30 @@ final class SequenceView: NSView {
             layoutWidth = width
             layoutDark = dark
             if let layout = layout { oc_seq_layout_set_hover_codon(layout, Int32(hoverCodon)) }
+            // Laid out while drawing: size and scroll once the draw is done.
+            if scrollAnchor != nil { DispatchQueue.main.async { [weak self] in self?.updateSize() } }
         }
         return layout
+    }
+
+    private var layoutIsCurrent: Bool {
+        layout != nil && layoutWidth == Double(max(1, availableWidth - trailingInset))
+    }
+
+    private func noteScrollAnchor(_ layout: OpaquePointer) {
+        guard scrollAnchor == nil else { return }
+        let visible = visibleRect
+        guard visible.height > 0 else { return }
+        var position = Int(oc_seq_layout_position_at(layout, 0, visible.minY + 1))
+        guard position >= 0 else { return }
+        if document.hasSelection {
+            let caret = Int32(document.selectionStart)
+            let top = CGFloat(oc_seq_layout_line_top(layout, caret))
+            if top >= visible.minY, top + CGFloat(oc_seq_layout_line_height(layout, caret)) <= visible.maxY {
+                position = Int(caret)
+            }
+        }
+        scrollAnchor = (position, CGFloat(oc_seq_layout_line_top(layout, Int32(position))) - visible.minY)
     }
 
     private func relayoutWhenSettled() {
@@ -127,6 +158,11 @@ final class SequenceView: NSView {
         let visibleHeight = enclosingScrollView?.contentSize.height ?? 0
         let size = NSSize(width: availableWidth, height: max(oc_seq_layout_total_height(layout) + 20, visibleHeight))
         if frame.size != size { setFrameSize(size) }
+        if let keep = scrollAnchor, layoutIsCurrent {
+            scrollAnchor = nil
+            let top = CGFloat(oc_seq_layout_line_top(layout, Int32(keep.position))) - keep.offset
+            scroll(NSPoint(x: 0, y: max(0, min(top, size.height - visibleHeight))))
+        }
     }
 
     func scrollToPosition(_ position: Int) {
@@ -154,7 +190,7 @@ final class SequenceView: NSView {
     override var acceptsFirstResponder: Bool { true }
 
     override func keyDown(with event: NSEvent) {
-        guard !document.isEmpty else { super.keyDown(with: event); return }
+        guard !document.isEmpty, isEditable else { super.keyDown(with: event); return }
         let flags = event.modifierFlags.intersection([.command, .control, .option])
         guard flags.isEmpty, let chars = event.charactersIgnoringModifiers, !chars.isEmpty else {
             super.keyDown(with: event)
@@ -184,11 +220,12 @@ final class SequenceView: NSView {
     }
 
     @objc func paste(_ sender: Any?) {
-        guard let text = NSPasteboard.general.string(forType: .string), !document.isEmpty else { return }
+        guard isEditable, let text = NSPasteboard.general.string(forType: .string), !document.isEmpty else { return }
         if !oc_document_type_bases(document.handle, text) { NSSound.beep() }
     }
 
     @objc func cut(_ sender: Any?) {
+        guard isEditable else { NSSound.beep(); return }
         let bases = document.selectedBases
         guard !bases.isEmpty else { NSSound.beep(); return }
         NSPasteboard.general.clearContents()
@@ -197,7 +234,7 @@ final class SequenceView: NSView {
     }
 
     @objc func delete(_ sender: Any?) {
-        guard document.hasSelection && document.selectionLength > 0 else { NSSound.beep(); return }
+        guard isEditable, document.hasSelection && document.selectionLength > 0 else { NSSound.beep(); return }
         oc_document_delete_selection(document.handle)
     }
 
@@ -207,6 +244,19 @@ final class SequenceView: NSView {
     }
 
     // MARK: Mouse
+
+    /// Right-click: Add Primer…, pre-filled with the selected bases.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard onAddPrimer != nil, !document.isEmpty else { return super.menu(for: event) }
+        let menu = NSMenu()
+        let title = document.hasSelection && document.selectionLength > 0 ? "Add Primer from Selection…" : "Add Primer…"
+        let item = NSMenuItem(title: title, action: #selector(addPrimerFromMenu(_:)), keyEquivalent: "")
+        item.target = self
+        menu.addItem(item)
+        return menu
+    }
+
+    @objc private func addPrimerFromMenu(_ sender: Any?) { onAddPrimer?() }
 
     override func mouseDown(with event: NSEvent) {
         guard let layout = ensureLayout(), !document.isEmpty else { return }

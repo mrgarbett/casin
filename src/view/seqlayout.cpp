@@ -712,6 +712,7 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
         // with a nick where it leaves the arrow.
         for (const PrimerPiece &pc : l.primers) {
             const Primer &pr = m_seq.primers[size_t(pc.primer)];
+            const Color primerColor = Color::parse(pr.color, m_theme.primer);
             Rect r = primerRect(l, pc);
             r.y -= scrollY;
             const double ym = r.y + r.h / 2;
@@ -727,7 +728,7 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
                     poly = {{x0 - head, ym}, {x0, r.y}, {x1, r.y}, {x1, r.y + r.h}, {x0, r.y + r.h}};
                 else
                     poly = {{x0, r.y}, {x1, r.y}, {x1, r.y + r.h}, {x0, r.y + r.h}};
-                s.polygon(poly, m_theme.primer.withAlpha(0.1), m_theme.primer, 1.4);
+                s.polygon(poly, primerColor.withAlpha(0.1), primerColor, 1.4);
             }
             const double lift = pc.top ? -5 : 5;   // the tail leaves the strand
             for (int c = pc.a; c < pc.b; ++c) {
@@ -750,7 +751,7 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
                 const double tx0 = leftTail ? boundaryX(pc.a) : boundaryX(pc.bindB);
                 const double tx1 = leftTail ? boundaryX(pc.bindA) : boundaryX(pc.b);
                 const double ty = ym + lift + (pc.top ? r.h / 2 - 1 : -r.h / 2 + 1);
-                const Color tc = m_theme.primer.withAlpha(0.8);
+                const Color tc = primerColor.withAlpha(0.8);
                 const bool joins = pc.bindB > pc.bindA;
                 if (leftTail) {
                     s.line({tx0, ty}, {tx1 - (joins ? 3 : 0), ty}, tc, 1.2);
@@ -766,11 +767,11 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
             if (pc.nameCols > 0) {
                 if (pc.top) {
                     const double nx = boundaryX(pc.bindB) + r.h * 0.6 + 4;
-                    s.label(pr.name, {nx, ym}, m_primerNameFont, m_theme.primer, HAlign::Left, VAlign::Middle);
+                    s.label(pr.name, {nx, ym}, m_primerNameFont, primerColor, HAlign::Left, VAlign::Middle);
                 } else {
                     const double nx = boundaryX(pc.bindA) - r.h * 0.6 - 4;
                     if (nx - pc.nameCols * m_charW >= m_left - m_endW)
-                        s.label(pr.name, {nx, ym}, m_primerNameFont, m_theme.primer, HAlign::Right, VAlign::Middle);
+                        s.label(pr.name, {nx, ym}, m_primerNameFont, primerColor, HAlign::Right, VAlign::Middle);
                 }
             }
         }

@@ -6,10 +6,11 @@
 // and hides the map, walks the right panel's panes (the sequence among them
 // with the map beside it), hides and shows the inspector, opens Find (which
 // reopens a hidden panel on the sequence), selects bases (the status splits),
-// copies the map image, and saves a PNG of the
-// window after each step. It exits 0 when every step got
+// copies the map image, adds a His-tagged primer in the Primers
+// pane, and saves a PNG of the window after each step. It exits 0 when every step got
 // through layout; a layout loop or other exception aborts the process instead.
 import AppKit
+import RestrictoCore
 
 enum UISmokeTest {
     static func startIfRequested() {
@@ -89,6 +90,47 @@ enum UISmokeTest {
             ("9g-caret", { (controller?.document as? SequenceDocument)?.core.select(start: 10, length: 0) }),
             ("9e-translation-on-map", { (controller?.document as? SequenceDocument)?.core.frames = 6 }),
             ("9e-translation-off", { (controller?.document as? SequenceDocument)?.core.frames = 0 }),
+            ("9h-primer-pane", {
+                // Right-click > Add Primer from Selection on bases 501-522.
+                (controller?.document as? SequenceDocument)?.core.select(start: 500, length: 22)
+                controller?.addPrimer(nil)
+            }),
+            ("9h-primer-his-tail", { PrimerEditor.insertFirstTag() }),
+            ("9h-primer-added", {
+                let core = (controller?.document as? SequenceDocument)?.core
+                let before = core?.primers.count ?? 0
+                PrimerEditor.acceptAll()
+                guard let core = core, core.primers.count == before + 1,
+                      core.primers.last?.start == 500, core.primers.last?.length == 22,
+                      core.primers.last?.bases.hasPrefix("CATCATCACCACCATCAC") == true,
+                      core.primers.last?.bases.count == 40,
+                      !PrimerEditor.isAnyOpen,
+                      !oc_document_has_pending_primer(core.handle) else {
+                    FileHandle.standardError.write("ui-smoke: adding a primer in the Primers pane failed\n".data(using: .utf8)!)
+                    exit(5)
+                }
+                oc_document_undo(core.handle)
+            }),
+            ("9h-primer-fit-tm", {
+                // Fitting to a hotter Tm grows the annealing part at its 5' end only.
+                let core = (controller?.document as? SequenceDocument)?.core
+                core?.select(start: 500, length: 22)
+                controller?.addPrimer(nil)
+                let sites = PrimerEditor.fitAll(to: 70)
+                guard let s = sites.first, s.start + s.length == 522, s.length > 22,
+                      let core = core, oc_document_has_pending_primer(core.handle) else {
+                    FileHandle.standardError.write("ui-smoke: fitting a primer to a Tm failed\n".data(using: .utf8)!)
+                    exit(5)
+                }
+            }),
+            ("9h-primer-cancelled", {
+                PrimerEditor.cancelAll()
+                let core = (controller?.document as? SequenceDocument)?.core
+                guard let core = core, !oc_document_has_pending_primer(core.handle), !PrimerEditor.isAnyOpen else {
+                    FileHandle.standardError.write("ui-smoke: cancelling left a primer behind\n".data(using: .utf8)!)
+                    exit(5)
+                }
+            }),
             ("9e-edited", { (controller?.document as? NSDocument)?.updateChangeCount(.changeDone) }),
             ("9f-saved", { (controller?.document as? NSDocument)?.updateChangeCount(.changeCleared) }),
             ("10-below-minimum", { resize(NSSize(width: 600, height: 400)) }),

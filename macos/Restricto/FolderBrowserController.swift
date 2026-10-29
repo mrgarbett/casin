@@ -133,6 +133,8 @@ final class FolderBrowserController: NSViewController, NSOutlineViewDataSource, 
             empty.leadingAnchor.constraint(equalTo: guide.leadingAnchor, constant: 16),
             empty.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -16),
         ])
+        // The same edge as the right panel's, on this side.
+        PanelEdgeLine.add(to: rootView, trailing: true)
         view = rootView
 
         NotificationCenter.default.addObserver(self, selector: #selector(reload), name: Self.folderChanged,

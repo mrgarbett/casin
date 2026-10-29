@@ -25,6 +25,14 @@ public:
 
     bool isEmpty() const { return m_seq.empty(); }
     const Sequence &sequence() const { return m_seq; }
+    // What the views draw: the sequence, plus the primer being designed if any.
+    const Sequence &displaySequence() const { return m_hasPending ? m_display : m_seq; }
+    // A primer drawn as if it were added, while it is being designed. It is
+    // not part of the sequence: not undoable, saved or listed. Any change to
+    // the sequence drops it.
+    void setPendingPrimer(const Primer &primer);
+    void clearPendingPrimer();
+    bool hasPendingPrimer() const { return m_hasPending; }
     const std::string &path() const { return m_path; }
     void setSequence(Sequence seq, std::string path = {});
     void setPath(std::string path) { m_path = std::move(path); }
@@ -127,6 +135,8 @@ public:
     void onHistoryChanged(Listener l) { m_histListeners.push_back(std::move(l)); }
     // Reads were added or dropped.
     void onReadsChanged(Listener l) { m_readListeners.push_back(std::move(l)); }
+    // The pending primer was set or cleared.
+    void onPendingChanged(Listener l) { m_pendingListeners.push_back(std::move(l)); }
     // True while the current sequence change came from an edit, not a load.
     bool isEditing() const { return m_inEdit; }
 
@@ -152,6 +162,8 @@ private:
     static void emit(const std::vector<Listener> &ls);
 
     Sequence m_seq;
+    Sequence m_display;        // m_seq plus the pending primer, while there is one
+    bool m_hasPending = false;
     std::string m_path;
     std::vector<Enzyme> m_enzymes;
     std::vector<CutSite> m_allSites;
@@ -168,7 +180,8 @@ private:
     unsigned m_state = 0, m_savedState = 0, m_nextState = 0;
     bool m_inEdit = false;
     bool m_typing = false;   // the last step was typed at the caret, so more typing joins it
-    std::vector<Listener> m_seqListeners, m_selListeners, m_enzListeners, m_histListeners, m_readListeners;
+    std::vector<Listener> m_seqListeners, m_selListeners, m_enzListeners, m_histListeners, m_readListeners,
+        m_pendingListeners;
 };
 
 } // namespace oc

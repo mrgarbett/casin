@@ -208,6 +208,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         let edit: (Int) -> Void = { [weak self] index in self?.editFeature(at: index) }
         inspector.onEditFeature = edit
         sequenceView.onEditFeature = edit
+        sequenceView.onAddPrimer = { [weak self] in self?.addPrimer(nil) }
         mapView.onEditFeature = edit
         inspector.onPick = { [weak self] _, wasShowing in
             guard let item = self?.inspectorItem else { return }
@@ -317,6 +318,8 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         let statusUnderMap = mapStacked && !mapHidden
         let statusOverSequence = !sequenceInPanel && !statusUnderMap
         sequenceScroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: statusOverSequence ? 52 : 0, right: 0)
+        // Under the map, the map's labels keep clear of it.
+        mapView.bottomInset = statusUnderMap ? 46 : 0
         if let pill = statusPill, let root = detailRoot {
             pillBottom?.isActive = false
             pillBottom = statusUnderMap
@@ -363,6 +366,12 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     /// Shows one pane of the right panel (the UI smoke test walks through them).
     func showInspectorPane(_ pane: InspectorController.Pane) {
         inspector.select(pane)
+    }
+
+    /// Opens the right panel on Primers with a new primer's inputs.
+    func beginAddingPrimer(bases: String) {
+        if let item = inspectorItem, item.isCollapsed { item.animator().isCollapsed = false }
+        inspector.beginAddingPrimer(bases: bases)
     }
 
     /// The widest the status pill may be: the middle less the panel pill's room
@@ -602,20 +611,21 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             updateTitle()
             return item
         case actionsItem:
-            let entries = [("Undo", "arrow.uturn.backward", "Undo the last edit (⌘Z)"),
-                           ("Redo", "arrow.uturn.forward", "Redo (⇧⌘Z)"),
-                           ("Save", "square.and.arrow.down", "Save (⌘S)"),
-                           ("Export", "square.and.arrow.up", "Export the map, or the sequence as GenBank or FASTA")]
-            let images = entries.map {
-                NSImage(systemSymbolName: $0.1, accessibilityDescription: $0.0) ?? NSImage(size: NSSize(width: 16, height: 16))
+            // Plain buttons in one group, so they share a capsule the way the
+            // toggles on the right do, without a segmented control's dividers.
+            let entries: [(String, String, String, Selector)] = [
+                ("Undo", "arrow.uturn.backward", "Undo the last edit (⌘Z)", #selector(undoEdit(_:))),
+                ("Redo", "arrow.uturn.forward", "Redo (⇧⌘Z)", #selector(redoEdit(_:))),
+                ("Save", "square.and.arrow.down", "Save (⌘S)", #selector(saveFromToolbar(_:))),
+                ("Export", "square.and.arrow.up", "Export the map, or the sequence as GenBank or FASTA",
+                 #selector(exportFromToolbar(_:))),
+            ]
+            let group = NSToolbarItemGroup(itemIdentifier: id)
+            group.subitems = entries.map {
+                button(NSToolbarItem.Identifier("actions.\($0.0)"), label: $0.0, help: $0.2, symbol: $0.1, action: $0.3)
             }
-            let group = NSToolbarItemGroup(itemIdentifier: id, images: images, selectionMode: .momentary,
-                                           labels: entries.map { $0.0 }, target: self,
-                                           action: #selector(actionsClicked(_:)))
-            group.controlRepresentation = .expanded
             group.label = "Actions"
             group.paletteLabel = "Undo, Redo, Save, Export"
-            for (sub, entry) in zip(group.subitems, entries) { sub.toolTip = entry.2 }
             return group
         case inspectorToolbarItem:
             return toggle(id, label: "Panel", help: "Show or hide the right panel",
@@ -634,14 +644,10 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         }
     }
 
-    @objc private func actionsClicked(_ sender: NSToolbarItemGroup) {
-        switch sender.selectedIndex {
-        case 0: undoEdit(sender)
-        case 1: redoEdit(sender)
-        case 2: (document as? NSDocument)?.save(sender)
-        case 3: exportMenu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
-        default: break
-        }
+    @objc private func saveFromToolbar(_ sender: Any?) { (document as? NSDocument)?.save(sender) }
+
+    @objc private func exportFromToolbar(_ sender: Any?) {
+        exportMenu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 
     /// A toolbar button for something that is on or off; refreshToolbarToggles
@@ -659,7 +665,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private func refreshToolbarToggles() {
         let on: [NSToolbarItem.Identifier: Bool] = [
             mapItem: !mapHidden, layoutItem: mapStacked,
-            inspectorToolbarItem: !(inspectorItem?.isCollapsed ?? true),
+            inspectorToolbarItem: !(inspectorItem?.isCollapsed ?? true) && !inspectorIsZeroWidth,
             complementItem: sequenceView.showComplement,
         ]
         for (id, entry) in toolbarToggles {
@@ -789,7 +795,25 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     /// responder chain and never retitles the menu item.
     @objc func toggleInspectorPanel(_ sender: Any?) {
         guard let item = inspectorItem else { return }
+        if inspectorIsZeroWidth {
+            showZeroWidthInspector()
+            return
+        }
         item.animator().isCollapsed = !item.isCollapsed
+    }
+
+    /// The split view can restore the panel open but 0 points wide: not
+    /// collapsed, so the menu says Hide, yet nothing shows.
+    private var inspectorIsZeroWidth: Bool {
+        guard let item = inspectorItem, !item.isCollapsed else { return false }
+        return item.viewController.view.frame.width < 1
+    }
+
+    private func showZeroWidthInspector() {
+        guard let item = inspectorItem, let split = splitController?.splitView,
+              split.arrangedSubviews.count == 3 else { return }
+        let width = max(item.minimumThickness, 300)
+        split.setPosition(split.bounds.width - width - split.dividerThickness, ofDividerAt: 1)
     }
 
     @objc func chooseBrowserFolder(_ sender: Any?) {
@@ -865,7 +889,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             item.state = mapStacked ? .on : .off
             return true
         case #selector(toggleInspectorPanel(_:)):
-            item.title = inspectorItem?.isCollapsed == true ? "Show Inspector" : "Hide Inspector"
+            item.title = inspectorItem?.isCollapsed == true || inspectorIsZeroWidth ? "Show Inspector" : "Hide Inspector"
             return true
         case #selector(setFrames(_:)):
             item.state = core.frames == item.tag ? .on : .off

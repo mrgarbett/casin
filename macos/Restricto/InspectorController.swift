@@ -26,6 +26,11 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     private let featureTable = NSTableView()
     private let enzymeTable = NSTableView()
     private let primerTable = NSTableView()
+    /// The Primers pane: the list, or a new primer's inputs while one is being added.
+    private let primersHolder = NSView()
+    private var primerList: NSView?
+    private var primerEditor: PrimerEditor?
+    private var removePrimerButton: NSButton?
     private let filter = NSPopUpButton(frame: .zero, pullsDown: false)
     private let enzymeSearch = NSSearchField()
     private let onMapOnly = NSButton(checkboxWithTitle: "Only enzymes on the map", target: nil, action: nil)
@@ -74,15 +79,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         // macOS 26 draws no line between the middle and the panel. Draw one
         // (with a grab handle) over the panel's edge; the drag stays the split
         // view's.
-        let edge = PanelEdgeLine()
-        edge.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(edge)
-        NSLayoutConstraint.activate([
-            edge.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            edge.topAnchor.constraint(equalTo: root.topAnchor),
-            edge.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            edge.widthAnchor.constraint(equalToConstant: 5),
-        ])
+        PanelEdgeLine.add(to: root, trailing: false)
         view = root
 
         document.observe { [weak self] what in
@@ -201,10 +198,85 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     private func buildPrimersTab() {
         let scroll = makeTable(primerTable, columns: [("name", "Primer", 120), ("tm", "Tm", 56),
                                                       ("location", "Binds", 96)])
+        // Add Primer sits at the top, where it's seen; − deletes the selected primer.
+        let add = NSButton(title: "Add Primer", image: NSImage(systemSymbolName: "plus", accessibilityDescription: nil)
+            ?? NSImage(), target: self, action: #selector(addPrimerClicked(_:)))
+        add.imagePosition = .imageLeading
+        add.controlSize = .small
+        add.bezelColor = .controlAccentColor
+        add.toolTip = "Add a primer: type it here and see where it binds"
+        let remove = NSButton(image: NSImage(systemSymbolName: "minus", accessibilityDescription: "Delete Primer")
+            ?? NSImage(), target: self, action: #selector(removePrimerClicked(_:)))
+        remove.controlSize = .small
+        remove.toolTip = "Delete the selected primer"
+        // A clear button, enabled while a primer is selected.
+        remove.isEnabled = false
+        removePrimerButton = remove
+        let bar = NSStackView(views: [add, NSView(), remove])
+        bar.spacing = 8
+        bar.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 2, right: 10)
+        let list = NSStackView(views: [bar, scroll])
+        list.orientation = .vertical
+        list.alignment = .leading
+        list.spacing = 4
+        for v in [scroll, bar] as [NSView] {
+            v.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
+        }
+        list.translatesAutoresizingMaskIntoConstraints = false
+        primerList = list
+        primersHolder.addSubview(list)
+        pin(list, to: primersHolder)
         let item = NSTabViewItem(identifier: Pane.primers.rawValue)
         item.label = "Primers"
-        item.view = scroll
+        item.view = primersHolder
         tabs.addTabViewItem(item)
+    }
+
+    private func pin(_ view: NSView, to holder: NSView) {
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: holder.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: holder.trailingAnchor),
+            view.topAnchor.constraint(equalTo: holder.topAnchor),
+            view.bottomAnchor.constraint(equalTo: holder.bottomAnchor),
+        ])
+    }
+
+    @objc private func addPrimerClicked(_ sender: Any?) { beginAddingPrimer(bases: "") }
+
+    @objc private func removePrimerClicked(_ sender: Any?) {
+        let row = primerTable.selectedRow
+        guard row >= 0, row < primers.count else { NSSound.beep(); return }
+        oc_document_remove_primer(document.handle, Int32(primers[row].index))
+    }
+
+    /// Shows the Primers pane with a new primer's inputs in place of the
+    /// list, filled in with `bases` if given. An editor already open keeps
+    /// what was typed unless new bases come.
+    func beginAddingPrimer(bases: String) {
+        select(.primers)
+        if let editor = primerEditor {
+            if !bases.isEmpty { editor.setBases(bases) }
+            editor.focus()
+            return
+        }
+        let editor = PrimerEditor(document: document, bases: bases)
+        editor.onClose = { [weak self] in self?.endAddingPrimer() }
+        primerEditor = editor
+        addChild(editor)
+        editor.view.translatesAutoresizingMaskIntoConstraints = false
+        primersHolder.addSubview(editor.view)
+        pin(editor.view, to: primersHolder)
+        primerList?.isHidden = true
+        editor.focus()
+    }
+
+    private func endAddingPrimer() {
+        guard let editor = primerEditor else { return }
+        editor.view.removeFromSuperview()
+        editor.removeFromParent()
+        primerEditor = nil
+        primerList?.isHidden = false
+        reloadPrimers()
     }
 
     private func buildFeaturesTab() {
@@ -279,6 +351,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     private func reloadPrimers() {
         primers = document.primers
         primerTable.reloadData()
+        removePrimerButton?.isEnabled = primerTable.selectedRow >= 0
     }
 
     private func reloadEnzymes() {
@@ -485,6 +558,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
+        removePrimerButton?.isEnabled = primerTable.selectedRow >= 0
         guard !syncing, let table = notification.object as? NSTableView, table.selectedRow >= 0 else { return }
         if table === featureTable {
             document.activateFeature(features[table.selectedRow].index)
@@ -507,15 +581,46 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     }
 }
 
-/// The line along the panel's left edge, with a small handle at its middle,
-/// like the map/sequence divider. It lets clicks through to the divider.
+/// The line along a side panel's inner edge (the right panel's left edge,
+/// the folder sidebar's right edge), with a small handle at its middle, like
+/// the map/sequence divider. Both panels use it, so their edges match. It
+/// lets clicks through to the divider.
 final class PanelEdgeLine: NSView {
+    /// The width to give it, pinned to the panel's inner edge.
+    static let width: CGFloat = 5
+    /// True when the line runs along the panel's trailing edge.
+    private let trailing: Bool
+
+    init(trailing: Bool = false) {
+        self.trailing = trailing
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
     override func draw(_ dirtyRect: NSRect) {
+        let x = trailing ? bounds.maxX - 1 : 0
         NSColor.separatorColor.setFill()
-        NSRect(x: 0, y: 0, width: 1, height: bounds.height).fill()
+        NSRect(x: x, y: 0, width: 1, height: bounds.height).fill()
         NSColor.tertiaryLabelColor.setFill()
-        NSBezierPath(roundedRect: NSRect(x: 0, y: bounds.midY - 16, width: 4, height: 32), xRadius: 2, yRadius: 2).fill()
+        let handleX = trailing ? bounds.maxX - 4 : 0
+        NSBezierPath(roundedRect: NSRect(x: handleX, y: bounds.midY - 16, width: 4, height: 32), xRadius: 2, yRadius: 2)
+            .fill()
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    /// Adds an edge line along `view`'s inner edge.
+    static func add(to view: NSView, trailing: Bool) {
+        let edge = PanelEdgeLine(trailing: trailing)
+        edge.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(edge)
+        NSLayoutConstraint.activate([
+            trailing ? edge.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+                     : edge.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            edge.topAnchor.constraint(equalTo: view.topAnchor),
+            edge.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            edge.widthAnchor.constraint(equalToConstant: width),
+        ])
+    }
 }
