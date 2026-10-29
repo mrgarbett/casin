@@ -69,6 +69,7 @@ private:
     void ensureLayout();
     void updateAdjustment();
     void extendSelectionTo(double viewX, double viewY);
+    void setHoverCodon(int codon);
     double scrollY() const;
 
     Document *m_doc;
@@ -89,6 +90,11 @@ private:
     // drag state
     bool m_dragging = false;
     int m_anchor = 0;
+    // A drag that started on an amino acid: its codon, so the selection grows
+    // codon by codon while it stays on amino acids (-1 otherwise).
+    int m_codonAnchor = -1;
+    // The codon whose amino acid is under the mouse, outlined on the strands.
+    int m_hoverCodon = -1;
     double m_x0 = 0, m_y0 = 0, m_lastX = 0, m_lastY = 0;
     guint m_timer = 0;
 };

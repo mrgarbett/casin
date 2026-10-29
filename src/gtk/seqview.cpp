@@ -197,6 +197,7 @@ void SequenceView::draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer p)
     st.selection = self->m_doc->selection();
     st.activeFeature = self->m_doc->activeFeature();
     st.activeSite = self->m_doc->activeSite();
+    st.hoverCodon = self->m_hoverCodon;
     const view::Scene scene = self->m_layout->render(self->scrollY(), h, st);
     if (!scene.background.isNone()) {
         // The whole width, so the pill floats over the sequence.
@@ -220,11 +221,32 @@ void SequenceView::valueChanged(GtkAdjustment *, gpointer p)
     gtk_widget_queue_draw(static_cast<SequenceView *>(p)->m_area);
 }
 
+void SequenceView::setHoverCodon(int codon)
+{
+    if (codon != m_hoverCodon) {
+        m_hoverCodon = codon;
+        gtk_widget_queue_draw(m_area);
+    }
+}
+
 void SequenceView::extendSelectionTo(double x, double y)
 {
     if (!m_layout)
         return;
-    const int pos = m_layout->positionAt({x, y + scrollY()});
+    const view::Point content{x, y + scrollY()};
+    if (m_codonAnchor >= 0) {
+        // From the first codon to the one under the mouse, both whole; off
+        // the amino acids, to the nearest base.
+        const int first = m_codonAnchor;
+        const int codon = m_layout->codonAt(content);
+        setHoverCodon(codon);
+        const int end = codon >= 0 ? (codon >= first ? codon + 3 : codon) : m_layout->positionAt(content);
+        const int start = std::min(first, end);
+        const int stop = std::min(std::max(first + 3, end), m_doc->sequence().length());
+        m_doc->setSelection({start, stop - start});
+        return;
+    }
+    const int pos = m_layout->positionAt(content);
     m_doc->setSelection({std::min(pos, m_anchor), std::abs(pos - m_anchor)});
 }
 
@@ -296,6 +318,15 @@ void SequenceView::dragBegin(GtkGestureDrag *g, double x, double y, gpointer p)
         self->extendSelectionTo(x, y);
         return;
     }
+    // An amino acid in a translation row selects its codon; dragging on
+    // across amino acids selects their codons too.
+    const int codon = self->m_layout->codonAt(content);
+    if (codon >= 0) {
+        self->m_dragging = true;
+        self->m_codonAnchor = self->m_anchor = codon;
+        self->m_doc->setSelection({codon, std::min(3, self->m_doc->sequence().length() - codon)});
+        return;
+    }
     const int site = self->m_layout->siteAt(content);
     if (site >= 0) {
         self->m_doc->activateSite(site);
@@ -359,18 +390,25 @@ void SequenceView::dragEnd(GtkGestureDrag *, double, double, gpointer p)
     if (self->m_dragging && self->onSelectDrag)
         self->onSelectDrag(-1, -1);
     self->m_dragging = false;
+    self->m_codonAnchor = -1;
 }
 
 void SequenceView::motion(GtkEventControllerMotion *, double x, double y, gpointer p)
 {
     auto *self = static_cast<SequenceView *>(p);
-    if (self->onHoverBase && self->m_layout)
-        self->onHoverBase(self->m_layout->baseAt({x, y + self->scrollY()}));
+    if (!self->m_layout)
+        return;
+    const view::Point content{x, y + self->scrollY()};
+    // An amino acid under the mouse outlines its codon.
+    self->setHoverCodon(self->m_layout->codonAt(content));
+    if (self->onHoverBase)
+        self->onHoverBase(self->m_layout->baseAt(content));
 }
 
 void SequenceView::leave(GtkEventControllerMotion *, gpointer p)
 {
     auto *self = static_cast<SequenceView *>(p);
+    self->setHoverCodon(-1);
     if (self->onHoverBase)
         self->onHoverBase(-1);
 }
