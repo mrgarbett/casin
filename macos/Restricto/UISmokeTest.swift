@@ -7,7 +7,7 @@
 // with the map beside it), hides and shows the inspector, opens Find (which
 // reopens a hidden panel on the sequence), selects bases (the status splits),
 // copies the map image, adds a His-tagged primer in the Primers
-// pane, and saves a PNG of the window after each step. It exits 0 when every step got
+// pane, opens a PCR product from the PCR wizard, and saves a PNG of the window after each step. It exits 0 when every step got
 // through layout; a layout loop or other exception aborts the process instead.
 import AppKit
 import RestrictoCore
@@ -28,7 +28,7 @@ enum UISmokeTest {
 
     private static func waitForWindow(out: URL, tries: Int) {
         if let window = NSApp.windows.first(where: { $0.windowController is DocumentWindowController }) {
-            run(steps(window), out: out)
+            run(steps(window, out: out), out: out)
         } else if tries > 0 {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { waitForWindow(out: out, tries: tries - 1) }
         } else {
@@ -37,7 +37,7 @@ enum UISmokeTest {
         }
     }
 
-    private static func steps(_ window: NSWindow) -> [(String, () -> Void)] {
+    private static func steps(_ window: NSWindow, out: URL) -> [(String, () -> Void)] {
         let split = window.contentViewController as? NSSplitViewController
         let controller = window.windowController as? DocumentWindowController
         func resize(_ size: NSSize) {
@@ -130,6 +130,30 @@ enum UISmokeTest {
                     FileHandle.standardError.write("ui-smoke: cancelling left a primer behind\n".data(using: .utf8)!)
                     exit(5)
                 }
+            }),
+            ("9i-pcr-wizard", {
+                // Sequence > PCR… with the sample's two primers.
+                controller?.pcrProduct(nil)
+                guard PcrWizard.isAnyOpen, let length = PcrWizard.productLengths.first, length > 0 else {
+                    FileHandle.standardError.write("ui-smoke: the PCR wizard showed no product\n".data(using: .utf8)!)
+                    exit(6)
+                }
+            }),
+            ("9i-pcr-opened", {
+                if let wizard = PcrWizard.openWindows.first {
+                    capture(wizard, to: out.appendingPathComponent("9i-pcr-wizard-window.png"))
+                }
+                let expected = PcrWizard.productLengths.first ?? 0
+                let before = Set(NSDocumentController.shared.documents.map { ObjectIdentifier($0) })
+                PcrWizard.openAll()
+                let added = NSDocumentController.shared.documents.filter { !before.contains(ObjectIdentifier($0)) }
+                guard added.count == 1, let product = added.first as? SequenceDocument,
+                      product.core.length == expected, !PcrWizard.isAnyOpen else {
+                    FileHandle.standardError.write("ui-smoke: Open Product didn't open the PCR product\n".data(using: .utf8)!)
+                    exit(6)
+                }
+                product.close()
+                window.makeKeyAndOrderFront(nil)
             }),
             ("9e-edited", { (controller?.document as? NSDocument)?.updateChangeCount(.changeDone) }),
             ("9f-saved", { (controller?.document as? NSDocument)?.updateChangeCount(.changeCleared) }),
