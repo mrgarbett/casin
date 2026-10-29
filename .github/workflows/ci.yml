@@ -136,6 +136,7 @@ jobs:
       - name: Crash report, if the app crashed
         if: failure()
         run: |
+          sleep 20   # ReportCrash writes the report a little after the crash
           for f in ~/Library/Logs/DiagnosticReports/Restricto*; do
             [ -e "$f" ] || continue
             echo "== $f"

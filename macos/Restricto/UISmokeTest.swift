@@ -140,19 +140,25 @@ enum UISmokeTest {
                 }
             }),
             ("9i-pcr-opened", {
+                func note(_ text: String) { print("ui-smoke: 9i \(text)"); fflush(stdout) }
+                note("capture")
                 if let wizard = PcrWizard.openWindows.first {
                     capture(wizard, to: out.appendingPathComponent("9i-pcr-wizard-window.png"))
                 }
                 let expected = PcrWizard.productLengths.first ?? 0
                 let before = Set(NSDocumentController.shared.documents.map { ObjectIdentifier($0) })
+                note("open product")
                 PcrWizard.openAll()
+                note("opened")
                 let added = NSDocumentController.shared.documents.filter { !before.contains(ObjectIdentifier($0)) }
                 guard added.count == 1, let product = added.first as? SequenceDocument,
                       product.core.length == expected, !PcrWizard.isAnyOpen else {
                     FileHandle.standardError.write("ui-smoke: Open Product didn't open the PCR product\n".data(using: .utf8)!)
                     exit(6)
                 }
+                note("close product")
                 product.close()
+                note("closed")
                 window.makeKeyAndOrderFront(nil)
             }),
             ("9e-edited", { (controller?.document as? NSDocument)?.updateChangeCount(.changeDone) }),
