@@ -92,20 +92,9 @@ jobs:
           path: restricto.flatpak
 
   macos:
-    # Two SDKs: macos-14 builds without the Liquid Glass code (older Xcode),
-    # macos-26 builds it in with Xcode 26. Both binaries target macOS 13.
-    name: macOS ${{ matrix.label }} (Swift + AppKit)
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-14
-            label: pre-26 SDK
-            artifact: macos-build
-          - runner: macos-26
-            label: Xcode 26 SDK
-            artifact: macos-build-xcode26
+    # Xcode 26; the app needs macOS 26 or later.
+    name: macOS (Swift + AppKit)
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
@@ -120,10 +109,10 @@ jobs:
           ctest --test-dir build --output-on-failure
       - name: Build Restricto.app
         run: scripts/build_macos_app.sh
-      - name: Check the deployment target is still Ventura
+      - name: Check the deployment target is macOS 26
         run: |
           vtool -show-build build/macos/Restricto.app/Contents/MacOS/Restricto | tee vtool.txt
-          grep -Eq 'minos 13\.0' vtool.txt
+          grep -Eq 'minos 26\.0' vtool.txt
           test -s build/macos/Restricto.app/Contents/Resources/Restricto.icns
           # AppKit picks the macOS 26 design from the SDK version in the binary.
           test "$(awk '$1 == "sdk" { print $2 }' vtool.txt)" = "$(xcrun --show-sdk-version)"
@@ -147,7 +136,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ${{ matrix.artifact }}
+          name: macos-build
           path: |
             demo-map-macos.png
             ui-first-launch
