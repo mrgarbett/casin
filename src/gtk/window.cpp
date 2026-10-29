@@ -383,7 +383,6 @@ void Window::buildUi()
     gtk_paned_set_shrink_start_child(GTK_PANED(m_split), FALSE);
     gtk_paned_set_shrink_end_child(GTK_PANED(m_split), FALSE);
     gtk_widget_set_vexpand(m_split, TRUE);
-    gtk_widget_set_margin_end(m_map->widget(), kPillRoom);
     g_signal_connect_swapped(m_split, "notify::max-position", G_CALLBACK(+[](gpointer p) {
                                  static_cast<Window *>(p)->placeSplit();
                              }),
@@ -565,7 +564,7 @@ GtkWidget *Window::buildPanel()
     m_enzymeSearch = gtk_search_entry_new();
     gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(m_enzymeSearch), "Find enzyme");
     gtk_widget_set_margin_start(m_enzymeSearch, 8);
-    gtk_widget_set_margin_end(m_enzymeSearch, kPillRoom);
+    gtk_widget_set_margin_end(m_enzymeSearch, 8);
     gtk_widget_set_margin_top(m_enzymeSearch, 10);
     g_signal_connect_swapped(m_enzymeSearch, "search-changed", G_CALLBACK(+[](gpointer p) {
                                  static_cast<Window *>(p)->applyEnzymeSearch();
@@ -686,13 +685,15 @@ void Window::applyLayout()
         if (parent != m_split)
             gtk_paned_set_end_child(GTK_PANED(m_split), m_seqPane);
     }
-    // Stacked, the map keeps the pill's corner; alone, the sequence does. In
-    // the middle, the sequence scrolls clear of the status floating over it.
+    // The pill and the status float over the content: whatever is under the
+    // pill's corner lays out short of it, and the map's labels stay clear of
+    // the status at the bottom, but both still fill the middle edge to edge.
+    // In the middle, the sequence scrolls clear of the status floating over it.
     m_seq->setTrailingInset(!inPanel && m_mapHidden ? kPillRoom : 0);
     m_seq->setBottomInset(inPanel ? 0 : 96);
     gtk_widget_set_margin_bottom(m_findBar, inPanel ? 12 : 100);
-    // Beside the sequence or alone, the map's labels stay clear of the status.
-    gtk_widget_set_margin_bottom(m_map->widget(), m_mapStacked ? 0 : 52);
+    m_map->setInsets(kPillRoom, m_mapStacked ? 0 : 52);
+    gtk_widget_set_margin_end(m_pill, 8 + (!inPanel && m_mapHidden ? m_seq->scrollbarWidth() : 0));
     if (inPanel)
         showPane("sequence");
     else if (m_pane == "sequence")

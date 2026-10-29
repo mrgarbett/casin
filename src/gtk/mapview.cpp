@@ -62,8 +62,19 @@ void MapView::setOptions(view::MapOptions options)
     invalidate();
 }
 
+void MapView::setInsets(int trailing, int bottom)
+{
+    if (trailing != m_trailing || bottom != m_bottom) {
+        m_trailing = trailing;
+        m_bottom = bottom;
+        invalidate();
+    }
+}
+
 void MapView::ensureLayout(int w, int h)
 {
+    w = std::max(160, w - m_trailing);
+    h = std::max(160, h - m_bottom);
     if (m_layout && w == m_w && h == m_h)
         return;
     m_w = w;
@@ -82,7 +93,14 @@ void MapView::draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer p)
     st.selection = self->m_doc->selection();
     st.activeFeature = self->m_doc->activeFeature();
     st.activeSite = self->m_doc->activeSite();
-    view::drawScene(cr, self->m_layout->render(st));
+    const view::Scene scene = self->m_layout->render(st);
+    if (!scene.background.isNone()) {
+        // Under the floating capsules too, so they float over the map.
+        const view::Color &c = scene.background;
+        cairo_set_source_rgba(cr, c.r, c.g, c.b, c.a);
+        cairo_paint(cr);
+    }
+    view::drawScene(cr, scene);
 }
 
 void MapView::dragBegin(GtkGestureDrag *, double x, double y, gpointer p)

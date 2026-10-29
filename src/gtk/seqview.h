@@ -36,10 +36,13 @@ public:
     void scrollToPosition(int pos);
     // Typing bases, Backspace, Delete and the arrow keys edit the document.
     void setEditable(bool editable) { m_editable = editable; }
-    // Room on the right for something floating over the view.
+    // Room on the right for something floating over the view (the lines wrap
+    // short of it; the background still fills the view).
     void setTrailingInset(int px);
     // Room to scroll the last line clear of something floating at the bottom.
     void setBottomInset(int px);
+    // The width of the view's own scrollbar, for floating things to stay clear of.
+    int scrollbarWidth() const;
 
     // The base under the mouse (-1 when none); the mouse, in widget
     // coordinates, while a drag selects bases, and -1, -1 when it ends; a
@@ -80,6 +83,7 @@ private:
     bool m_groupTens = false;
     bool m_enzymes = true;
     int m_bottomInset = 0;
+    int m_trailing = 0;
     std::set<std::string> m_hiddenTypes;
     bool m_editable = false;
     // drag state

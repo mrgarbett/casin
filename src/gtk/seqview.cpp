@@ -145,7 +145,8 @@ void SequenceView::ensureLayout()
     options.hiddenTypes = m_hiddenTypes;
     m_layout = std::make_unique<view::SequenceLayout>(m_doc->sequence(), m_doc->visibleSites(),
                                                       m_dark ? view::Theme::darkTheme() : view::Theme::light(),
-                                                      m_measure, m_w, m_complement, options, m_doc->reads());
+                                                      m_measure, std::max(200, m_w - m_trailing), m_complement,
+                                                      options, m_doc->reads());
     updateAdjustment();
 }
 
@@ -196,7 +197,14 @@ void SequenceView::draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer p)
     st.selection = self->m_doc->selection();
     st.activeFeature = self->m_doc->activeFeature();
     st.activeSite = self->m_doc->activeSite();
-    view::drawScene(cr, self->m_layout->render(self->scrollY(), h, st));
+    const view::Scene scene = self->m_layout->render(self->scrollY(), h, st);
+    if (!scene.background.isNone()) {
+        // The whole width, so the pill floats over the sequence.
+        const view::Color &c = scene.background;
+        cairo_set_source_rgba(cr, c.r, c.g, c.b, c.a);
+        cairo_paint(cr);
+    }
+    view::drawScene(cr, scene);
 }
 
 gboolean SequenceView::scrolled(GtkEventControllerScroll *c, double, double dy, gpointer p)
@@ -385,7 +393,17 @@ void SequenceView::setBottomInset(int px)
 
 void SequenceView::setTrailingInset(int px)
 {
-    gtk_widget_set_margin_end(m_box, px);
+    if (px != m_trailing) {
+        m_trailing = px;
+        invalidate();
+    }
+}
+
+int SequenceView::scrollbarWidth() const
+{
+    int natural = 0;
+    gtk_widget_measure(m_scrollbar, GTK_ORIENTATION_HORIZONTAL, -1, nullptr, &natural, nullptr, nullptr);
+    return natural;
 }
 
 gboolean SequenceView::queryTooltip(GtkWidget *, int x, int y, gboolean, GtkTooltip *tip, gpointer p)

@@ -21,6 +21,9 @@ public:
     void setDark(bool dark);
     const view::MapOptions &options() const { return m_options; }
     void setOptions(view::MapOptions options);
+    // Room kept clear on the right and at the bottom for capsules floating
+    // over the map; the background still fills the whole view.
+    void setInsets(int trailing, int bottom);
 
     // As on SequenceView: the base under the mouse, the mouse while a drag
     // selects bases (-1, -1 at the end), a feature double-clicked.
@@ -44,6 +47,7 @@ private:
     view::PangoTextMeasurer m_measure;
     std::unique_ptr<view::MapLayout> m_layout;
     int m_w = 0, m_h = 0;
+    int m_trailing = 0, m_bottom = 0;
     bool m_dark = false;
     view::MapOptions m_options;
     // drag state
