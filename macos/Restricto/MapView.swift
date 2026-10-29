@@ -17,10 +17,6 @@ final class MapView: NSView {
     var onHoverBase: ((Int) -> Void)?
     /// Called with a feature's index when it is double-clicked.
     var onEditFeature: ((Int) -> Void)?
-    /// While the size changes (a side panel sliding open, a window resize),
-    /// the last layout is drawn scaled to fit, so the map grows and shrinks
-    /// smoothly; it is laid out again once the size settles.
-    private var pendingRelayout: DispatchWorkItem?
 
     init(document: CoreDocument) {
         self.document = document
@@ -69,13 +65,9 @@ final class MapView: NSView {
 
     private func ensureLayout() -> OpaquePointer? {
         let dark = isDarkAppearance
-        if let current = layout, layoutDark == dark, layoutSize != mapSize {
-            pendingRelayout?.cancel()
-            let work = DispatchWorkItem { [weak self] in self?.invalidateLayout() }
-            pendingRelayout = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: work)
-            return current
-        }
+        // Laid out afresh at every size, including each frame of a side
+        // panel sliding open: it takes well under a millisecond, and the map
+        // then ends exactly where it will stay, with no snap at the end.
         if layout == nil || layoutSize != mapSize || layoutDark != dark {
             if let old = layout { oc_map_layout_free(old) }
             layout = newMapLayout(document, size: mapSize, dark: dark)
@@ -89,21 +81,6 @@ final class MapView: NSView {
         guard let ctx = NSGraphicsContext.current?.cgContext, let layout = ensureLayout(),
               let scene = oc_map_layout_render(layout, document.handle) else { return }
         defer { oc_scene_free(scene) }
-        if layoutSize != mapSize, layoutSize.width > 0, layoutSize.height > 0 {
-            // The last layout while the size settles: fill the view, then the
-            // map scaled to fit and centred.
-            let background = oc_scene_background(scene)
-            if background.a > 0 {
-                ctx.setFillColor(background.cgColor)
-                ctx.fill(bounds)
-            }
-            let scale = min(mapSize.width / layoutSize.width, mapSize.height / layoutSize.height)
-            ctx.translateBy(x: (mapSize.width - layoutSize.width * scale) / 2,
-                            y: (mapSize.height - layoutSize.height * scale) / 2)
-            ctx.scaleBy(x: scale, y: scale)
-            drawScene(scene, in: ctx)
-            return
-        }
         drawScene(scene, in: ctx, trailing: trailingInset)
     }
 
