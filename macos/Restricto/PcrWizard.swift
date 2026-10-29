@@ -33,7 +33,7 @@ final class PcrWizard: NSWindowController, NSWindowDelegate {
 
     /// Brings up the wizard for `template`, opening one if there is none.
     static func show(for template: CoreDocument, near parent: NSWindow?, onAddPrimer: @escaping () -> Void) {
-        if let open = showing.first(where: { $0.template === template }) {
+        if let open = visible.first(where: { $0.template === template }) {
             open.window?.makeKeyAndOrderFront(nil)
             return
         }
@@ -337,17 +337,21 @@ final class PcrWizard: NSWindowController, NSWindowDelegate {
     @objc private func addPrimer(_ sender: Any?) { onAddPrimer() }
 
     func windowWillClose(_ notification: Notification) {
-        Self.showing.removeAll { $0 === self }
+        // Let go after the close finishes: dropping the last reference here
+        // would free the window while it's still closing.
+        DispatchQueue.main.async { Self.showing.removeAll { $0 === self } }
     }
 
     // MARK: Launch check
 
-    static var isAnyOpen: Bool { !showing.isEmpty }
-    static var openWindows: [NSWindow] { showing.compactMap { $0.window } }
+    /// Wizards not yet closed (a closed one lingers in `showing` until the next turn).
+    private static var visible: [PcrWizard] { showing.filter { $0.window?.isVisible == true } }
+    static var isAnyOpen: Bool { !visible.isEmpty }
+    static var openWindows: [NSWindow] { visible.compactMap { $0.window } }
     /// The product length each open wizard shows (0 for none).
-    static var productLengths: [Int] { showing.map { $0.hasProduct ? $0.preview.length : 0 } }
-    static func openAll() { showing.forEach { $0.openProduct(nil) } }
-    static func cancelAll() { showing.forEach { $0.cancel(nil) } }
+    static var productLengths: [Int] { visible.map { $0.hasProduct ? $0.preview.length : 0 } }
+    static func openAll() { visible.forEach { $0.openProduct(nil) } }
+    static func cancelAll() { visible.forEach { $0.cancel(nil) } }
 }
 
 /// A polymerase's cycling: the temperatures and times its maker suggests,
