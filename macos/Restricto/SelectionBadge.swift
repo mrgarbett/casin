@@ -48,8 +48,10 @@ final class SelectionBadge {
         let start = document.selectionStart + 1
         var end = document.selectionStart + length
         if end > n { end -= n }
-        var parts = ["\(start.formatted())–\(end.formatted())", "\(length.formatted()) bp"]
-        if length <= maxTmLength {
+        var parts = [length == 1 ? start.formatted() : "\(start.formatted())–\(end.formatted())",
+                     "\(length.formatted()) bp"]
+        // Below 8 bases the Tm formula means nothing (it goes negative).
+        if length >= 8, length <= maxTmLength {
             var check = OCPrimerCheck()
             _ = takeString(oc_primer_check(document.selectedBases, &check))
             if !check.tm.isNaN { parts.append(String(format: "Tm %.1f °C", check.tm)) }

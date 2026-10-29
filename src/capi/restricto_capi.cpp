@@ -112,7 +112,7 @@ struct OCDocument {
     Document doc;
     OCChangeCallback cb = nullptr;
     void *ctx = nullptr;
-    std::string scratch1, scratch2;   // backing for const char * results
+    std::string scratch1, scratch2, scratch3, scratch4;   // backing for const char * results
 };
 
 struct OCMapLayout {
@@ -169,6 +169,18 @@ std::set<std::string> typeSet(const char *list)
 
 } // namespace
 
+namespace {
+// A site from oc_primer_sites in the core's terms.
+PrimerSite coreSite(const OCPrimerSite &s)
+{
+    PrimerSite p;
+    p.binding = {s.start, s.start + s.length};
+    p.strand = s.strand == OC_STRAND_REVERSE ? Strand::Reverse : Strand::Forward;
+    p.mismatches = s.mismatches;
+    return p;
+}
+}
+
 extern "C" {
 
 const char *oc_version(void) { return RESTRICTO_VERSION; }
@@ -187,6 +199,7 @@ OCDocument *oc_document_new(void)
     d->doc.onSelectionChanged([d] { if (d->cb) d->cb(d->ctx, OC_CHANGED_SELECTION); });
     d->doc.onEnzymesChanged([d] { if (d->cb) d->cb(d->ctx, OC_CHANGED_ENZYMES); });
     d->doc.onHistoryChanged([d] { if (d->cb) d->cb(d->ctx, OC_CHANGED_HISTORY); });
+    d->doc.onPendingChanged([d] { if (d->cb) d->cb(d->ctx, OC_CHANGED_PENDING); });
     return d;
 }
 
@@ -232,6 +245,16 @@ bool oc_document_save(OCDocument *doc, const char *path, int format, char **erro
         doc->doc.setPath(path);
         doc->doc.markSaved();
     }
+    return true;
+}
+
+bool oc_document_copy(const OCDocument *src, OCDocument *out)
+{
+    if (!src || !out)
+        return false;
+    out->doc.setSequence(src->doc.sequence());
+    out->doc.markUnsaved();
+    out->doc.setSelection(src->doc.selection());
     return true;
 }
 
@@ -406,6 +429,10 @@ bool oc_document_primer(OCDocument *doc, int index, OCPrimerInfo *out)
     out->start = p.binding.start;
     out->length = p.binding.length();
     out->strand = p.strand == Strand::Reverse ? OC_STRAND_REVERSE : OC_STRAND_FORWARD;
+    doc->scratch3 = p.color;
+    out->color = doc->scratch3.c_str();
+    doc->scratch4 = p.description;
+    out->description = doc->scratch4.c_str();
     return true;
 }
 
@@ -436,6 +463,106 @@ int oc_document_add_primer_sequence(OCDocument *doc, const char *name, const cha
     doc->doc.addPrimers({p}, "Add Primer");
     return int(doc->doc.sequence().primers.size()) - 1;
 }
+
+int oc_primer_sites(const OCDocument *doc, const char *bases, OCPrimerSite *out, int max)
+{
+    const std::string b = cleanBases(cleanPrimerBases(bases ? bases : ""));
+    if (b.empty())
+        return 0;
+    const std::vector<PrimerSite> sites = findPrimerSites(doc->doc.sequence(), b);
+    for (int i = 0; out && i < max && i < int(sites.size()); ++i)
+        out[i] = {sites[size_t(i)].binding.start, sites[size_t(i)].binding.length(),
+                  sites[size_t(i)].strand == Strand::Reverse ? OC_STRAND_REVERSE : OC_STRAND_FORWARD,
+                  sites[size_t(i)].mismatches};
+    return int(sites.size());
+}
+
+namespace {
+// A primer at a site from oc_primer_sites, or false for an empty primer or bad site.
+bool primerAt(const OCDocument *doc, const char *name, const char *bases, const char *color,
+              const char *description, const OCPrimerSite *site, Primer *out)
+{
+    const std::string typed = cleanPrimerBases(bases ? bases : "");
+    const int n = doc->doc.sequence().length();
+    if (typed.empty() || !site || site->length <= 0 || site->start < 0 || site->start + site->length > n
+        || site->length > int(typed.size()))
+        return false;
+    out->name = name && *name ? name : "primer";
+    out->bases = typed;
+    out->binding = {site->start, site->start + site->length};
+    out->strand = site->strand == OC_STRAND_REVERSE ? Strand::Reverse : Strand::Forward;
+    out->color = color ? color : "";
+    out->description = description ? description : "";
+    return true;
+}
+}
+
+int oc_document_add_primer_at(OCDocument *doc, const char *name, const char *bases, const char *color,
+                              const char *description, const OCPrimerSite *site)
+{
+    Primer p;
+    if (!primerAt(doc, name, bases, color, description, site, &p))
+        return -1;
+    doc->doc.addPrimers({p}, "Add Primer");
+    return int(doc->doc.sequence().primers.size()) - 1;
+}
+
+bool oc_document_set_pending_primer(OCDocument *doc, const char *name, const char *bases, const char *color,
+                                    const OCPrimerSite *site)
+{
+    Primer p;
+    if (!primerAt(doc, name, bases, color, nullptr, site, &p)) {
+        doc->doc.clearPendingPrimer();
+        return false;
+    }
+    doc->doc.setPendingPrimer(p);
+    return true;
+}
+
+void oc_document_clear_pending_primer(OCDocument *doc) { doc->doc.clearPendingPrimer(); }
+
+char *oc_primer_fit_tm(const OCDocument *doc, const char *bases, const OCPrimerSite *site, double target_tm,
+                       OCPrimerSite *fitted)
+{
+    const std::string primer = cleanPrimerBases(bases ? bases : "");
+    if (!site) {
+        if (fitted)
+            *fitted = {};
+        return dupString(primer);
+    }
+    PrimerSite out;
+    const std::string result = fitAnnealingToTm(doc->doc.sequence(), primer, coreSite(*site), target_tm, &out);
+    if (fitted)
+        *fitted = {out.binding.start, out.binding.length(),
+                   out.strand == Strand::Reverse ? OC_STRAND_REVERSE : OC_STRAND_FORWARD, site->mismatches};
+    return dupString(result);
+}
+
+int oc_pcr_product_length(const OCDocument *doc, const OCPrimerSite *a, int tail_a, const OCPrimerSite *b,
+                          int tail_b)
+{
+    if (!a || !b)
+        return -1;
+    return pcrProductLength(doc->doc.sequence(), coreSite(*a), tail_a, coreSite(*b), tail_b);
+}
+
+void oc_primer_part_frame(const OCDocument *doc, const OCPrimerSite *site, int tail_length, int part_start,
+                          int part_length, bool part_forward, OCFrameCheck *out)
+{
+    if (!out)
+        return;
+    *out = {};
+    if (!site)
+        return;
+    const FrameCheck f =
+        checkPartFrame(doc->doc.sequence(), coreSite(*site), tail_length, part_start, part_length, part_forward);
+    out->applies = f.applies;
+    out->against_cds = f.againstCds;
+    out->in_frame = f.inFrame;
+    out->fix = f.fix;
+    std::snprintf(out->cds, sizeof out->cds, "%s", f.cds.c_str());
+}
+bool oc_document_has_pending_primer(const OCDocument *doc) { return doc->doc.hasPendingPrimer(); }
 
 int oc_document_enzyme_count(const OCDocument *doc) { return int(doc->doc.enzymes().size()); }
 
@@ -863,7 +990,7 @@ OCMapLayout *oc_map_layout_new(const OCDocument *doc, double width, double heigh
 {
     CallbackMeasurer tm(measure, context);
     auto *l = new OCMapLayout;
-    l->layout = std::make_unique<view::MapLayout>(doc->doc.sequence(), doc->doc.visibleSites(),
+    l->layout = std::make_unique<view::MapLayout>(doc->doc.displaySequence(), doc->doc.visibleSites(),
                                                   dark ? view::Theme::darkTheme() : view::Theme::light(), tm,
                                                   width, height);
     return l;
@@ -888,7 +1015,7 @@ OCMapLayout *oc_map_layout_new_frames(const OCDocument *doc, double width, doubl
     opt.hiddenTypes = typeSet(hidden_types);
     opt.frames = frames;
     auto *l = new OCMapLayout;
-    l->layout = std::make_unique<view::MapLayout>(doc->doc.sequence(), doc->doc.visibleSites(),
+    l->layout = std::make_unique<view::MapLayout>(doc->doc.displaySequence(), doc->doc.visibleSites(),
                                                   dark ? view::Theme::darkTheme() : view::Theme::light(), tm, width,
                                                   height, opt);
     return l;
@@ -936,7 +1063,7 @@ OCSeqLayout *oc_seq_layout_new_frames(const OCDocument *doc, double width, bool 
 {
     CallbackMeasurer tm(measure, context);
     auto *l = new OCSeqLayout;
-    l->layout = std::make_unique<view::SequenceLayout>(doc->doc.sequence(), doc->doc.visibleSites(),
+    l->layout = std::make_unique<view::SequenceLayout>(doc->doc.displaySequence(), doc->doc.visibleSites(),
                                                        dark ? view::Theme::darkTheme() : view::Theme::light(), tm,
                                                        width, show_complement, frames, doc->doc.reads());
     return l;
@@ -957,7 +1084,7 @@ OCSeqLayout *oc_seq_layout_new_options(const OCDocument *doc, double width, bool
         opt.hiddenTypes = typeSet(options->hidden_types);
     }
     auto *l = new OCSeqLayout;
-    l->layout = std::make_unique<view::SequenceLayout>(doc->doc.sequence(), doc->doc.visibleSites(),
+    l->layout = std::make_unique<view::SequenceLayout>(doc->doc.displaySequence(), doc->doc.visibleSites(),
                                                        dark ? view::Theme::darkTheme() : view::Theme::light(), tm,
                                                        width, show_complement, opt, doc->doc.reads());
     return l;

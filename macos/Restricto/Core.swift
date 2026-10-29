@@ -11,6 +11,8 @@ enum Change {
     static let selection = Int32(OC_CHANGED_SELECTION)
     static let enzymes = Int32(OC_CHANGED_ENZYMES)
     static let history = Int32(OC_CHANGED_HISTORY)
+    /// The primer being added was drawn or dropped (see PrimerEditor).
+    static let pending = Int32(OC_CHANGED_PENDING)
 }
 
 struct FeatureInfo {

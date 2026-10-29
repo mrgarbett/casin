@@ -9,10 +9,9 @@ import UniformTypeIdentifiers
 /// Enzymes/Features/Primers panel on the right. Find and view controls sit in
 /// a unified toolbar and a status line.
 ///
-/// Ventura through Sequoia get the classic layout: a vibrant sidebar and a flat
-/// status line under the content. macOS 26 adds Liquid Glass (see Glass.swift):
-/// the status line becomes glass capsules floating over the middle, which split
-/// in two while there is a position or selection to show.
+/// The status is Liquid Glass capsules floating over the middle (see
+/// Glass.swift), which split in two while there is a position or selection
+/// to show.
 final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSMenuItemValidation {
     private let core: CoreDocument
     private let mapView: MapView
@@ -26,8 +25,6 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private var inspectorItem: NSSplitViewItem?
     private var detailItem: NSSplitViewItem?
     private var splitController: NSSplitViewController?
-    /// macOS 26: the status floats over the middle, so the sequence there scrolls clear of it.
-    private var floatsStatus = false
     private let status = NSTextField(labelWithString: "")
     /// View toggles beside the status: complement strand, translation, and
     /// enzymes and features on the map.
@@ -39,7 +36,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private var findBar: NSView?
     private var findBarBottom: NSLayoutConstraint?
     private var findBarCentre: NSLayoutConstraint?
-    /// The status's second capsule (macOS 26): the caret or selection, and the
+    /// The status's second capsule: the caret or selection, and the
     /// base under the mouse. Hidden while there is nothing to show.
     private var infoCapsule: NSView?
     /// The base under the mouse in the sequence or on the map, or -1.
@@ -53,7 +50,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private var pillMaxWidth: NSLayoutConstraint?
     /// Map | sequence, or map over sequence (View > Stack Map Above Sequence).
     private let split = MapSplitView()
-    /// The floating status capsule (macOS 26), and its bottom edge: under the
+    /// The floating status capsule, and its bottom edge: under the
     /// map when the map is stacked over the sequence, else the window's bottom.
     private var statusPill: NSView?
     private var pillBottom: NSLayoutConstraint?
@@ -153,70 +150,47 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         let root = DropView(frame: NSRect(x: 0, y: 0, width: 1040, height: 820))
         detail.view = root
         detailRoot = root
-        if let pill = floatingStatus() {
-            // macOS 26: content fills the pane below the toolbar; the status
-            // floats over the bottom of the sequence (or of the map).
-            let content = split
-            for v in [content, pill] {
-                v.translatesAutoresizingMaskIntoConstraints = false
-                root.addSubview(v)
-            }
-            floatsStatus = true
-            scroll.automaticallyAdjustsContentInsets = false
-            // Centred in the middle, so it sits centred below the map.
-            NSLayoutConstraint.activate([
-                content.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-                content.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-                content.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
-                content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            ])
-            // Shifted as the map is, which leaves room for the panel's pill on
-            // the right. The edges stay inside the visible middle: on a narrow
-            // middle the status text truncates instead of the pill running
-            // under the sidebar or the panel pill.
-            // The max width (updatePillMaxWidth) is what keeps it inside; these
-            // guards stay below the split view's holding priority, so the pill
-            // never raises the middle's minimum width, and the window's with it.
-            let centre = pill.centerXAnchor.constraint(equalTo: root.safeAreaLayoutGuide.centerXAnchor,
-                                                       constant: -Self.panelPillRoom / 2)
-            centre.priority = .defaultHigh
-            let leading = pill.leadingAnchor.constraint(greaterThanOrEqualTo: root.safeAreaLayoutGuide.leadingAnchor,
-                                                        constant: 8)
-            let trailing = pill.trailingAnchor.constraint(lessThanOrEqualTo: root.safeAreaLayoutGuide.trailingAnchor,
-                                                          constant: -8 - Self.panelPillRoom)
-            leading.priority = .defaultLow - 1
-            trailing.priority = .defaultLow - 1
-            NSLayoutConstraint.activate([centre, leading, trailing])
-            root.postsFrameChangedNotifications = true
-            NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: root,
-                                                   queue: .main) { [weak self] _ in
-                DispatchQueue.main.async { self?.updatePillMaxWidth() }
-            }
-            statusPill = pill
-            pillMaxWidth = pill.widthAnchor.constraint(lessThanOrEqualToConstant: 400)
-            pillMaxWidth?.isActive = true
-        } else {
-            // Ventura to Sequoia: content below the toolbar, flat status line under it.
-            let statusRow = NSStackView(views: [makeToggles(), status])
-            statusRow.spacing = 10
-            let stack = NSStackView(views: [split, statusRow])
-            stack.orientation = .vertical
-            stack.spacing = 4
-            stack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 6, right: 0)
-            stack.setHuggingPriority(.defaultLow, for: .vertical)
-            split.setContentHuggingPriority(.defaultLow, for: .vertical)
-            stack.translatesAutoresizingMaskIntoConstraints = false
-            root.addSubview(stack)
-            NSLayoutConstraint.activate([
-                stack.leadingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.leadingAnchor),
-                stack.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor),
-                stack.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
-                stack.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-                split.widthAnchor.constraint(equalTo: stack.widthAnchor),
-                statusRow.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: 8),
-                statusRow.trailingAnchor.constraint(lessThanOrEqualTo: stack.trailingAnchor, constant: -12),
-            ])
+        // Content fills the pane below the toolbar; the status floats
+        // over the bottom of the sequence (or of the map).
+        let pill = floatingStatus()
+        let content = split
+        for v in [content, pill] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(v)
         }
+        scroll.automaticallyAdjustsContentInsets = false
+        // Centred in the middle, so it sits centred below the map.
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            content.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+            content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
+        // Shifted as the map is, which leaves room for the panel's pill on
+        // the right. The edges stay inside the visible middle: on a narrow
+        // middle the status text truncates instead of the pill running
+        // under the sidebar or the panel pill.
+        // The max width (updatePillMaxWidth) is what keeps it inside; these
+        // guards stay below the split view's holding priority, so the pill
+        // never raises the middle's minimum width, and the window's with it.
+        let centre = pill.centerXAnchor.constraint(equalTo: root.safeAreaLayoutGuide.centerXAnchor,
+                                                   constant: -Self.panelPillRoom / 2)
+        centre.priority = .defaultHigh
+        let leading = pill.leadingAnchor.constraint(greaterThanOrEqualTo: root.safeAreaLayoutGuide.leadingAnchor,
+                                                    constant: 8)
+        let trailing = pill.trailingAnchor.constraint(lessThanOrEqualTo: root.safeAreaLayoutGuide.trailingAnchor,
+                                                      constant: -8 - Self.panelPillRoom)
+        leading.priority = .defaultLow - 1
+        trailing.priority = .defaultLow - 1
+        NSLayoutConstraint.activate([centre, leading, trailing])
+        root.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: root,
+                                               queue: .main) { [weak self] _ in
+            DispatchQueue.main.async { self?.updatePillMaxWidth() }
+        }
+        statusPill = pill
+        pillMaxWidth = pill.widthAnchor.constraint(lessThanOrEqualToConstant: 400)
+        pillMaxWidth?.isActive = true
 
         // The panel's pill floats at the top right of the middle: at the
         // window's edge while the panel is hidden, and it slides left with the
@@ -234,6 +208,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         let edit: (Int) -> Void = { [weak self] index in self?.editFeature(at: index) }
         inspector.onEditFeature = edit
         sequenceView.onEditFeature = edit
+        sequenceView.onAddPrimer = { [weak self] in self?.addPrimer(nil) }
         mapView.onEditFeature = edit
         inspector.onPick = { [weak self] _, wasShowing in
             guard let item = self?.inspectorItem else { return }
@@ -341,8 +316,10 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         // The floating status sits under the map when the map is stacked over
         // the sequence, else at the bottom, where the sequence scrolls clear of it.
         let statusUnderMap = mapStacked && !mapHidden
-        let statusOverSequence = floatsStatus && !sequenceInPanel && !statusUnderMap
+        let statusOverSequence = !sequenceInPanel && !statusUnderMap
         sequenceScroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: statusOverSequence ? 52 : 0, right: 0)
+        // Under the map, the map's labels keep clear of it.
+        mapView.bottomInset = statusUnderMap ? 46 : 0
         if let pill = statusPill, let root = detailRoot {
             pillBottom?.isActive = false
             pillBottom = statusUnderMap
@@ -391,6 +368,12 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         inspector.select(pane)
     }
 
+    /// Opens the right panel on Primers with a new primer's inputs.
+    func beginAddingPrimer(bases: String) {
+        if let item = inspectorItem, item.isCollapsed { item.animator().isCollapsed = false }
+        inspector.beginAddingPrimer(bases: bases)
+    }
+
     /// The widest the status pill may be: the middle less the panel pill's room
     /// and a margin. Called after layout, never from inside it, and the
     /// constant changes only when the width really did.
@@ -400,13 +383,12 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         if abs(limit.constant - width) >= 1 { limit.constant = width }
     }
 
-    /// The status as glass capsules, or nil before macOS 26: the view toggles
+    /// The status as glass capsules: the view toggles
     /// in one, and beside it, while there is something to show, a second with
     /// the caret or selection (positions, length, GC, Tm) and the base under
     /// the mouse. The two sit in a glass container, so the second splits off
     /// the first when it appears and merges back into it when it goes.
-    private func floatingStatus() -> NSView? {
-        guard Glass.isAvailable else { return nil }
+    private func floatingStatus() -> NSView {
         let togglesInner = NSView()
         let toggles = makeToggles()
         toggles.translatesAutoresizingMaskIntoConstraints = false
@@ -424,8 +406,8 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             status.trailingAnchor.constraint(equalTo: infoInner.trailingAnchor, constant: -14),
             status.centerYAnchor.constraint(equalTo: infoInner.centerYAnchor),
         ])
-        guard let togglesCapsule = Glass.capsule(around: togglesInner, height: 30),
-              let info = Glass.capsule(around: infoInner, height: 30) else { return nil }
+        let togglesCapsule = Glass.capsule(around: togglesInner, height: 30)
+        let info = Glass.capsule(around: infoInner, height: 30)
         info.isHidden = true
         infoCapsule = info
         let row = NSStackView(views: [togglesCapsule, info])
@@ -439,10 +421,10 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         status.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         // Secondary grey washes out over the sequence text behind the glass.
         status.textColor = .labelColor
-        return Glass.mergingContainer(around: row, spacing: 8) ?? row
+        return Glass.mergingContainer(around: row, spacing: 8)
     }
 
-    /// Small icon toggles for the status pill (or the status row before macOS 26).
+    /// Small icon toggles for the status pill.
     private func makeToggles() -> NSStackView {
         let entries = [("Complement strand", "arrow.left.arrow.right"),
                        ("Translation of open reading frames (green forward, red reverse)", "textformat"),
@@ -535,7 +517,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     }
 
     /// The status: a Find message, or the caret or selection and the base under
-    /// the mouse. On macOS 26 the second capsule shows only while there is text.
+    /// the mouse. The second capsule shows only while there is text.
     private func updateStatus() {
         var parts: [String] = []
         if let message = statusMessage {
@@ -629,20 +611,21 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             updateTitle()
             return item
         case actionsItem:
-            let entries = [("Undo", "arrow.uturn.backward", "Undo the last edit (⌘Z)"),
-                           ("Redo", "arrow.uturn.forward", "Redo (⇧⌘Z)"),
-                           ("Save", "square.and.arrow.down", "Save (⌘S)"),
-                           ("Export", "square.and.arrow.up", "Export the map, or the sequence as GenBank or FASTA")]
-            let images = entries.map {
-                NSImage(systemSymbolName: $0.1, accessibilityDescription: $0.0) ?? NSImage(size: NSSize(width: 16, height: 16))
+            // Plain buttons in one group, so they share a capsule the way the
+            // toggles on the right do, without a segmented control's dividers.
+            let entries: [(String, String, String, Selector)] = [
+                ("Undo", "arrow.uturn.backward", "Undo the last edit (⌘Z)", #selector(undoEdit(_:))),
+                ("Redo", "arrow.uturn.forward", "Redo (⇧⌘Z)", #selector(redoEdit(_:))),
+                ("Save", "square.and.arrow.down", "Save (⌘S)", #selector(saveFromToolbar(_:))),
+                ("Export", "square.and.arrow.up", "Export the map, or the sequence as GenBank or FASTA",
+                 #selector(exportFromToolbar(_:))),
+            ]
+            let group = NSToolbarItemGroup(itemIdentifier: id)
+            group.subitems = entries.map {
+                button(NSToolbarItem.Identifier("actions.\($0.0)"), label: $0.0, help: $0.2, symbol: $0.1, action: $0.3)
             }
-            let group = NSToolbarItemGroup(itemIdentifier: id, images: images, selectionMode: .momentary,
-                                           labels: entries.map { $0.0 }, target: self,
-                                           action: #selector(actionsClicked(_:)))
-            group.controlRepresentation = .expanded
             group.label = "Actions"
             group.paletteLabel = "Undo, Redo, Save, Export"
-            for (sub, entry) in zip(group.subitems, entries) { sub.toolTip = entry.2 }
             return group
         case inspectorToolbarItem:
             return toggle(id, label: "Panel", help: "Show or hide the right panel",
@@ -661,14 +644,10 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         }
     }
 
-    @objc private func actionsClicked(_ sender: NSToolbarItemGroup) {
-        switch sender.selectedIndex {
-        case 0: undoEdit(sender)
-        case 1: redoEdit(sender)
-        case 2: (document as? NSDocument)?.save(sender)
-        case 3: exportMenu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
-        default: break
-        }
+    @objc private func saveFromToolbar(_ sender: Any?) { (document as? NSDocument)?.save(sender) }
+
+    @objc private func exportFromToolbar(_ sender: Any?) {
+        exportMenu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 
     /// A toolbar button for something that is on or off; refreshToolbarToggles
@@ -686,7 +665,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private func refreshToolbarToggles() {
         let on: [NSToolbarItem.Identifier: Bool] = [
             mapItem: !mapHidden, layoutItem: mapStacked,
-            inspectorToolbarItem: !(inspectorItem?.isCollapsed ?? true),
+            inspectorToolbarItem: !(inspectorItem?.isCollapsed ?? true) && !inspectorIsZeroWidth,
             complementItem: sequenceView.showComplement,
         ]
         for (id, entry) in toolbarToggles {
@@ -698,7 +677,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         }
     }
 
-    /// A plain bordered toolbar button. On macOS 26 the system groups these into glass.
+    /// A plain bordered toolbar button; the system groups these into glass.
     private func button(_ id: NSToolbarItem.Identifier, label: String, help: String, symbol: String,
                         action: Selector) -> NSToolbarItem {
         let item = NSToolbarItem(itemIdentifier: id)
@@ -773,27 +752,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             searchField.trailingAnchor.constraint(equalTo: inner.trailingAnchor, constant: -8),
             searchField.centerYAnchor.constraint(equalTo: inner.centerYAnchor),
         ])
-        let bar: NSView
-        if let glass = Glass.capsule(around: inner, height: 38) {
-            bar = glass
-        } else {
-            // Before macOS 26: a rounded vibrant panel.
-            let panel = NSVisualEffectView()
-            panel.material = .popover
-            panel.state = .active
-            panel.wantsLayer = true
-            panel.layer?.cornerRadius = 10
-            inner.translatesAutoresizingMaskIntoConstraints = false
-            panel.addSubview(inner)
-            NSLayoutConstraint.activate([
-                inner.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
-                inner.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
-                inner.topAnchor.constraint(equalTo: panel.topAnchor),
-                inner.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
-                panel.heightAnchor.constraint(equalToConstant: 38),
-            ])
-            bar = panel
-        }
+        let bar = Glass.capsule(around: inner, height: 38)
         bar.translatesAutoresizingMaskIntoConstraints = false
         bar.isHidden = true
         pane.addSubview(bar)
@@ -836,7 +795,25 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     /// responder chain and never retitles the menu item.
     @objc func toggleInspectorPanel(_ sender: Any?) {
         guard let item = inspectorItem else { return }
+        if inspectorIsZeroWidth {
+            showZeroWidthInspector()
+            return
+        }
         item.animator().isCollapsed = !item.isCollapsed
+    }
+
+    /// The split view can restore the panel open but 0 points wide: not
+    /// collapsed, so the menu says Hide, yet nothing shows.
+    private var inspectorIsZeroWidth: Bool {
+        guard let item = inspectorItem, !item.isCollapsed else { return false }
+        return item.viewController.view.frame.width < 1
+    }
+
+    private func showZeroWidthInspector() {
+        guard let item = inspectorItem, let split = splitController?.splitView,
+              split.arrangedSubviews.count == 3 else { return }
+        let width = max(item.minimumThickness, 300)
+        split.setPosition(split.bounds.width - width - split.dividerThickness, ofDividerAt: 1)
     }
 
     @objc func chooseBrowserFolder(_ sender: Any?) {
@@ -912,7 +889,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             item.state = mapStacked ? .on : .off
             return true
         case #selector(toggleInspectorPanel(_:)):
-            item.title = inspectorItem?.isCollapsed == true ? "Show Inspector" : "Hide Inspector"
+            item.title = inspectorItem?.isCollapsed == true || inspectorIsZeroWidth ? "Show Inspector" : "Hide Inspector"
             return true
         case #selector(setFrames(_:)):
             item.state = core.frames == item.tag ? .on : .off

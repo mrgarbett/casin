@@ -852,6 +852,8 @@ static void testSnapGeneWriter()
     cds.qualifiers = {{"codon_start", "1"}, {"note", "first"}, {"note", "x < y"}};
     s.features = {cds, feat("wrap", {{22, 26}, {0, 3}}, Strand::Reverse), feat("plain", {{5, 9}}, Strand::None)};
     s.primers = {{"fwd", "ATGAAACCC", {0, 9}, Strand::Forward}, {"rev", "CATGCATGC", {17, 26}, Strand::Reverse}};
+    s.primers[1].color = "#ff8800";
+    s.primers[1].description = "adds a <NotI> site & a tail";
 
     const std::string data = writeSnapGene(s);
     CHECK(looksLikeSnapGene(data));
@@ -876,7 +878,23 @@ static void testSnapGeneWriter()
         CHECK(r.primers[1].binding == Range({17, 26}));
         CHECK(r.primers[1].strand == Strand::Reverse);
         CHECK_EQ(r.primers[0].bases, std::string("ATGAAACCC"));
+        CHECK(r.primers[0].color.empty() && r.primers[1].color == "#ff8800");
+        CHECK(r.primers[0].description.empty());
+        CHECK_EQ(r.primers[1].description, s.primers[1].description);
     }
+
+    // Packets we don't read come back on save while the bases are unchanged,
+    // and are dropped once they change (they may refer to positions).
+    std::string withExtra = data;
+    withExtra += char(99);
+    withExtra += std::string("\0\0\0\x07", 4) + "ignored";
+    Sequence e;
+    CHECK(readSnapGene(withExtra, &e, &err));
+    CHECK_EQ(e.snapgeneExtra.size(), size_t(1));
+    e.features.pop_back();
+    CHECK(writeSnapGene(e).find(std::string(1, char(99)) + std::string("\0\0\0\x07", 4) + "ignored") != std::string::npos);
+    e.bases[0] = 'C';
+    CHECK(writeSnapGene(e).find("ignored") == std::string::npos);
 }
 
 static void testPcr()
@@ -1242,6 +1260,75 @@ static void testPrimerDesign()
     CHECK(findPrimerSites(s, "GGGGGGGGGGGGGGGGGGGG").empty());
 }
 
+// Fitting a primer to a Tm, the product of two primers, and whether a part
+// in a tail lands in frame with the CDS it joins.
+static void testPrimerHelpers()
+{
+    Sequence s;
+    s.name = "p";
+    s.bases = "GCGTTGCATGCCTAGGATCCGTAACGGCATCAAGTCGACTTCAGCGTAGCATGAAACCCGGGTTTTAGTTGACCGGTACCATGCAAGCTTGCAGCAGGTCAG"
+              "CATCGATCGGCTAGCTAGGCGCGCCATCGATGGTACCTTAGCAGTCAAGGCTTACGATCGTTGCAACGTAGGCATCGGATACGTTAGCCAATGCATGCAA";
+    const int n = s.length();
+    Feature cds = feat("gene", {{60, 180}});
+    cds.type = "CDS";
+    cds.strand = Strand::Forward;
+    s.features = {cds};
+
+    // A forward primer on 60..80 and a reverse one on 160..180.
+    PrimerSite f{{60, 80}, Strand::Forward, 0}, r{{160, 180}, Strand::Reverse, 0};
+    const std::string fwd = s.bases.substr(60, 20), rev = reverseComplement(s.bases.substr(160, 20));
+    CHECK_EQ(findPrimerSites(s, fwd).front().binding, f.binding);
+
+    // Fitting keeps the tail and 3' end and moves the annealing part's 5' end.
+    PrimerSite fitted;
+    const std::string tail = "GGATCC";
+    const double tm20 = meltingTemperature(fwd);
+    const std::string hotter = fitAnnealingToTm(s, tail + fwd, f, tm20 + 8, &fitted);
+    CHECK(startsWith(hotter, tail) && hotter.size() > tail.size() + fwd.size());
+    CHECK_EQ(fitted.binding.end, 80);
+    CHECK_EQ(hotter.substr(tail.size()), s.bases.substr(size_t(fitted.binding.start), size_t(fitted.binding.length())));
+    const std::string cooler = fitAnnealingToTm(s, fwd, f, tm20 - 8, &fitted);
+    CHECK(cooler.size() < fwd.size() && cooler.size() >= 15 && fitted.binding.end == 80);
+    const std::string revHot = fitAnnealingToTm(s, rev, r, meltingTemperature(rev) + 8, &fitted);
+    CHECK(revHot.size() > rev.size() && fitted.binding.start == 160 && fitted.strand == Strand::Reverse);
+    CHECK_EQ(revHot, reverseComplement(s.bases.substr(160, size_t(fitted.binding.length()))));
+    CHECK_EQ(fitAnnealingToTm(s, fwd, f, meltingTemperature(fwd), &fitted), fwd);   // already there
+
+    // Product: from the forward primer's 5' end to the reverse one's, tails included.
+    CHECK_EQ(pcrProductLength(s, f, 0, r, 0), 120);
+    CHECK_EQ(pcrProductLength(s, r, 6, f, 18), 144);
+    CHECK_EQ(pcrProductLength(s, f, 0, f, 0), -1);
+    PrimerSite before{{20, 40}, Strand::Reverse, 0};
+    CHECK_EQ(pcrProductLength(s, f, 0, before, 0), -1);   // linear: they face away
+    s.circular = true;
+    CHECK_EQ(pcrProductLength(s, f, 0, before, 0), n - 60 + 40);
+    s.circular = false;
+
+    // His6 (18 bases) right before a forward primer at the CDS start: in frame.
+    FrameCheck fc = checkPartFrame(s, f, 18, 0, 18, true);
+    CHECK(fc.applies && fc.inFrame && fc.cds == "gene");
+    // One base between them: two more fix it.
+    fc = checkPartFrame(s, f, 19, 0, 18, true);
+    CHECK(fc.applies && !fc.inFrame && fc.fix == 2);
+    // Reverse primer at the CDS end, His6 reverse complemented in its tail: in frame.
+    fc = checkPartFrame(s, r, 18, 0, 18, false);
+    CHECK(fc.applies && fc.inFrame);
+    // The same tag not reverse complemented reads against the CDS.
+    fc = checkPartFrame(s, r, 18, 0, 18, true);
+    CHECK(fc.applies && fc.againstCds);
+    // His6 whose last base also anneals: the site starts a base before the
+    // CDS, so the junction is outside it; still in frame.
+    PrimerSite early{{f.binding.start - 1, f.binding.end}, Strand::Forward, 0};
+    fc = checkPartFrame(s, early, 17, 0, 18, true);
+    CHECK(fc.applies && fc.inFrame && fc.cds == "gene");
+    // Three spacer bases, the last annealing: still in frame.
+    fc = checkPartFrame(s, early, 20, 0, 18, true);
+    CHECK(fc.applies && fc.inFrame);
+    // No CDS where a primer joins.
+    PrimerSite outside{{200, 220}, Strand::Forward, 0};
+    CHECK(!checkPartFrame(s, outside, 18, 0, 18, true).applies);
+}
+
 static void testMutagenesis()
 {
     Sequence s;
@@ -1372,6 +1459,13 @@ static void testReferences(const std::string &dir)
     CHECK(siteStarts(puc, "HindIII") == std::vector<int>({447}));
     CHECK(bandSizes(puc, {"EcoRI"}) == std::vector<int>({2686}));
     CHECK(bandSizes(puc, {"PvuII"}) == std::vector<int>({2364, 322}));
+    // Annotate Common Features finds pUC19's origin (the pUC copy differs
+    // from pBR322's by a few bases), on the reverse strand of this record.
+    bool ori = false;
+    for (const Feature &f : findCommonFeatures(puc))
+        if (f.name == "pMB1 ori")
+            ori = f.strand == Strand::Reverse && f.ranges.size() == 1 && f.ranges[0].length() == 589;
+    CHECK(ori);
 
     // Phage lambda (RefSeq NC_001416.1): 48,502 bp, linear. EcoRI gives the
     // six bands of the lambda/EcoRI marker.
@@ -1531,6 +1625,7 @@ int main(int argc, char **argv)
     testProtein();
     testInsertionByPcr();
     testPrimerDesign();
+    testPrimerHelpers();
     testMutagenesis();
     testAlign();
     testOrfs();

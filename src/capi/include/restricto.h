@@ -28,7 +28,13 @@ typedef struct OCScene OCScene;
 typedef struct { double r, g, b, a; } OCColor;
 typedef struct { double x, y; } OCPoint;
 
-enum { OC_CHANGED_SEQUENCE = 1, OC_CHANGED_SELECTION = 2, OC_CHANGED_ENZYMES = 4, OC_CHANGED_HISTORY = 8 };
+enum {
+    OC_CHANGED_SEQUENCE = 1,
+    OC_CHANGED_SELECTION = 2,
+    OC_CHANGED_ENZYMES = 4,
+    OC_CHANGED_HISTORY = 8,
+    OC_CHANGED_PENDING = 16,   /* the pending primer was set or cleared: redraw */
+};
 enum { OC_FORMAT_GENBANK = 1, OC_FORMAT_FASTA = 2, OC_FORMAT_SNAPGENE = 3, OC_FORMAT_EMBL = 4 };
 enum { OC_STRAND_NONE = 0, OC_STRAND_FORWARD = 1, OC_STRAND_REVERSE = 2 };
 enum { OC_HIT_NONE = 0, OC_HIT_FEATURE = 1, OC_HIT_SITE = 2, OC_HIT_SEQUENCE = 3 };
@@ -55,6 +61,9 @@ bool oc_document_save(OCDocument *doc, const char *path, int format, char **erro
 /* Starts the document over with typed or pasted bases (cleaned to IUPAC).
  * The result counts as unsaved. Returns false when `bases` holds no DNA. */
 bool oc_document_new_sequence(OCDocument *doc, const char *name, const char *bases, bool circular);
+/* Copies `src`'s sequence (with its features and primers) and selection into
+ * `out`, as an unsaved document; for previews. */
+bool oc_document_copy(const OCDocument *src, OCDocument *out);
 
 bool oc_document_is_empty(const OCDocument *doc);
 const char *oc_document_name(OCDocument *doc);
@@ -159,6 +168,8 @@ typedef struct {
     int start;           /* binding site, 0-based; length 0 when it doesn't bind */
     int length;
     int strand;          /* OC_STRAND_FORWARD or OC_STRAND_REVERSE */
+    const char *color;   /* "#rrggbb", or "" for the default primer colour */
+    const char *description;
 } OCPrimerInfo;
 
 /* How the construct was made, oldest step first ("2026-10-27 PCR with ..."). */
@@ -173,6 +184,49 @@ void oc_document_remove_primer(OCDocument *doc, int index);
 /* Adds a primer by its sequence where its 3' part binds best (a 5' tail is
  * allowed); returns its index, or -1 with *error when it doesn't bind. */
 int oc_document_add_primer_sequence(OCDocument *doc, const char *name, const char *bases, char **error);
+
+typedef struct {
+    int start, length;   /* the annealing part, on the top strand, 0-based */
+    int strand;          /* OC_STRAND_FORWARD or OC_STRAND_REVERSE */
+    int mismatches;      /* in the annealing part */
+} OCPrimerSite;
+/* Where a primer (5'->3', a 5' tail allowed) anneals, best first; returns how
+ * many sites there are and fills up to `max`. */
+int oc_primer_sites(const OCDocument *doc, const char *bases, OCPrimerSite *out, int max);
+/* Adds a primer at a site from oc_primer_sites as one undo step; `color` and
+ * `description` may be NULL or "". Returns its index, or -1 for an empty
+ * primer or bad site. */
+int oc_document_add_primer_at(OCDocument *doc, const char *name, const char *bases, const char *color,
+                              const char *description, const OCPrimerSite *site);
+/* Draws a primer at a site as if it were added, while it is being designed.
+ * It isn't part of the document (not undoable, saved or listed); any change
+ * to the sequence drops it. Reports OC_CHANGED_PENDING. Returns false for an
+ * empty primer or bad site, and then clears it. */
+bool oc_document_set_pending_primer(OCDocument *doc, const char *name, const char *bases, const char *color,
+                                    const OCPrimerSite *site);
+void oc_document_clear_pending_primer(OCDocument *doc);
+bool oc_document_has_pending_primer(const OCDocument *doc);
+/* The primer with its annealing part at `site` grown or shrunk (its 5' end
+ * moving along the template; tail and 3' end kept) so the annealing part's
+ * Tm comes closest to target_tm, 15 to 40 bases. Sets *fitted. Free with
+ * oc_string_free. */
+char *oc_primer_fit_tm(const OCDocument *doc, const char *bases, const OCPrimerSite *site, double target_tm,
+                       OCPrimerSite *fitted);
+/* Length of the product of two primers at these sites, tails included, or -1
+ * when they don't face each other. */
+int oc_pcr_product_length(const OCDocument *doc, const OCPrimerSite *a, int tail_a, const OCPrimerSite *b,
+                          int tail_b);
+typedef struct {
+    bool applies;       /* a CDS meets the primer where its tail joins the annealing part */
+    bool against_cds;   /* the part reads the other way to it */
+    bool in_frame;
+    int fix;            /* bases to add between the part and the annealing part (1 or 2), else 0 */
+    char cds[64];       /* the CDS's name */
+} OCFrameCheck;
+/* Whether a part in a primer's tail (bases part_start.. from the 5' end)
+ * lands in frame with the CDS its annealing part joins. */
+void oc_primer_part_frame(const OCDocument *doc, const OCPrimerSite *site, int tail_length, int part_start,
+                          int part_length, bool part_forward, OCFrameCheck *out);
 
 /* ---- text metrics supplied by the frontend ------------------------------ */
 
