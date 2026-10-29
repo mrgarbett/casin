@@ -381,7 +381,7 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         }
         // The 3' end: its last five bases tinted, green with one to three G/C.
         if typed.count >= 5 {
-            let clamp = Int(check.clampGC)
+            let clamp = Int(check.clamp_gc)
             let good = (1...3).contains(clamp)
             lines.append("3′ end …\(typed.suffix(5).uppercased()): \(clamp) G/C" + (good ? " ✓" : ""))
             sequenceText.threePrimeTint = good ? .systemGreen : .systemOrange

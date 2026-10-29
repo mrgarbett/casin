@@ -169,6 +169,18 @@ std::set<std::string> typeSet(const char *list)
 
 } // namespace
 
+namespace {
+// A site from oc_primer_sites in the core's terms.
+PrimerSite coreSite(const OCPrimerSite &s)
+{
+    PrimerSite p;
+    p.binding = {s.start, s.start + s.length};
+    p.strand = s.strand == OC_STRAND_REVERSE ? Strand::Reverse : Strand::Forward;
+    p.mismatches = s.mismatches;
+    return p;
+}
+}
+
 extern "C" {
 
 const char *oc_version(void) { return RESTRICTO_VERSION; }
@@ -508,17 +520,6 @@ bool oc_document_set_pending_primer(OCDocument *doc, const char *name, const cha
 }
 
 void oc_document_clear_pending_primer(OCDocument *doc) { doc->doc.clearPendingPrimer(); }
-
-namespace {
-PrimerSite coreSite(const OCPrimerSite &s)
-{
-    PrimerSite p;
-    p.binding = {s.start, s.start + s.length};
-    p.strand = s.strand == OC_STRAND_REVERSE ? Strand::Reverse : Strand::Forward;
-    p.mismatches = s.mismatches;
-    return p;
-}
-}
 
 char *oc_primer_fit_tm(const OCDocument *doc, const char *bases, const OCPrimerSite *site, double target_tm,
                        OCPrimerSite *fitted)
