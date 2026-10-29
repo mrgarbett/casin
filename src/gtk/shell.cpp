@@ -472,7 +472,10 @@ gboolean Shell::onClosePage(AdwTabView *view, AdwTabPage *page, gpointer)
 {
     auto *w = static_cast<Window *>(g_object_get_data(G_OBJECT(adw_tab_page_get_child(page)), "oc-page"));
     // Asks first when there are unsaved changes, and closes the tab later.
-    adw_tab_view_close_page_finish(view, page, !w || w->confirmClose(false));
+    const bool close = !w || w->confirmClose(false);
+    if (close && w)
+        w->closeTools();
+    adw_tab_view_close_page_finish(view, page, close);
     return GDK_EVENT_STOP;
 }
 
@@ -506,6 +509,8 @@ gboolean Shell::onCloseRequest(GtkWindow *, gpointer p)
     for (Window *w : self->pages())
         if (!w->confirmClose(true))
             return TRUE;   // asking; the answer closes the window again
+    for (Window *w : self->pages())
+        w->closeTools();
     self->m_closing = true;
     return FALSE;
 }
@@ -888,7 +893,7 @@ void Shell::rebuildMenu()
     addExp(cloneDigest, "Choose Enzymes…", "win.choose-enzymes");
     g_menu_append_section(cloneMenu, nullptr, G_MENU_MODEL(cloneDigest));
     GMenu *cloneCore = g_menu_new();
-    g_menu_append(cloneCore, "PCR Product…", "win.pcr");
+    g_menu_append(cloneCore, "PCR…", "win.pcr");
     g_menu_append(cloneCore, "Insertion by PCR…", "win.insertion");
     g_menu_append(cloneCore, "Gibson Assembly…", "win.gibson");
     g_menu_append_section(cloneMenu, nullptr, G_MENU_MODEL(cloneCore));

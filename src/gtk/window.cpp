@@ -244,6 +244,8 @@ Window::Window(Shell *shell) : m_shell(shell), m_window(shell->widget())
     m_doc.onSequenceChanged([this] {
         if (m_primerEditor)
             m_primerEditor->sequenceChanged();
+        if (m_pcr)
+            m_pcr->templateChanged();
         rebuildFeatureList();
         rebuildPrimerList();
         rebuildEnzymeList();
@@ -276,6 +278,7 @@ Window::~Window()
     // Before the views: dropping the editor clears its preview, which they draw.
     if (m_endPrimerIdle)
         g_source_remove(m_endPrimerIdle);
+    closeTools();
     m_primerEditor.reset();
     if (m_panelAnim) {
         g_signal_handlers_disconnect_by_data(m_panelAnim, this);
@@ -726,8 +729,19 @@ GtkWidget *Window::buildPanel()
                                  static_cast<Window *>(p)->beginAddingPrimer("");
                              }),
                              this);
+    GtkWidget *pcr = gtk_button_new_with_label("PCR…");
+    gtk_widget_set_tooltip_text(pcr, "Make a PCR product from two of these primers");
+    gtk_widget_set_margin_end(pcr, 10);
+    gtk_widget_set_margin_top(pcr, 10);
+    gtk_widget_set_margin_bottom(pcr, 4);
+    gtk_widget_set_hexpand(pcr, TRUE);
+    gtk_widget_set_halign(pcr, GTK_ALIGN_END);
+    gtk_actionable_set_action_name(GTK_ACTIONABLE(pcr), "win.pcr");
+    GtkWidget *primerBar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_append(GTK_BOX(primerBar), addPrimer);
+    gtk_box_append(GTK_BOX(primerBar), pcr);
     GtkWidget *primerBox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_box_append(GTK_BOX(primerBox), addPrimer);
+    gtk_box_append(GTK_BOX(primerBox), primerBar);
     gtk_box_append(GTK_BOX(primerBox), pscroll);
     m_primerStack = gtk_stack_new();
     gtk_stack_add_named(GTK_STACK(m_primerStack), primerBox, "list");
@@ -1273,6 +1287,30 @@ void Window::beginAddingPrimer(const std::string &bases)
     gtk_stack_add_named(GTK_STACK(m_primerStack), m_primerEditor->widget(), "editor");
     gtk_stack_set_visible_child_name(GTK_STACK(m_primerStack), "editor");
     m_primerEditor->focus();
+}
+
+// One wizard per tab, over this window.
+void Window::openPcrWizard()
+{
+    if (m_doc.isEmpty())
+        return;
+    if (m_pcr) {
+        m_pcr->present();
+        return;
+    }
+    m_pcr = new PcrWizard(&m_doc, gtkWindow(), displayName());
+    m_pcr->onClosed = [this] { m_pcr = nullptr; };
+    m_pcr->onAddPrimer = [this] {
+        present();
+        beginAddingPrimer("");
+    };
+    m_pcr->onOpenProduct = [this](const Sequence &product) {
+        Window *w = Window::create(gtk_window_get_application(gtkWindow()));
+        w->document().setSequence(product);
+        w->document().markUnsaved();
+        w->present();
+    };
+    m_pcr->present();
 }
 
 void Window::endAddingPrimer()
@@ -1839,6 +1877,15 @@ bool Window::save(bool closeAfter)
     return false;
 }
 
+void Window::closeTools()
+{
+    if (m_pcr) {
+        m_pcr->onClosed = nullptr;
+        m_pcr->close();
+        m_pcr = nullptr;
+    }
+}
+
 bool Window::confirmClose(bool closeWindow)
 {
     if (m_closeConfirmed || !m_doc.isModified())
@@ -2123,7 +2170,7 @@ void Window::actDigest(GSimpleAction *, GVariant *, gpointer p)
 
 void Window::actPcr(GSimpleAction *, GVariant *, gpointer p)
 {
-    static_cast<Window *>(p)->pcrDialog();
+    static_cast<Window *>(p)->openPcrWizard();
 }
 
 void Window::actClone(GSimpleAction *, GVariant *, gpointer p)

@@ -28,7 +28,8 @@ add_executable(restricto
     digestdialog.cpp
     mapview.cpp
     seqview.cpp
-    primereditor.cpp)
+    primereditor.cpp
+    pcrwizard.cpp)
 target_include_directories(restricto PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(restricto PRIVATE restricto_cairo PkgConfig::GTK4 PkgConfig::ADW)
 # GLib's C macros trip -Wpedantic in C++.

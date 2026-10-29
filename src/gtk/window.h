@@ -4,6 +4,7 @@
 #include "mapview.h"
 #include "seqview.h"
 #include "primereditor.h"
+#include "pcrwizard.h"
 #include "core/abif.h"
 #include "core/seqio.h"
 #include "view/document.h"
@@ -68,6 +69,8 @@ private:
     // Asks about unsaved changes before the tab (or, with closeWindow, the
     // window) closes. True when it can close right away.
     bool confirmClose(bool closeWindow);
+    // The tab is closing: closes the windows it opened, such as the PCR wizard.
+    void closeTools();
     void finishClose();
     // Map beside the sequence (the sequence then sits in the panel), stacked
     // above it, or hidden.
@@ -185,7 +188,7 @@ private:
     // Feature dialog: index < 0 adds a feature from the selection.
     void featureDialog(int index);
     void digestDialog();
-    void pcrDialog();
+    void openPcrWizard();
     void cloningDialog();
     void goldenGateDialog();
     void gibsonDialog();
@@ -259,6 +262,7 @@ private:
     GtkWidget *m_primerStack = nullptr;
     std::unique_ptr<PrimerEditor> m_primerEditor;
     guint m_endPrimerIdle = 0;
+    PcrWizard *m_pcr = nullptr;   // owns itself; closes with this tab
     bool m_closeConfirmed = false;
     GtkWidget *m_filter = nullptr;
     GtkWidget *m_setDrop = nullptr;
