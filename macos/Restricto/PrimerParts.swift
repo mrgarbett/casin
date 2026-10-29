@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The pieces the Add Primer wizard can insert into a primer: codons, tags and
+// The pieces the primer editor can insert into a primer: codons, tags and
 // protease sites. Enzyme sites come from the document's enzyme list.
 import Foundation
 

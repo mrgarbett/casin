@@ -27,7 +27,7 @@ final class MapView: NSView {
         super.init(frame: NSRect(x: 0, y: 0, width: 520, height: 520))
         document.observe { [weak self] what in
             guard let self = self else { return }
-            if what & (Change.sequence | Change.enzymes) != 0 { self.invalidateLayout() }
+            if what & (Change.sequence | Change.enzymes | Change.pending) != 0 { self.invalidateLayout() }
             self.needsDisplay = true
         }
     }

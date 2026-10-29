@@ -1,42 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The Add Primer wizard: a window with the primer's name, description, colour
-// and bases in a sidebar, with codons, enzyme sites and tags to insert into it,
-// and in the middle a live preview of where it binds: the map and the sequence
-// with the primer drawn over it. Add puts the primer on the document as one
-// undo step.
+// Adding a primer, in the right panel's Primers pane: the primer's name,
+// description, colour and bases, with codons, enzyme sites and tags to insert
+// into it. While it binds, the window's map and sequence draw it where it
+// would go, as it will look; Add puts it on the document as one undo step.
 import AppKit
 import RestrictoCore
 
-final class PrimerWizard: NSWindowController, NSWindowDelegate, NSTextViewDelegate {
-    /// Open wizards, kept alive until their windows close.
-    private static var openWizards: [PrimerWizard] = []
+final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDelegate {
+    /// Called once the primer was added or the editor cancelled.
+    var onClose: (() -> Void)?
 
-    /// Opens a wizard for `target`, filled in with `bases` (5'->3') if given.
-    static func show(for target: CoreDocument, bases: String = "", near parent: NSWindow?) {
-        let wizard = PrimerWizard(target: target, bases: bases)
-        openWizards.append(wizard)
-        if let parent = parent, let window = wizard.window {
-            // Centred on the document window, a little lower so the title stays visible.
-            let p = parent.frame, w = window.frame
-            window.setFrameOrigin(NSPoint(x: p.midX - w.width / 2, y: max(p.minY, p.midY - w.height / 2 - 20)))
-        } else {
-            wizard.window?.center()
-        }
-        wizard.showWindow(nil)
-        wizard.window?.makeFirstResponder(wizard.sequenceText)
-    }
-
-    private let target: CoreDocument
-    /// A copy of the document the primer is tried on; the preview shows it.
-    private let preview: CoreDocument
-    private var previewHasPrimer = false
+    private let document: CoreDocument
     private var site: OCPrimerSite?
+    /// Set once the primer is added or cancelled, so later changes don't bring the preview back.
+    private var finished = false
 
     private let nameField = NSTextField(string: "")
     private let descriptionField = NSTextField(string: "")
     private let colorWell = NSColorWell(style: .minimal)
     private var colorChosen = false
     private let sequenceText = NSTextView()
+    /// The sequence box's own undo, apart from the document's.
+    private let textUndo = UndoManager()
     /// On when the bases are the reverse complement of what was typed, so the
     /// primer binds the other strand; inserts then go in reverse complemented
     /// too, so they still read on the strand they were typed on.
@@ -47,78 +32,73 @@ final class PrimerWizard: NSWindowController, NSWindowDelegate, NSTextViewDelega
     private let tagPopup = NSPopUpButton()
     private let info = NSTextField(wrappingLabelWithString: "")
     private let warnings = NSTextField(wrappingLabelWithString: "")
-    private let addButton = NSButton(title: "Add Primer", target: nil, action: nil)
+    private let addButton = NSButton(title: "Add", target: nil, action: nil)
+    private let initialBases: String
 
-    private let mapView: MapView
-    private let sequenceView: SequenceView
-    private let sequenceScroll = NSScrollView()
-    private let previewSplit = NSSplitView()
-    private var splitPositioned = false
-    private let emptyState = NSTextField(labelWithString: "Type or paste a primer to see where it binds.")
+    /// Editors showing now, for the launch check.
+    private static var showing: [PrimerEditor] = []
 
-    private init(target: CoreDocument, bases: String) {
-        self.target = target
-        let copy = CoreDocument()
-        oc_document_copy(target.handle, copy.handle)
-        copy.mapShowsEnzymes = false
-        let seqView = SequenceView(document: copy)
-        seqView.isEditable = false
-        preview = copy
-        mapView = MapView(document: copy)
-        sequenceView = seqView
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1040, height: 720),
-                              styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView],
-                              backing: .buffered, defer: false)
-        window.minSize = NSSize(width: 800, height: 520)
-        window.title = "Add Primer"
-        window.subtitle = target.name.isEmpty ? "Untitled" : target.name
-        window.toolbarStyle = .unified
-        window.toolbar = NSToolbar(identifier: "PrimerWizard")
-        window.isReleasedWhenClosed = false
-        window.tabbingMode = .disallowed
-        super.init(window: window)
-        window.delegate = self
-        buildContent()
-        sequenceText.string = bases
+    /// An editor for a new primer on `document`, filled in with `bases` (5'->3') if given.
+    init(document: CoreDocument, bases: String = "") {
+        self.document = document
+        initialBases = bases
+        super.init(nibName: nil, bundle: nil)
+        Self.showing.append(self)
+        document.observe { [weak self] what in
+            // An edit to the sequence drops the preview; find the site again,
+            // leaving the caret where the edit put it.
+            guard let self = self, !self.finished, what & Change.sequence != 0 else { return }
+            self.refresh(select: false)
+        }
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func loadView() {
+        view = buildView()
+        sequenceText.string = initialBases
         // A 5' tail is what gets added most, so start at the 5' end.
         sequenceText.setSelectedRange(NSRange(location: 0, length: 0))
         refresh()
     }
 
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+    /// Puts the cursor in the sequence box.
+    func focus() {
+        view.window?.makeFirstResponder(sequenceText)
+    }
+
+    /// Replaces the bases, as when a new selection is sent here.
+    func setBases(_ bases: String) {
+        sequenceText.string = bases
+        flipSwitch.state = .off
+        sequenceText.setSelectedRange(NSRange(location: 0, length: 0))
+        refresh()
+    }
 
     // MARK: Layout
 
-    private func buildContent() {
-        guard let window = window else { return }
-        let split = NSSplitViewController()
-        let sidebar = NSSplitViewItem(sidebarWithViewController: sidebarController())
-        sidebar.minimumThickness = 280
-        sidebar.maximumThickness = 360
-        sidebar.canCollapse = false
-        split.addSplitViewItem(sidebar)
-        let main = NSViewController()
-        main.view = previewView()
-        split.addSplitViewItem(NSSplitViewItem(viewController: main))
-        window.contentViewController = split
-        window.setContentSize(NSSize(width: 1040, height: 720))
-    }
-
-    private func sidebarController() -> NSViewController {
+    private func buildView() -> NSView {
         func heading(_ text: String) -> NSTextField {
             let label = NSTextField(labelWithString: text)
             label.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
             label.textColor = .secondaryLabelColor
             return label
         }
+        let title = NSTextField(labelWithString: "New Primer")
+        title.font = .systemFont(ofSize: NSFont.systemFontSize + 2, weight: .semibold)
+
         nameField.placeholderString = "primer"
         nameField.stringValue = nextPrimerName()
         nameField.delegate = self
+        descriptionField.placeholderString = "Optional"
+        descriptionField.delegate = self
 
         colorWell.color = NSColor(srgbRed: 0xe6 / 255.0, green: 0x61 / 255.0, blue: 0, alpha: 1)
         colorWell.target = self
         colorWell.action = #selector(colorChanged(_:))
         colorWell.toolTip = "The primer's colour on the map and sequence"
+        let colorRow = NSStackView(views: [colorWell, NSTextField(labelWithString: "Colour")])
+        colorRow.spacing = 8
 
         sequenceText.isRichText = false
         sequenceText.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
@@ -136,10 +116,7 @@ final class PrimerWizard: NSWindowController, NSWindowDelegate, NSTextViewDelega
         sequenceText.autoresizingMask = [.width]
         sequenceText.isVerticallyResizable = true
         sequenceText.textContainer?.widthTracksTextView = true
-        textScroll.heightAnchor.constraint(equalToConstant: 110).isActive = true
-
-        descriptionField.placeholderString = "Optional"
-        descriptionField.delegate = self
+        textScroll.heightAnchor.constraint(equalToConstant: 96).isActive = true
 
         flipSwitch.controlSize = .small
         flipSwitch.target = self
@@ -155,19 +132,16 @@ final class PrimerWizard: NSWindowController, NSWindowDelegate, NSTextViewDelega
         warnings.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         warnings.textColor = .systemOrange
 
-        let colorRow = NSStackView(views: [colorWell, NSTextField(labelWithString: "Colour")])
-        colorRow.spacing = 8
-
         // Codon: an amino acid, then one of its codons.
         for aa in PrimerParts.aminoAcids { aminoAcidPopup.addItem(withTitle: aa.name) }
         aminoAcidPopup.target = self
         aminoAcidPopup.action = #selector(aminoAcidChanged(_:))
         fillCodons()
         let codonRow = insertRow([aminoAcidPopup, codonPopup], action: #selector(insertCodon(_:)))
-        codonPopup.widthAnchor.constraint(equalToConstant: 108).isActive = true
+        codonPopup.widthAnchor.constraint(equalToConstant: 100).isActive = true
 
         // Enzyme site: the unambiguous sites, with how often each cuts here.
-        for e in target.enzymes.filter({ $0.site.allSatisfy { "ACGT".contains($0) } })
+        for e in document.enzymes.filter({ $0.site.allSatisfy { "ACGT".contains($0) } })
             .sorted(by: { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) {
             let cuts = e.cuts == 0 ? "doesn't cut" : "cuts \(e.cuts)×"
             enzymePopup.addItem(withTitle: "\(e.name)  \(e.site)  · \(cuts)")
@@ -185,20 +159,22 @@ final class PrimerWizard: NSWindowController, NSWindowDelegate, NSTextViewDelega
         }
         let tagRow = insertRow([tagPopup], action: #selector(insertTag(_:)))
 
-        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancel(_:)))
-        cancel.keyEquivalent = "\u{1b}"
-        addButton.target = self
-        addButton.action = #selector(accept(_:))
-        addButton.keyEquivalent = "\r"
-        addButton.bezelColor = .controlAccentColor
-        let buttons = NSStackView(views: [NSView(), cancel, addButton])
-        buttons.spacing = 8
-
         let insertHint = NSTextField(wrappingLabelWithString: "Inserts go in at the cursor, in lowercase.")
         insertHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         insertHint.textColor = .tertiaryLabelColor
 
+        // Return and Esc work from the fields, not as window-wide keys, so
+        // they don't take over the rest of the window (Find, for one).
+        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancel(_:)))
+        addButton.target = self
+        addButton.action = #selector(accept(_:))
+        addButton.bezelColor = .controlAccentColor
+        addButton.toolTip = "Add the primer (Return)"
+        let buttons = NSStackView(views: [NSView(), cancel, addButton])
+        buttons.spacing = 8
+
         let stack = NSStackView(views: [
+            title,
             heading("NAME"), nameField,
             heading("DESCRIPTION"), descriptionField,
             heading("TAG"), colorRow,
@@ -212,17 +188,17 @@ final class PrimerWizard: NSWindowController, NSWindowDelegate, NSTextViewDelega
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 6
-        for v in [nameField, descriptionField, colorRow, flipRow, codonRow, enzymeRow] as [NSView] {
+        for v in [title, nameField, descriptionField, colorRow, flipRow, codonRow, enzymeRow] as [NSView] {
             stack.setCustomSpacing(14, after: v)
         }
         stack.setCustomSpacing(18, after: warnings)
-        stack.edgeInsets = NSEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 12, right: 14)
         for v in [nameField, descriptionField, textScroll, info, warnings, codonRow, enzymeRow, tagRow,
                   insertHint] as [NSView] {
-            v.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -32).isActive = true
+            v.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24).isActive = true
         }
 
-        // The inputs scroll when the window is short; the buttons stay put.
+        // The inputs scroll when the panel is short; the buttons stay put.
         let content = FlippedView()
         stack.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(stack)
@@ -250,15 +226,13 @@ final class PrimerWizard: NSWindowController, NSWindowDelegate, NSTextViewDelega
         NSLayoutConstraint.activate([
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+            scroll.topAnchor.constraint(equalTo: root.topAnchor),
             scroll.bottomAnchor.constraint(equalTo: buttons.topAnchor, constant: -10),
-            buttons.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
-            buttons.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -16),
-            buttons.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
+            buttons.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 10),
+            buttons.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
+            buttons.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -12),
         ])
-        let controller = NSViewController()
-        controller.view = root
-        return controller
+        return root
     }
 
     /// Popups that fill the row, then an Insert button.
@@ -274,44 +248,6 @@ final class PrimerWizard: NSWindowController, NSWindowDelegate, NSTextViewDelega
         let row = NSStackView(views: popups + [insert])
         row.spacing = 6
         return row
-    }
-
-    private func previewView() -> NSView {
-        sequenceScroll.documentView = sequenceView
-        sequenceScroll.hasVerticalScroller = true
-        sequenceScroll.autohidesScrollers = true
-        sequenceScroll.drawsBackground = false
-        sequenceScroll.contentView.postsFrameChangedNotifications = true
-        NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification,
-                                               object: sequenceScroll.contentView, queue: .main) { [weak self] _ in
-            self?.sequenceView.updateSize()
-        }
-        // The map above the sequence where the primer binds.
-        previewSplit.isVertical = false
-        previewSplit.dividerStyle = .thin
-        previewSplit.addArrangedSubview(mapView)
-        previewSplit.addArrangedSubview(sequenceScroll)
-        previewSplit.setHoldingPriority(.defaultLow - 1, forSubviewAt: 0)
-
-        emptyState.textColor = .secondaryLabelColor
-        emptyState.font = .systemFont(ofSize: 15)
-        emptyState.alignment = .center
-
-        let root = NSView()
-        for v in [previewSplit, emptyState] as [NSView] {
-            v.translatesAutoresizingMaskIntoConstraints = false
-            root.addSubview(v)
-        }
-        NSLayoutConstraint.activate([
-            previewSplit.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            previewSplit.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            previewSplit.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
-            previewSplit.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            emptyState.centerXAnchor.constraint(equalTo: root.centerXAnchor),
-            emptyState.centerYAnchor.constraint(equalTo: root.centerYAnchor),
-            emptyState.widthAnchor.constraint(lessThanOrEqualTo: root.widthAnchor, constant: -40),
-        ])
-        return root
     }
 
     // MARK: Preview
@@ -333,15 +269,13 @@ final class PrimerWizard: NSWindowController, NSWindowDelegate, NSTextViewDelega
         return name.isEmpty ? "primer" : name
     }
 
-    /// Tries the primer on the copy and shows the result.
-    private func refresh() {
-        if previewHasPrimer {
-            oc_document_undo(preview.handle)
-            previewHasPrimer = false
-        }
+    /// Finds where the primer binds and draws it there on the document's views,
+    /// selecting the site (which brings it into view) when `select`.
+    private func refresh(select: Bool = true) {
+        guard !finished else { return }
         let typed = bases
         var sites = [OCPrimerSite](repeating: OCPrimerSite(), count: 8)
-        let count = typed.isEmpty ? 0 : Int(oc_primer_sites(target.handle, typed, &sites, Int32(sites.count)))
+        let count = typed.isEmpty ? 0 : Int(oc_primer_sites(document.handle, typed, &sites, Int32(sites.count)))
         site = count > 0 ? sites[0] : nil
 
         var lines: [String] = []
@@ -369,41 +303,32 @@ final class PrimerWizard: NSWindowController, NSWindowDelegate, NSTextViewDelega
             if tail > 0 { lines.append("\(tail)-nt 5′ tail") }
             if s.mismatches > 0 { warn.append("\(s.mismatches) mismatch\(s.mismatches == 1 ? "" : "es") where it anneals.") }
             if count > 1 { warn.append("Also binds \(count - 1) other place\(count == 2 ? "" : "s"); the best site is shown.") }
-            oc_document_add_primer_at(preview.handle, primerName, typed, hexColor, nil, &sites[0])
-            previewHasPrimer = true
-            preview.select(start: Int(s.start), length: Int(s.length))
-            sequenceView.scrollToPosition(Int(s.start))
-        } else if !typed.isEmpty {
-            warn.append(typed.count < 15 ? "Type at least 15 bases." : "It doesn't bind this sequence.")
-            preview.select(start: 0, length: 0)
+            oc_document_set_pending_primer(document.handle, primerName, typed, hexColor, &sites[0])
+            if select, !document.hasSelection || document.selectionStart != Int(s.start)
+                || document.selectionLength != Int(s.length) {
+                document.select(start: Int(s.start), length: Int(s.length))
+            }
+        } else {
+            oc_document_clear_pending_primer(document.handle)
+            if !typed.isEmpty {
+                warn.append(typed.count < 15 ? "Type at least 15 bases." : "It doesn't bind this sequence.")
+            } else {
+                lines.append("Type or paste a primer; the map and sequence show where it binds.")
+            }
         }
         if !checkWarnings.isEmpty {
             warn.append(contentsOf: checkWarnings.split(separator: "\n").map { String($0) })
         }
         info.stringValue = lines.joined(separator: "\n")
+        info.textColor = typed.isEmpty ? .secondaryLabelColor : .labelColor
         warnings.stringValue = warn.joined(separator: "\n")
         warnings.isHidden = warn.isEmpty
         info.isHidden = lines.isEmpty
-        let binds = site != nil
-        previewSplit.isHidden = !binds
-        if binds && !splitPositioned {
-            // The map takes a little over half the height the first time it shows.
-            splitPositioned = true
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                self.previewSplit.setPosition(self.previewSplit.bounds.height * 0.55, ofDividerAt: 0)
-            }
-        }
-        emptyState.isHidden = binds
-        if !binds {
-            emptyState.stringValue = typed.isEmpty ? "Type or paste a primer to see where it binds."
-                                                   : "No binding site yet."
-        }
-        addButton.isEnabled = binds
+        addButton.isEnabled = site != nil
     }
 
     private func nextPrimerName() -> String {
-        let names = Set(target.primers.map { $0.name })
+        let names = Set(document.primers.map { $0.name })
         var i = names.count + 1
         while names.contains("primer\(i)") { i += 1 }
         return "primer\(i)"
@@ -412,6 +337,41 @@ final class PrimerWizard: NSWindowController, NSWindowDelegate, NSTextViewDelega
     // MARK: Actions
 
     func textDidChange(_ notification: Notification) { refresh() }
+    func controlTextDidChange(_ obj: Notification) { refresh() }
+
+    func undoManager(for view: NSTextView) -> UndoManager? { textUndo }
+
+    /// Return adds the primer and Esc cancels, from the sequence box…
+    func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        handle(selector)
+    }
+
+    /// …and from the name and description fields.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        handle(selector)
+    }
+
+    private func handle(_ selector: Selector) -> Bool {
+        switch selector {
+        case #selector(NSResponder.insertNewline(_:)):
+            accept(nil)
+            return true
+        case #selector(NSResponder.cancelOperation(_:)):
+            cancel(nil)
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Edit > Undo while the editor has the focus: the sequence box's typing first.
+    @objc func undoEdit(_ sender: Any?) {
+        if textUndo.canUndo { textUndo.undo() } else { oc_document_undo(document.handle) }
+    }
+
+    @objc func redoEdit(_ sender: Any?) {
+        if textUndo.canRedo { textUndo.redo() } else { oc_document_redo(document.handle) }
+    }
 
     @objc private func colorChanged(_ sender: Any?) {
         colorChosen = true
@@ -422,8 +382,7 @@ final class PrimerWizard: NSWindowController, NSWindowDelegate, NSTextViewDelega
         // Keep the cursor on the same base of the flipped primer.
         let text = sequenceText.string
         let caret = sequenceText.selectedRange()
-        let flipped = PrimerParts.reverseComplement(text)
-        sequenceText.string = flipped
+        sequenceText.string = PrimerParts.reverseComplement(text)
         let length = (text as NSString).length
         sequenceText.setSelectedRange(NSRange(location: max(0, length - caret.location - caret.length),
                                               length: caret.length))
@@ -449,42 +408,46 @@ final class PrimerWizard: NSWindowController, NSWindowDelegate, NSTextViewDelega
     private func insert(_ bases: String?) {
         guard let bases = bases, !bases.isEmpty else { NSSound.beep(); return }
         let text = flipSwitch.state == .on ? PrimerParts.reverseComplement(bases) : bases
-        window?.makeFirstResponder(sequenceText)
-        let range = sequenceText.selectedRange()
-        sequenceText.insertText(text.lowercased(), replacementRange: range)
+        view.window?.makeFirstResponder(sequenceText)
+        sequenceText.insertText(text.lowercased(), replacementRange: sequenceText.selectedRange())
     }
 
     @objc private func accept(_ sender: Any?) {
         guard var s = site else { NSSound.beep(); return }
+        finished = true
+        oc_document_clear_pending_primer(document.handle)
         let description = descriptionField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        oc_document_add_primer_at(target.handle, primerName, bases, hexColor, description, &s)
-        target.select(start: Int(s.start), length: Int(s.length))
+        oc_document_add_primer_at(document.handle, primerName, bases, hexColor, description, &s)
+        document.select(start: Int(s.start), length: Int(s.length))
         close()
     }
 
-    @objc private func cancel(_ sender: Any?) { close() }
+    @objc private func cancel(_ sender: Any?) {
+        finished = true
+        oc_document_clear_pending_primer(document.handle)
+        close()
+    }
 
-    /// For the launch check: the open wizards' windows, and pressing Add on each.
-    static var openWindows: [NSWindow] { openWizards.compactMap { $0.window } }
-    static func acceptAll() { openWizards.forEach { $0.accept(nil) } }
-    /// Inserts the first tag (His6) at each wizard's cursor.
+    private func close() {
+        Self.showing.removeAll { $0 === self }
+        onClose?()
+    }
+
+    // MARK: Launch check
+
+    static var isAnyOpen: Bool { !showing.isEmpty }
+    /// Presses Add on each open editor.
+    static func acceptAll() { showing.forEach { $0.accept(nil) } }
+    /// Inserts the first tag (His6) at each open editor's cursor.
     static func insertFirstTag() {
-        openWizards.forEach {
+        showing.forEach {
             $0.tagPopup.selectItem(at: 0)
             $0.insertTag(nil)
         }
     }
-
-    func windowWillClose(_ notification: Notification) {
-        Self.openWizards.removeAll { $0 === self }
-    }
 }
 
-extension PrimerWizard: NSTextFieldDelegate {
-    func controlTextDidChange(_ obj: Notification) { refresh() }
-}
-
-/// Top-down coordinates, so the sidebar's inputs start at the top of their scroll view.
+/// Top-down coordinates, so the inputs start at the top of their scroll view.
 private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }

@@ -26,6 +26,10 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     private let featureTable = NSTableView()
     private let enzymeTable = NSTableView()
     private let primerTable = NSTableView()
+    /// The Primers pane: the list, or a new primer's inputs while one is being added.
+    private let primersHolder = NSView()
+    private var primerList: NSView?
+    private var primerEditor: PrimerEditor?
     private let filter = NSPopUpButton(frame: .zero, pullsDown: false)
     private let enzymeSearch = NSSearchField()
     private let onMapOnly = NSButton(checkboxWithTitle: "Only enzymes on the map", target: nil, action: nil)
@@ -201,10 +205,82 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     private func buildPrimersTab() {
         let scroll = makeTable(primerTable, columns: [("name", "Primer", 120), ("tm", "Tm", 56),
                                                       ("location", "Binds", 96)])
+        // + adds a primer (here, in the pane), − deletes the selected one.
+        func small(_ symbol: String, _ label: String, _ action: Selector) -> NSButton {
+            let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label) ?? NSImage()
+            let button = NSButton(image: image, target: self, action: action)
+            button.isBordered = false
+            button.toolTip = label
+            return button
+        }
+        let add = small("plus", "Add Primer", #selector(addPrimerClicked(_:)))
+        let remove = small("minus", "Delete Primer", #selector(removePrimerClicked(_:)))
+        let bar = NSStackView(views: [add, remove, NSView()])
+        bar.spacing = 10
+        let list = NSStackView(views: [scroll, bar])
+        list.orientation = .vertical
+        list.alignment = .leading
+        list.spacing = 4
+        list.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 8, right: 0)
+        for v in [scroll, bar] as [NSView] {
+            v.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
+        }
+        bar.edgeInsets = NSEdgeInsets(top: 0, left: 8, bottom: 0, right: 8)
+        list.translatesAutoresizingMaskIntoConstraints = false
+        primerList = list
+        primersHolder.addSubview(list)
+        pin(list, to: primersHolder)
         let item = NSTabViewItem(identifier: Pane.primers.rawValue)
         item.label = "Primers"
-        item.view = scroll
+        item.view = primersHolder
         tabs.addTabViewItem(item)
+    }
+
+    private func pin(_ view: NSView, to holder: NSView) {
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: holder.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: holder.trailingAnchor),
+            view.topAnchor.constraint(equalTo: holder.topAnchor),
+            view.bottomAnchor.constraint(equalTo: holder.bottomAnchor),
+        ])
+    }
+
+    @objc private func addPrimerClicked(_ sender: Any?) { beginAddingPrimer(bases: "") }
+
+    @objc private func removePrimerClicked(_ sender: Any?) {
+        let row = primerTable.selectedRow
+        guard row >= 0, row < primers.count else { NSSound.beep(); return }
+        oc_document_remove_primer(document.handle, Int32(primers[row].index))
+    }
+
+    /// Shows the Primers pane with a new primer's inputs in place of the
+    /// list, filled in with `bases` if given. An editor already open keeps
+    /// what was typed unless new bases come.
+    func beginAddingPrimer(bases: String) {
+        select(.primers)
+        if let editor = primerEditor {
+            if !bases.isEmpty { editor.setBases(bases) }
+            editor.focus()
+            return
+        }
+        let editor = PrimerEditor(document: document, bases: bases)
+        editor.onClose = { [weak self] in self?.endAddingPrimer() }
+        primerEditor = editor
+        addChild(editor)
+        editor.view.translatesAutoresizingMaskIntoConstraints = false
+        primersHolder.addSubview(editor.view)
+        pin(editor.view, to: primersHolder)
+        primerList?.isHidden = true
+        editor.focus()
+    }
+
+    private func endAddingPrimer() {
+        guard let editor = primerEditor else { return }
+        editor.view.removeFromSuperview()
+        editor.removeFromParent()
+        primerEditor = nil
+        primerList?.isHidden = false
+        reloadPrimers()
     }
 
     private func buildFeaturesTab() {

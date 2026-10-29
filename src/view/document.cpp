@@ -21,8 +21,25 @@ void Document::emit(const std::vector<Listener> &ls)
         l();
 }
 
+void Document::setPendingPrimer(const Primer &primer)
+{
+    m_display = m_seq;
+    m_display.primers.push_back(primer);
+    m_hasPending = true;
+    emit(m_pendingListeners);
+}
+
+void Document::clearPendingPrimer()
+{
+    if (!m_hasPending)
+        return;
+    m_hasPending = false;   // m_display stays until replaced: layouts may still hold it
+    emit(m_pendingListeners);
+}
+
 void Document::setSequence(Sequence seq, std::string path)
 {
+    m_hasPending = false;
     m_seq = std::move(seq);
     m_path = std::move(path);
     m_hasSelection = false;
@@ -241,6 +258,7 @@ void Document::clearReads()
 
 void Document::sequenceEdited()
 {
+    m_hasPending = false;
     m_reads.clear();
     m_activeFeature = -1;
     m_activeSite = -1;

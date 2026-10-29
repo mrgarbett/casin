@@ -366,6 +366,12 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         inspector.select(pane)
     }
 
+    /// Opens the right panel on Primers with a new primer's inputs.
+    func beginAddingPrimer(bases: String) {
+        if let item = inspectorItem, item.isCollapsed { item.animator().isCollapsed = false }
+        inspector.beginAddingPrimer(bases: bases)
+    }
+
     /// The widest the status pill may be: the middle less the panel pill's room
     /// and a margin. Called after layout, never from inside it, and the
     /// constant changes only when the width really did.

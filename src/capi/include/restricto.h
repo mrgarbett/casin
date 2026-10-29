@@ -28,7 +28,13 @@ typedef struct OCScene OCScene;
 typedef struct { double r, g, b, a; } OCColor;
 typedef struct { double x, y; } OCPoint;
 
-enum { OC_CHANGED_SEQUENCE = 1, OC_CHANGED_SELECTION = 2, OC_CHANGED_ENZYMES = 4, OC_CHANGED_HISTORY = 8 };
+enum {
+    OC_CHANGED_SEQUENCE = 1,
+    OC_CHANGED_SELECTION = 2,
+    OC_CHANGED_ENZYMES = 4,
+    OC_CHANGED_HISTORY = 8,
+    OC_CHANGED_PENDING = 16,   /* the pending primer was set or cleared: redraw */
+};
 enum { OC_FORMAT_GENBANK = 1, OC_FORMAT_FASTA = 2, OC_FORMAT_SNAPGENE = 3, OC_FORMAT_EMBL = 4 };
 enum { OC_STRAND_NONE = 0, OC_STRAND_FORWARD = 1, OC_STRAND_REVERSE = 2 };
 enum { OC_HIT_NONE = 0, OC_HIT_FEATURE = 1, OC_HIT_SITE = 2, OC_HIT_SEQUENCE = 3 };
@@ -192,6 +198,14 @@ int oc_primer_sites(const OCDocument *doc, const char *bases, OCPrimerSite *out,
  * primer or bad site. */
 int oc_document_add_primer_at(OCDocument *doc, const char *name, const char *bases, const char *color,
                               const char *description, const OCPrimerSite *site);
+/* Draws a primer at a site as if it were added, while it is being designed.
+ * It isn't part of the document (not undoable, saved or listed); any change
+ * to the sequence drops it. Reports OC_CHANGED_PENDING. Returns false for an
+ * empty primer or bad site, and then clears it. */
+bool oc_document_set_pending_primer(OCDocument *doc, const char *name, const char *bases, const char *color,
+                                    const OCPrimerSite *site);
+void oc_document_clear_pending_primer(OCDocument *doc);
+bool oc_document_has_pending_primer(const OCDocument *doc);
 
 /* ---- text metrics supplied by the frontend ------------------------------ */
 

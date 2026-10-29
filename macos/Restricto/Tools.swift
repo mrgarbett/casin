@@ -560,11 +560,12 @@ extension DocumentWindowController {
 
     // MARK: Primers
 
-    /// Opens the Add Primer wizard, filled in with the selected bases (top
-    /// strand, so a forward primer) when there is a selection.
+    /// Opens a new primer's inputs in the right panel's Primers pane, filled in
+    /// with the selected bases (top strand, so a forward primer) when there is
+    /// a selection.
     @objc func addPrimer(_ sender: Any?) {
         guard let d = doc, !d.isEmpty else { return }
-        PrimerWizard.show(for: d, bases: hasRange ? d.selectedBases : "", near: window)
+        beginAddingPrimer(bases: hasRange ? d.selectedBases : "")
     }
 
     @objc func deletePrimer(_ sender: Any?) {

@@ -278,6 +278,34 @@ int main(int argc, char **argv)
     CHECK(oc_document_add_primer_at(copy, "bad", tailed, NULL, NULL, &bad) == -1);
     CHECK(oc_primer_sites(doc, "", sites, 4) == 0);
     oc_document_free(copy);
+
+    /* A pending primer is drawn but isn't part of the document. */
+    {
+        const int primers = oc_document_primer_count(doc);
+        const bool couldUndo = oc_document_can_undo(doc), wasModified = oc_document_is_modified(doc);
+        OCMapLayout *plain = oc_map_layout_new(doc, 900, 700, false, measure, NULL);
+        OCScene *before = oc_map_layout_render(plain, doc);
+        CHECK(oc_document_set_pending_primer(doc, "pending", tailed, "#00aa00", &sites[0])
+              && oc_document_has_pending_primer(doc));
+        OCMapLayout *pending = oc_map_layout_new(doc, 900, 700, false, measure, NULL);
+        OCScene *after = oc_map_layout_render(pending, doc);
+        CHECK(oc_scene_item_count(after) > oc_scene_item_count(before));
+        CHECK(oc_document_primer_count(doc) == primers && oc_document_can_undo(doc) == couldUndo
+              && oc_document_is_modified(doc) == wasModified);
+        CHECK(!oc_document_set_pending_primer(doc, "bad", tailed, NULL, &bad) && !oc_document_has_pending_primer(doc));
+        CHECK(oc_document_set_pending_primer(doc, "pending", tailed, NULL, &sites[0]));
+        oc_document_set_selection(doc, 0, 0);   /* a selection change keeps it */
+        CHECK(oc_document_has_pending_primer(doc));
+        oc_document_add_primer_at(doc, "real", tailed, NULL, NULL, &sites[0]);   /* a sequence change drops it */
+        CHECK(!oc_document_has_pending_primer(doc) && oc_document_primer_count(doc) == primers + 1);
+        oc_document_undo(doc);
+        CHECK(oc_document_primer_count(doc) == primers);
+        oc_document_clear_pending_primer(doc);
+        oc_scene_free(before);
+        oc_scene_free(after);
+        oc_map_layout_free(plain);
+        oc_map_layout_free(pending);
+    }
     oc_string_free(pb);
     CHECK(oc_document_add_primer_sequence(doc, "short", "ACGT", NULL) == -1);
     char *hits = oc_search_folder(argv[1], "GAATTC");
