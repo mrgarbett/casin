@@ -1279,6 +1279,13 @@ static void testReferences(const std::string &dir)
     CHECK(siteStarts(puc, "HindIII") == std::vector<int>({447}));
     CHECK(bandSizes(puc, {"EcoRI"}) == std::vector<int>({2686}));
     CHECK(bandSizes(puc, {"PvuII"}) == std::vector<int>({2364, 322}));
+    // Annotate Common Features finds pUC19's origin (the pUC copy differs
+    // from pBR322's by a few bases), on the reverse strand of this record.
+    bool ori = false;
+    for (const Feature &f : findCommonFeatures(puc))
+        if (f.name == "pMB1 ori")
+            ori = f.strand == Strand::Reverse && f.ranges.size() == 1 && f.ranges[0].length() == 589;
+    CHECK(ori);
 
     // Phage lambda (RefSeq NC_001416.1): 48,502 bp, linear. EcoRI gives the
     // six bands of the lambda/EcoRI marker.

@@ -603,16 +603,18 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         return menu
     }()
 
-    // The actions pill sits with the sidebar button (in the sidebar's part of
-    // the toolbar while it is open), the title in the centre, the view toggles
-    // at the right. Find opens on the sequence (⌘F).
+    // The actions pill sits just past the sidebar button: first in the
+    // toolbar's main part, which starts at the sidebar's edge. (Before the
+    // tracking separator it shares the sidebar's width with the window buttons
+    // and never fits, so AppKit moves it into the overflow menu.) The title
+    // is in the centre, the view toggles at the right. Find opens on ⌘F.
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, actionsItem, .sidebarTrackingSeparator, .flexibleSpace, titleItem, .flexibleSpace,
+        [.toggleSidebar, .sidebarTrackingSeparator, actionsItem, .flexibleSpace, titleItem, .flexibleSpace,
          mapItem, layoutItem, inspectorToolbarItem]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, actionsItem, .sidebarTrackingSeparator, titleItem, .flexibleSpace, .space,
+        [.toggleSidebar, .sidebarTrackingSeparator, actionsItem, titleItem, .flexibleSpace, .space,
          mapItem, layoutItem, complementItem, inspectorToolbarItem]
     }
 
@@ -728,8 +730,10 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
 
     /// ⌘F: shows the sequence (opening the panel on it when the map is beside
     /// it), opens the find bar at the sequence's bottom and puts the cursor
-    /// in it; again (or Esc) closes it.
-    @objc func performFindPanelAction(_ sender: Any?) {
+    /// in it; again (or Esc) closes it. Not performFindPanelAction: while the
+    /// find field is being edited its field editor, an NSTextView, has that
+    /// action too and takes ⌘F first, so the bar would never close.
+    @objc func toggleFindBar(_ sender: Any?) {
         guard let bar = findBar else { return }
         let editing = searchField.currentEditor() != nil
         if !bar.isHidden && editing {
