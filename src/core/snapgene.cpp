@@ -292,11 +292,13 @@ bool readSnapGene(const std::string &data, Sequence *out, std::string *error)
         case kFeatures: featuresXml = payload; break;
         case kPrimers: primersXml = payload; break;
         case kNotes: notesXml = payload; break;
-        default: break;   // unknown packets are ignored
+        default: seq.snapgeneExtra.push_back({type, payload}); break;   // kept for saving
         }
     }
     if (!haveDna)
         return fail("no DNA packet");
+    if (!seq.snapgeneExtra.empty())
+        seq.snapgeneExtraBases = seq.bases;
 
     // Features and primers need the sequence length, so parse them last.
     if (!featuresXml.empty())
@@ -333,6 +335,9 @@ std::string writeSnapGene(const Sequence &seq)
     }
     putPacket(out, kNotes, notes + "</Notes>");
     putPacket(out, kFeatures, featuresXml(seq));
+    if (seq.bases == seq.snapgeneExtraBases)
+        for (const Sequence::ExtraPacket &p : seq.snapgeneExtra)
+            putPacket(out, uint8_t(p.type), p.payload);
     return out;
 }
 
