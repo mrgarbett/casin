@@ -178,14 +178,14 @@ void SequenceView::ensureLayout()
     options.hiddenTypes = m_hiddenTypes;
     m_layout = std::make_unique<view::SequenceLayout>(m_doc->displaySequence(), m_doc->visibleSites(),
                                                       m_dark ? view::Theme::darkTheme() : view::Theme::light(),
-                                                      m_measure, std::max(200, m_w - m_trailing), m_complement,
+                                                      m_measure, std::max(200, int((m_w - m_trailing) / m_zoom)), m_complement,
                                                       options, m_doc->reads());
     updateAdjustment();
 }
 
 void SequenceView::updateAdjustment()
 {
-    const double total = m_layout ? m_layout->totalHeight() + 20 + m_bottomInset : 0;
+    const double total = m_layout ? (m_layout->totalHeight() + 20) * m_zoom + m_bottomInset : 0;
     const double page = std::max(1, m_h);
     m_syncing = true;
     gtk_adjustment_configure(m_adj, std::clamp(m_offset, 0.0, std::max(0.0, total - page)), 0,
@@ -201,7 +201,7 @@ void SequenceView::scrollToPosition(int pos)
     ensureLayout();
     if (!m_layout)
         return;
-    const double top = m_layout->lineTopFor(pos), h = m_layout->lineHeightFor(pos);
+    const double top = m_layout->lineTopFor(pos) * m_zoom, h = m_layout->lineHeightFor(pos) * m_zoom;
     const double y = m_motion == Motion::Ease ? m_target : m_offset;
     if (top < y || top + h > y + m_h)
         scrollSmoothlyTo(top - 20);
@@ -407,19 +407,19 @@ void SequenceView::relayoutKeepingPlace()
     int keep = -1;
     double below = 0;
     if (m_layout) {
-        keep = m_layout->positionAt({0, m_offset + 1});
+        keep = m_layout->positionAt(content(0, 1));
         if (m_doc->hasSelection()) {
             const int caret = m_doc->selection().start;
-            const double top = m_layout->lineTopFor(caret);
-            if (top >= m_offset && top + m_layout->lineHeightFor(caret) <= m_offset + m_h)
+            const double top = m_layout->lineTopFor(caret) * m_zoom;
+            if (top >= m_offset && top + m_layout->lineHeightFor(caret) * m_zoom <= m_offset + m_h)
                 keep = caret;
         }
         if (keep >= 0)
-            below = m_layout->lineTopFor(keep) - m_offset;
+            below = m_layout->lineTopFor(keep) * m_zoom - m_offset;
     }
     invalidate();
     if (keep >= 0 && m_layout)
-        setOffset(std::clamp(m_layout->lineTopFor(keep) - below, 0.0, maxOffset()));
+        setOffset(std::clamp(m_layout->lineTopFor(keep) * m_zoom - below, 0.0, maxOffset()));
 }
 
 void SequenceView::resized(GtkDrawingArea *, int w, int h, gpointer p)
@@ -453,13 +453,15 @@ void SequenceView::draw(GtkDrawingArea *, cairo_t *cr, int, int h, gpointer p)
     st.activeFeature = self->m_doc->activeFeature();
     st.activeSite = self->m_doc->activeSite();
     st.hoverCodon = self->m_hoverCodon;
-    const view::Scene scene = self->m_layout->render(self->scrollY(), h, st);
+    const double z = self->m_zoom;
+    const view::Scene scene = self->m_layout->render(self->m_offset / z, h / z, st);
     if (!scene.background.isNone()) {
         // The whole width, so the pill floats over the sequence.
         const view::Color &c = scene.background;
         cairo_set_source_rgba(cr, c.r, c.g, c.b, c.a);
         cairo_paint(cr);
     }
+    cairo_scale(cr, z, z);
     view::drawScene(cr, scene);
 }
 
@@ -486,20 +488,20 @@ void SequenceView::extendSelectionTo(double x, double y)
 {
     if (!m_layout)
         return;
-    const view::Point content{x, y + scrollY()};
+    const view::Point at = content(x, y);
     if (m_codonAnchor >= 0) {
         // From the first codon to the one under the mouse, both whole; off
         // the amino acids, to the nearest base.
         const int first = m_codonAnchor;
-        const int codon = m_layout->codonAt(content);
+        const int codon = m_layout->codonAt(at);
         setHoverCodon(codon);
-        const int end = codon >= 0 ? (codon >= first ? codon + 3 : codon) : m_layout->positionAt(content);
+        const int end = codon >= 0 ? (codon >= first ? codon + 3 : codon) : m_layout->positionAt(at);
         const int start = std::min(first, end);
         const int stop = std::min(std::max(first + 3, end), m_doc->sequence().length());
         m_doc->setSelection({start, stop - start});
         return;
     }
-    const int pos = m_layout->positionAt(content);
+    const int pos = m_layout->positionAt(at);
     m_doc->setSelection({std::min(pos, m_anchor), std::abs(pos - m_anchor)});
 }
 
@@ -561,7 +563,7 @@ void SequenceView::dragBegin(GtkGestureDrag *g, double x, double y, gpointer p)
         return;
     self->m_x0 = self->m_lastX = x;
     self->m_y0 = self->m_lastY = y;
-    const view::Point content{x, y + self->scrollY()};
+    const view::Point at = self->content(x, y);
     const GdkModifierType mods = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(g));
     if (mods & GDK_SHIFT_MASK) {
         // Shift-click extends from the existing anchor.
@@ -573,33 +575,33 @@ void SequenceView::dragBegin(GtkGestureDrag *g, double x, double y, gpointer p)
     }
     // An amino acid in a translation row selects its codon; dragging on
     // across amino acids selects their codons too.
-    const int codon = self->m_layout->codonAt(content);
+    const int codon = self->m_layout->codonAt(at);
     if (codon >= 0) {
         self->m_dragging = true;
         self->m_codonAnchor = self->m_anchor = codon;
         self->m_doc->setSelection({codon, std::min(3, self->m_doc->sequence().length() - codon)});
         return;
     }
-    const int site = self->m_layout->siteAt(content);
+    const int site = self->m_layout->siteAt(at);
     if (site >= 0) {
         self->m_doc->activateSite(site);
         return;
     }
     // The layout draws displaySequence(): the pending primer, if any, comes last.
-    const int primer = self->m_layout->primerAt(content);
+    const int primer = self->m_layout->primerAt(at);
     if (primer >= 0 && primer < int(self->m_doc->displaySequence().primers.size())) {
         const Range b = self->m_doc->displaySequence().primers[size_t(primer)].binding;
         self->m_anchor = b.start;
         self->m_doc->setSelection({b.start, b.length()});
         return;
     }
-    const int feature = self->m_layout->featureAt(content);
+    const int feature = self->m_layout->featureAt(at);
     if (feature >= 0) {
         self->m_doc->activateFeature(feature);
         return;
     }
     self->m_dragging = true;
-    self->m_anchor = self->m_layout->positionAt(content);
+    self->m_anchor = self->m_layout->positionAt(at);
     self->m_doc->setSelection({self->m_anchor, 0});
 }
 
@@ -652,11 +654,11 @@ void SequenceView::motion(GtkEventControllerMotion *, double x, double y, gpoint
     auto *self = static_cast<SequenceView *>(p);
     if (!self->m_layout)
         return;
-    const view::Point content{x, y + self->scrollY()};
+    const view::Point at = self->content(x, y);
     // An amino acid under the mouse outlines its codon.
-    self->setHoverCodon(self->m_layout->codonAt(content));
+    self->setHoverCodon(self->m_layout->codonAt(at));
     if (self->onHoverBase)
-        self->onHoverBase(self->m_layout->baseAt(content));
+        self->onHoverBase(self->m_layout->baseAt(at));
 }
 
 void SequenceView::leave(GtkEventControllerMotion *, gpointer p)
@@ -672,7 +674,7 @@ void SequenceView::pressed(GtkGestureClick *, int n, double x, double y, gpointe
     auto *self = static_cast<SequenceView *>(p);
     if (n != 2 || !self->m_layout || !self->onEditFeature)
         return;
-    const int feature = self->m_layout->featureAt({x, y + self->scrollY()});
+    const int feature = self->m_layout->featureAt(self->content(x, y));
     if (feature >= 0)
         self->onEditFeature(feature);
 }
@@ -681,6 +683,19 @@ void SequenceView::setBottomInset(int px)
 {
     m_bottomInset = px;
     updateAdjustment();
+}
+
+void SequenceView::setZoom(double zoom)
+{
+    if (zoom == m_zoom)
+        return;
+    // Keep the same base at the top of the view.
+    const int keep = m_layout ? m_layout->positionAt(content(0, 1)) : -1;
+    const double below = keep >= 0 ? m_layout->lineTopFor(keep) * m_zoom - m_offset : 0;
+    m_zoom = zoom;
+    invalidate();
+    if (keep >= 0 && m_layout)
+        setOffset(std::clamp(m_layout->lineTopFor(keep) * m_zoom - below, 0.0, maxOffset()));
 }
 
 void SequenceView::setTrailingInset(int px)
@@ -703,7 +718,7 @@ gboolean SequenceView::queryTooltip(GtkWidget *, int x, int y, gboolean, GtkTool
     auto *self = static_cast<SequenceView *>(p);
     if (!self->m_layout)
         return FALSE;
-    const std::string text = self->m_layout->tooltipAt({double(x), y + self->scrollY()});
+    const std::string text = self->m_layout->tooltipAt(self->content(x, y));
     if (text.empty())
         return FALSE;
     gtk_tooltip_set_text(tip, text.c_str());

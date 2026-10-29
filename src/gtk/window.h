@@ -155,6 +155,11 @@ private:
     static void actFrames(GSimpleAction *, GVariant *, gpointer self);
     static void actClearReads(GSimpleAction *, GVariant *, gpointer self);
     static void actGroupTens(GSimpleAction *, GVariant *, gpointer self);
+    static void actZoomIn(GSimpleAction *, GVariant *, gpointer self);
+    static void actZoomOut(GSimpleAction *, GVariant *, gpointer self);
+    static void actZoomReset(GSimpleAction *, GVariant *, gpointer self);
+    // Steps the map and sequence zoom of every window (0 = back to 100 %).
+    void stepZoom(int direction);
     static void actRevert(GSimpleAction *, GVariant *, gpointer self);
     static void actCopyMap(GSimpleAction *, GVariant *, gpointer self);
     static void actGoTo(GSimpleAction *, GVariant *, gpointer self);

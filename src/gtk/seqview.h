@@ -36,6 +36,8 @@ public:
     void scrollToPosition(int pos);
     // Typing bases, Backspace, Delete and the arrow keys edit the document.
     void setEditable(bool editable) { m_editable = editable; }
+    // Text and drawing scaled together, like a zoomed web page (1 = 100 %).
+    void setZoom(double zoom);
     // Room on the right for something floating over the view (the lines wrap
     // short of it; the background still fills the view).
     void setTrailingInset(int px);
@@ -74,6 +76,8 @@ private:
     void extendSelectionTo(double viewX, double viewY);
     void setHoverCodon(int codon);
     double scrollY() const { return m_offset; }
+    // A point in the view, in the layout's coordinates.
+    view::Point content(double x, double y) const { return {x / m_zoom, (y + m_offset) / m_zoom}; }
     // Scrolling. The offset can run past either end while a touchpad pulls
     // it (the rubber band); a tick callback runs the momentum after a flick,
     // the spring back, and the eased wheel and jump scrolls.
@@ -101,6 +105,7 @@ private:
     bool m_enzymes = true;
     int m_bottomInset = 0;
     int m_trailing = 0;
+    double m_zoom = 1;
     std::set<std::string> m_hiddenTypes;
     bool m_editable = false;
     // drag state

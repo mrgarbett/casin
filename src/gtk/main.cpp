@@ -204,7 +204,7 @@ void onStartup(GApplication *app, gpointer)
     g_action_map_add_action_entries(G_ACTION_MAP(app), entries, G_N_ELEMENTS(entries), app);
     g_simple_action_set_state(G_SIMPLE_ACTION(g_action_map_lookup_action(G_ACTION_MAP(app), "experimental")),
                               g_variant_new_boolean(gtk::Window::experimentalTools()));
-    struct Accel { const char *action; const char *keys[3]; };
+    struct Accel { const char *action; const char *keys[4]; };
     static const Accel accels[] = {
         {"app.open", {"<Control>o", nullptr}},
         {"app.quit", {"<Control>q", nullptr}},
@@ -230,6 +230,9 @@ void onStartup(GApplication *app, gpointer)
         {"win.sidebar", {"F9", nullptr}},
         {"win.show-panel", {"<Control><Alt>i", nullptr}},
         {"win.fullscreen", {"F11", nullptr}},
+        {"win.zoom-in", {"<Control>plus", "<Control>equal", "<Control>KP_Add", nullptr}},
+        {"win.zoom-out", {"<Control>minus", "<Control>KP_Subtract", nullptr}},
+        {"win.zoom-reset", {"<Control>0", "<Control>KP_0", nullptr}},
     };
     for (const Accel &a : accels)
         gtk_application_set_accels_for_action(GTK_APPLICATION(app), a.action, a.keys);

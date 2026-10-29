@@ -87,6 +87,15 @@ void onCurrent(GSimpleAction *a, GVariant *v, gpointer shell)
         F(a, v, w);
 }
 
+// The zoom steps of the map and sequence, and the one saved.
+const double kZoomSteps[] = {0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0};
+
+double savedZoom()
+{
+    const double z = std::strtod(settingString("View", "zoom").c_str(), nullptr);
+    return z >= 0.8 && z <= 2.0 ? z : 1.0;
+}
+
 // Room the vertical pill takes at the top right of the middle.
 const int kPillRoom = 48;
 
@@ -228,6 +237,8 @@ Window::Window(Shell *shell) : m_shell(shell), m_window(shell->widget())
         m_tablePane = pane;
     m_map = std::make_unique<MapView>(&m_doc);
     m_seq = std::make_unique<SequenceView>(&m_doc);
+    m_map->setZoom(savedZoom());
+    m_seq->setZoom(savedZoom());
     buildUi();
     rebuildEnzymeSets();
     m_doc.onSequenceChanged([this] {
@@ -331,6 +342,9 @@ void Window::addActions(GActionMap *map, Shell *shell)
         OC_STATE("frames", "s", "'0'", actFrames),
         OC_ACT("clear-reads", actClearReads),
         OC_STATE("group-tens", nullptr, "false", actGroupTens),
+        OC_ACT("zoom-in", actZoomIn),
+        OC_ACT("zoom-out", actZoomOut),
+        OC_ACT("zoom-reset", actZoomReset),
         OC_ACT("revert", actRevert),
         OC_ACT("copy-map", actCopyMap),
         OC_ACT("go-to", actGoTo),
@@ -1622,6 +1636,48 @@ void Window::actGroupTens(GSimpleAction *a, GVariant *state, gpointer p)
 {
     g_simple_action_set_state(a, state);
     static_cast<Window *>(p)->m_seq->setGroupTens(g_variant_get_boolean(state));
+}
+
+void Window::stepZoom(int direction)
+{
+    double zoom = 1.0;
+    const double now = savedZoom();
+    if (direction > 0) {
+        zoom = kZoomSteps[std::size(kZoomSteps) - 1];
+        for (double z : kZoomSteps)
+            if (z > now + 1e-6) {
+                zoom = z;
+                break;
+            }
+    } else if (direction < 0) {
+        zoom = kZoomSteps[0];
+        for (double z : kZoomSteps)
+            if (z < now - 1e-6)
+                zoom = z;
+    }
+    char buf[16];
+    std::snprintf(buf, sizeof buf, "%.2f", zoom);
+    setSettingString("View", "zoom", buf);
+    // Every window and tab, so they all read the same.
+    for (Window *w : all(gtk_window_get_application(GTK_WINDOW(m_window)))) {
+        w->m_map->setZoom(zoom);
+        w->m_seq->setZoom(zoom);
+    }
+}
+
+void Window::actZoomIn(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->stepZoom(1);
+}
+
+void Window::actZoomOut(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->stepZoom(-1);
+}
+
+void Window::actZoomReset(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->stepZoom(0);
 }
 
 void Window::actRevert(GSimpleAction *, GVariant *, gpointer p)

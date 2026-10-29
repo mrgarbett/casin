@@ -24,6 +24,8 @@ public:
     // Room kept clear on the right and at the bottom for capsules floating
     // over the map; the background still fills the whole view.
     void setInsets(int trailing, int bottom);
+    // Labels and drawing scaled together (1 = 100 %).
+    void setZoom(double zoom);
 
     // As on SequenceView: the base under the mouse, the mouse while a drag
     // selects bases (-1, -1 at the end), a feature double-clicked.
@@ -41,6 +43,7 @@ private:
     static void leave(GtkEventControllerMotion *, gpointer self);
     static void pressed(GtkGestureClick *, int n, double x, double y, gpointer self);
     void ensureLayout(int w, int h);
+    view::Point toLayout(double x, double y) const { return {x / m_zoom, y / m_zoom}; }
 
     Document *m_doc;
     GtkWidget *m_area;
@@ -48,6 +51,7 @@ private:
     std::unique_ptr<view::MapLayout> m_layout;
     int m_w = 0, m_h = 0;
     int m_trailing = 0, m_bottom = 0;
+    double m_zoom = 1;
     bool m_dark = false;
     view::MapOptions m_options;
     // drag state

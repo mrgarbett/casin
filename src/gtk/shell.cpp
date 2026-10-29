@@ -926,6 +926,11 @@ void Shell::rebuildMenu()
     g_menu_append(viewSeq, "Show Complement Strand", "win.show-complement");
     g_menu_append(viewSeq, "Group Bases in Tens", "win.group-tens");
     g_menu_append_section(viewMenu, nullptr, G_MENU_MODEL(viewSeq));
+    GMenu *viewZoom = g_menu_new();
+    g_menu_append(viewZoom, "Zoom In", "win.zoom-in");
+    g_menu_append(viewZoom, "Zoom Out", "win.zoom-out");
+    g_menu_append(viewZoom, "Actual Size", "win.zoom-reset");
+    g_menu_append_section(viewMenu, nullptr, G_MENU_MODEL(viewZoom));
     GMenu *viewWindow = g_menu_new();
     g_menu_append(viewWindow, "Full Screen", "win.fullscreen");
     g_menu_append_section(viewMenu, nullptr, G_MENU_MODEL(viewWindow));
