@@ -80,4 +80,32 @@ struct PrimerSite {
 std::vector<PrimerSite> findPrimerSites(const Sequence &seq, const std::string &primer, int maxMismatches = 2,
                                         int minBinding = 15);
 
+// Grows or shrinks the part of `primer` that anneals at `site` so its Tm
+// comes as close as it can to `targetTm`, between 15 and 40 bases. The 3' end
+// and any 5' tail stay; the annealing part's 5' end moves along the template.
+// Returns the new primer (its tail as it was) and sets *fitted to the new
+// site. Returns `primer` unchanged when it doesn't anneal at `site`.
+std::string fitAnnealingToTm(const Sequence &seq, const std::string &primer, const PrimerSite &site,
+                             double targetTm, PrimerSite *fitted);
+
+// Length of the product two primers make from these sites, tails included,
+// or -1 when they don't face each other on opposite strands.
+int pcrProductLength(const Sequence &seq, const PrimerSite &a, int tailA, const PrimerSite &b, int tailB);
+
+// Whether a part in a primer's 5' tail (a codon or a tag) lands in frame with
+// the CDS the primer's annealing part joins: the forward primer's 5' end, or
+// the reverse primer's, within a CDS or at its ends. `partStart` and
+// `partLength` count bases from the primer's 5' end; `partForward` is true
+// when the part reads 5'->3' along the primer.
+struct FrameCheck {
+    bool applies = false;      // a CDS was found at the junction
+    bool againstCds = false;   // the part reads the other way to the CDS
+    bool inFrame = false;
+    int fix = 0;               // bases to add between the part and the annealing part (1 or 2)
+    std::string cds;           // the CDS's name
+};
+
+FrameCheck checkPartFrame(const Sequence &seq, const PrimerSite &site, int tailLength, int partStart,
+                          int partLength, bool partForward);
+
 } // namespace oc

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 namespace oc {
 
@@ -369,6 +370,141 @@ std::vector<PrimerSite> findPrimerSites(const Sequence &seq, const std::string &
             return a.binding.length() > b.binding.length();
         return a.binding.start < b.binding.start;
     });
+    return out;
+}
+
+std::string fitAnnealingToTm(const Sequence &seq, const std::string &primer, const PrimerSite &site,
+                             double targetTm, PrimerSite *fitted)
+{
+    const int n = seq.length(), length = site.binding.length();
+    if (fitted)
+        *fitted = site;
+    if (length <= 0 || length > int(primer.size()) || site.binding.start < 0 || site.binding.end > n)
+        return primer;
+    const std::string tail = primer.substr(0, primer.size() - size_t(length));
+    const std::string annealing = primer.substr(primer.size() - size_t(length));
+    const bool forward = site.strand != Strand::Reverse;
+    // The template base `k` bases beyond the annealing part's 5' end, or -1
+    // past an end (or the origin: a site doesn't cross it).
+    auto extra = [&](int k) -> int {
+        const int pos = forward ? site.binding.start - k : site.binding.end - 1 + k;
+        return pos >= 0 && pos < n ? pos : -1;
+    };
+    std::string best = annealing;
+    double bestGap = std::fabs(meltingTemperature(cleanBases(annealing)) - targetTm);
+    int bestLength = length;
+    // Shorter: drop bases from the 5' end.
+    for (int len = std::min(length - 1, 40); len >= 15; --len) {
+        const std::string a = annealing.substr(size_t(length - len));
+        const double gap = std::fabs(meltingTemperature(cleanBases(a)) - targetTm);
+        if (std::isfinite(gap) && (!std::isfinite(bestGap) || gap < bestGap)) {
+            best = a;
+            bestGap = gap;
+            bestLength = len;
+        }
+    }
+    // Longer: add template bases at the 5' end.
+    std::string grown = annealing;
+    for (int k = 1; length + k <= 40; ++k) {
+        const int pos = extra(k);
+        if (pos < 0)
+            break;
+        const char b = forward ? seq.bases[size_t(pos)] : complementBase(seq.bases[size_t(pos)]);
+        grown.insert(grown.begin(), b);
+        if (length + k < 15)
+            continue;
+        const double gap = std::fabs(meltingTemperature(cleanBases(grown)) - targetTm);
+        if (std::isfinite(gap) && (!std::isfinite(bestGap) || gap < bestGap)) {
+            best = grown;
+            bestGap = gap;
+            bestLength = length + k;
+        }
+    }
+    if (fitted) {
+        const int change = bestLength - length;
+        if (forward)
+            fitted->binding = {site.binding.start - change, site.binding.end};
+        else
+            fitted->binding = {site.binding.start, site.binding.end + change};
+    }
+    return tail + best;
+}
+
+int pcrProductLength(const Sequence &seq, const PrimerSite &a, int tailA, const PrimerSite &b, int tailB)
+{
+    if (a.strand == b.strand)
+        return -1;
+    const PrimerSite &f = a.strand == Strand::Forward ? a : b;
+    const PrimerSite &r = a.strand == Strand::Forward ? b : a;
+    const int tailF = a.strand == Strand::Forward ? tailA : tailB, tailR = a.strand == Strand::Forward ? tailB : tailA;
+    const int n = seq.length();
+    int span = r.binding.end - f.binding.start;
+    if (span < f.binding.length() || span < r.binding.length()) {
+        if (!seq.circular)
+            return -1;
+        span += n;   // across the origin
+    }
+    if (span <= 0 || span > n + std::max(f.binding.length(), r.binding.length()))
+        return -1;
+    return span + tailF + tailR;
+}
+
+FrameCheck checkPartFrame(const Sequence &seq, const PrimerSite &site, int tailLength, int partStart,
+                          int partLength, bool partForward)
+{
+    FrameCheck out;
+    const bool primerForward = site.strand != Strand::Reverse;
+    // Where the tail meets the annealing part, on the top strand.
+    const int junction = primerForward ? site.binding.start : site.binding.end;
+    const Feature *cds = nullptr;
+    for (const Feature &f : seq.features) {
+        if (f.type != "CDS" || f.ranges.empty() || f.strand == Strand::None)
+            continue;
+        int lo = f.ranges.front().start, hi = f.ranges.front().end;
+        for (const Range &r : f.ranges) {
+            lo = std::min(lo, r.start);
+            hi = std::max(hi, r.end);
+        }
+        if (junction >= lo && junction <= hi) {
+            cds = &f;
+            break;
+        }
+    }
+    if (!cds)
+        return out;
+    out.applies = true;
+    out.cds = cds->name;
+    const bool readsForward = partForward == primerForward;
+    if (readsForward != (cds->strand == Strand::Forward)) {
+        out.againstCds = true;
+        return out;
+    }
+    const int offset = std::max(0, std::atoi(cds->qualifier("codon_start").c_str()) - 1);
+    int lo = cds->ranges.front().start, hi = cds->ranges.front().end;
+    for (const Range &r : cds->ranges) {
+        lo = std::min(lo, r.start);
+        hi = std::max(hi, r.end);
+    }
+    // The part's top-strand bases with `k` more bases between it and the
+    // annealing part, and whether a codon starts where the part does.
+    auto inFrame = [&](int k) {
+        int left, right;
+        if (primerForward) {
+            left = junction - tailLength - k + partStart;
+            right = left + partLength;
+        } else {
+            right = junction + tailLength + k - partStart;
+            left = right - partLength;
+        }
+        const int phase = cds->strand == Strand::Forward ? left - (lo + offset) : (hi - offset) - right;
+        return ((phase % 3) + 3) % 3 == 0;
+    };
+    out.inFrame = inFrame(0);
+    for (int k = 1; !out.inFrame && k <= 2; ++k)
+        if (inFrame(k)) {
+            out.fix = k;
+            break;
+        }
     return out;
 }
 

@@ -1167,6 +1167,67 @@ static void testPrimerDesign()
     CHECK(findPrimerSites(s, "GGGGGGGGGGGGGGGGGGGG").empty());
 }
 
+// Fitting a primer to a Tm, the product of two primers, and whether a part
+// in a tail lands in frame with the CDS it joins.
+static void testPrimerHelpers()
+{
+    Sequence s;
+    s.name = "p";
+    s.bases = "GCGTTGCATGCCTAGGATCCGTAACGGCATCAAGTCGACTTCAGCGTAGCATGAAACCCGGGTTTTAGTTGACCGGTACCATGCAAGCTTGCAGCAGGTCAG"
+              "CATCGATCGGCTAGCTAGGCGCGCCATCGATGGTACCTTAGCAGTCAAGGCTTACGATCGTTGCAACGTAGGCATCGGATACGTTAGCCAATGCATGCAA";
+    const int n = s.length();
+    Feature cds = feat("gene", {{60, 180}});
+    cds.type = "CDS";
+    cds.strand = Strand::Forward;
+    s.features = {cds};
+
+    // A forward primer on 60..80 and a reverse one on 160..180.
+    PrimerSite f{{60, 80}, Strand::Forward, 0}, r{{160, 180}, Strand::Reverse, 0};
+    const std::string fwd = s.bases.substr(60, 20), rev = reverseComplement(s.bases.substr(160, 20));
+    CHECK_EQ(findPrimerSites(s, fwd).front().binding, f.binding);
+
+    // Fitting keeps the tail and 3' end and moves the annealing part's 5' end.
+    PrimerSite fitted;
+    const std::string tail = "GGATCC";
+    const double tm20 = meltingTemperature(fwd);
+    const std::string hotter = fitAnnealingToTm(s, tail + fwd, f, tm20 + 8, &fitted);
+    CHECK(startsWith(hotter, tail) && hotter.size() > tail.size() + fwd.size());
+    CHECK_EQ(fitted.binding.end, 80);
+    CHECK_EQ(hotter.substr(tail.size()), s.bases.substr(size_t(fitted.binding.start), size_t(fitted.binding.length())));
+    const std::string cooler = fitAnnealingToTm(s, fwd, f, tm20 - 8, &fitted);
+    CHECK(cooler.size() < fwd.size() && cooler.size() >= 15 && fitted.binding.end == 80);
+    const std::string revHot = fitAnnealingToTm(s, rev, r, meltingTemperature(rev) + 8, &fitted);
+    CHECK(revHot.size() > rev.size() && fitted.binding.start == 160 && fitted.strand == Strand::Reverse);
+    CHECK_EQ(revHot, reverseComplement(s.bases.substr(160, size_t(fitted.binding.length()))));
+    CHECK_EQ(fitAnnealingToTm(s, fwd, f, meltingTemperature(fwd), &fitted), fwd);   // already there
+
+    // Product: from the forward primer's 5' end to the reverse one's, tails included.
+    CHECK_EQ(pcrProductLength(s, f, 0, r, 0), 120);
+    CHECK_EQ(pcrProductLength(s, r, 6, f, 18), 144);
+    CHECK_EQ(pcrProductLength(s, f, 0, f, 0), -1);
+    PrimerSite before{{20, 40}, Strand::Reverse, 0};
+    CHECK_EQ(pcrProductLength(s, f, 0, before, 0), -1);   // linear: they face away
+    s.circular = true;
+    CHECK_EQ(pcrProductLength(s, f, 0, before, 0), n - 60 + 40);
+    s.circular = false;
+
+    // His6 (18 bases) right before a forward primer at the CDS start: in frame.
+    FrameCheck fc = checkPartFrame(s, f, 18, 0, 18, true);
+    CHECK(fc.applies && fc.inFrame && fc.cds == "gene");
+    // One base between them: two more fix it.
+    fc = checkPartFrame(s, f, 19, 0, 18, true);
+    CHECK(fc.applies && !fc.inFrame && fc.fix == 2);
+    // Reverse primer at the CDS end, His6 reverse complemented in its tail: in frame.
+    fc = checkPartFrame(s, r, 18, 0, 18, false);
+    CHECK(fc.applies && fc.inFrame);
+    // The same tag not reverse complemented reads against the CDS.
+    fc = checkPartFrame(s, r, 18, 0, 18, true);
+    CHECK(fc.applies && fc.againstCds);
+    // No CDS where a primer joins.
+    PrimerSite outside{{200, 220}, Strand::Forward, 0};
+    CHECK(!checkPartFrame(s, outside, 18, 0, 18, true).applies);
+}
+
 static void testMutagenesis()
 {
     Sequence s;
@@ -1462,6 +1523,7 @@ int main(int argc, char **argv)
     testProtein();
     testInsertionByPcr();
     testPrimerDesign();
+    testPrimerHelpers();
     testMutagenesis();
     testAlign();
     testOrfs();

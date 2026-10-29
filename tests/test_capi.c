@@ -279,6 +279,19 @@ int main(int argc, char **argv)
     CHECK(oc_primer_sites(doc, "", sites, 4) == 0);
     oc_document_free(copy);
 
+    /* Fitting to a Tm keeps the tail and the 3' end; a primer can't pair with itself. */
+    {
+        OCPrimerSite fitted;
+        char *hot = oc_primer_fit_tm(doc, tailed, &sites[0], 72, &fitted);
+        CHECK(hot && strlen(hot) > strlen(tailed) && strncmp(hot, tailed, 6) == 0
+              && fitted.start + fitted.length == sites[0].start + sites[0].length);
+        oc_string_free(hot);
+        CHECK(oc_pcr_product_length(doc, &sites[0], 0, &sites[0], 0) == -1);
+        OCFrameCheck frame;
+        oc_primer_part_frame(doc, &sites[0], 6, 0, 3, true, &frame);
+        CHECK(!frame.applies || frame.cds[0] != '\0');
+    }
+
     /* A pending primer is drawn but isn't part of the document. */
     {
         const int primers = oc_document_primer_count(doc);

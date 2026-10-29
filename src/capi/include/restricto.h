@@ -206,6 +206,27 @@ bool oc_document_set_pending_primer(OCDocument *doc, const char *name, const cha
                                     const OCPrimerSite *site);
 void oc_document_clear_pending_primer(OCDocument *doc);
 bool oc_document_has_pending_primer(const OCDocument *doc);
+/* The primer with its annealing part at `site` grown or shrunk (its 5' end
+ * moving along the template; tail and 3' end kept) so the annealing part's
+ * Tm comes closest to target_tm, 15 to 40 bases. Sets *fitted. Free with
+ * oc_string_free. */
+char *oc_primer_fit_tm(const OCDocument *doc, const char *bases, const OCPrimerSite *site, double target_tm,
+                       OCPrimerSite *fitted);
+/* Length of the product of two primers at these sites, tails included, or -1
+ * when they don't face each other. */
+int oc_pcr_product_length(const OCDocument *doc, const OCPrimerSite *a, int tail_a, const OCPrimerSite *b,
+                          int tail_b);
+typedef struct {
+    bool applies;       /* a CDS meets the primer where its tail joins the annealing part */
+    bool against_cds;   /* the part reads the other way to it */
+    bool in_frame;
+    int fix;            /* bases to add between the part and the annealing part (1 or 2), else 0 */
+    char cds[64];       /* the CDS's name */
+} OCFrameCheck;
+/* Whether a part in a primer's tail (bases part_start.. from the 5' end)
+ * lands in frame with the CDS its annealing part joins. */
+void oc_primer_part_frame(const OCDocument *doc, const OCPrimerSite *site, int tail_length, int part_start,
+                          int part_length, bool part_forward, OCFrameCheck *out);
 
 /* ---- text metrics supplied by the frontend ------------------------------ */
 

@@ -508,6 +508,59 @@ bool oc_document_set_pending_primer(OCDocument *doc, const char *name, const cha
 }
 
 void oc_document_clear_pending_primer(OCDocument *doc) { doc->doc.clearPendingPrimer(); }
+
+namespace {
+PrimerSite coreSite(const OCPrimerSite &s)
+{
+    PrimerSite p;
+    p.binding = {s.start, s.start + s.length};
+    p.strand = s.strand == OC_STRAND_REVERSE ? Strand::Reverse : Strand::Forward;
+    p.mismatches = s.mismatches;
+    return p;
+}
+}
+
+char *oc_primer_fit_tm(const OCDocument *doc, const char *bases, const OCPrimerSite *site, double target_tm,
+                       OCPrimerSite *fitted)
+{
+    const std::string primer = cleanPrimerBases(bases ? bases : "");
+    if (!site) {
+        if (fitted)
+            *fitted = {};
+        return dupString(primer);
+    }
+    PrimerSite out;
+    const std::string result = fitAnnealingToTm(doc->doc.sequence(), primer, coreSite(*site), target_tm, &out);
+    if (fitted)
+        *fitted = {out.binding.start, out.binding.length(),
+                   out.strand == Strand::Reverse ? OC_STRAND_REVERSE : OC_STRAND_FORWARD, site->mismatches};
+    return dupString(result);
+}
+
+int oc_pcr_product_length(const OCDocument *doc, const OCPrimerSite *a, int tail_a, const OCPrimerSite *b,
+                          int tail_b)
+{
+    if (!a || !b)
+        return -1;
+    return pcrProductLength(doc->doc.sequence(), coreSite(*a), tail_a, coreSite(*b), tail_b);
+}
+
+void oc_primer_part_frame(const OCDocument *doc, const OCPrimerSite *site, int tail_length, int part_start,
+                          int part_length, bool part_forward, OCFrameCheck *out)
+{
+    if (!out)
+        return;
+    *out = {};
+    if (!site)
+        return;
+    const FrameCheck f =
+        checkPartFrame(doc->doc.sequence(), coreSite(*site), tail_length, part_start, part_length, part_forward);
+    out->applies = f.applies;
+    out->against_cds = f.againstCds;
+    out->in_frame = f.inFrame;
+    out->fix = f.fix;
+    std::snprintf(out->cds, sizeof out->cds, "%s", f.cds.c_str());
+}
 bool oc_document_has_pending_primer(const OCDocument *doc) { return doc->doc.hasPendingPrimer(); }
 
 int oc_document_enzyme_count(const OCDocument *doc) { return int(doc->doc.enzymes().size()); }
