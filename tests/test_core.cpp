@@ -760,6 +760,7 @@ static void testSnapGeneWriter()
     s.features = {cds, feat("wrap", {{22, 26}, {0, 3}}, Strand::Reverse), feat("plain", {{5, 9}}, Strand::None)};
     s.primers = {{"fwd", "ATGAAACCC", {0, 9}, Strand::Forward}, {"rev", "CATGCATGC", {17, 26}, Strand::Reverse}};
     s.primers[1].color = "#ff8800";
+    s.primers[1].description = "adds a <NotI> site & a tail";
 
     const std::string data = writeSnapGene(s);
     CHECK(looksLikeSnapGene(data));
@@ -785,6 +786,8 @@ static void testSnapGeneWriter()
         CHECK(r.primers[1].strand == Strand::Reverse);
         CHECK_EQ(r.primers[0].bases, std::string("ATGAAACCC"));
         CHECK(r.primers[0].color.empty() && r.primers[1].color == "#ff8800");
+        CHECK(r.primers[0].description.empty());
+        CHECK_EQ(r.primers[1].description, s.primers[1].description);
     }
 
     // Packets we don't read come back on save while the bases are unchanged,

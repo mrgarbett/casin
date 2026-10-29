@@ -268,14 +268,14 @@ int main(int argc, char **argv)
     OCDocument *copy = oc_document_new();
     CHECK(oc_document_copy(doc, copy) && oc_document_length(copy) == oc_document_length(doc)
           && oc_document_primer_count(copy) == oc_document_primer_count(doc));
-    const int ci = oc_document_add_primer_at(copy, "wiz", tailed, "#ff8800", &sites[0]);
+    const int ci = oc_document_add_primer_at(copy, "wiz", tailed, "#ff8800", "His6 & TEV", &sites[0]);
     CHECK(ci == oc_document_primer_count(doc) && oc_document_primer(copy, ci, &pinf)
-          && strcmp(pinf.color, "#ff8800") == 0 && pinf.start == 500 && pinf.length == 22);
+          && strcmp(pinf.color, "#ff8800") == 0 && strcmp(pinf.description, "His6 & TEV") == 0 && pinf.start == 500 && pinf.length == 22);
     CHECK(oc_document_primer_count(doc) == ci);   /* the original is untouched */
     oc_document_undo(copy);
     CHECK(oc_document_primer_count(copy) == ci);
     OCPrimerSite bad = {oc_document_length(doc) - 5, 22, OC_STRAND_FORWARD, 0};
-    CHECK(oc_document_add_primer_at(copy, "bad", tailed, NULL, &bad) == -1);
+    CHECK(oc_document_add_primer_at(copy, "bad", tailed, NULL, NULL, &bad) == -1);
     CHECK(oc_primer_sites(doc, "", sites, 4) == 0);
     oc_document_free(copy);
     oc_string_free(pb);

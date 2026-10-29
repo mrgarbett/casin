@@ -163,6 +163,7 @@ typedef struct {
     int length;
     int strand;          /* OC_STRAND_FORWARD or OC_STRAND_REVERSE */
     const char *color;   /* "#rrggbb", or "" for the default primer colour */
+    const char *description;
 } OCPrimerInfo;
 
 /* How the construct was made, oldest step first ("2026-10-27 PCR with ..."). */
@@ -186,10 +187,11 @@ typedef struct {
 /* Where a primer (5'->3', a 5' tail allowed) anneals, best first; returns how
  * many sites there are and fills up to `max`. */
 int oc_primer_sites(const OCDocument *doc, const char *bases, OCPrimerSite *out, int max);
-/* Adds a primer at a site from oc_primer_sites as one undo step; `color` may
- * be NULL or "". Returns its index, or -1 for an empty primer or bad site. */
+/* Adds a primer at a site from oc_primer_sites as one undo step; `color` and
+ * `description` may be NULL or "". Returns its index, or -1 for an empty
+ * primer or bad site. */
 int oc_document_add_primer_at(OCDocument *doc, const char *name, const char *bases, const char *color,
-                              const OCPrimerSite *site);
+                              const char *description, const OCPrimerSite *site);
 
 /* ---- text metrics supplied by the frontend ------------------------------ */
 

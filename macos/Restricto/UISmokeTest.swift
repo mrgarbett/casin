@@ -6,9 +6,8 @@
 // and hides the map, walks the right panel's panes (the sequence among them
 // with the map beside it), hides and shows the inspector, opens Find (which
 // reopens a hidden panel on the sequence), selects bases (the status splits),
-// copies the map image, adds a primer through the Add Primer wizard, and
-// saves a PNG of the
-// window after each step. It exits 0 when every step got
+// copies the map image, adds a His-tagged primer through the Add Primer
+// wizard, and saves a PNG of the window after each step. It exits 0 when every step got
 // through layout; a layout loop or other exception aborts the process instead.
 import AppKit
 import RestrictoCore
@@ -96,12 +95,15 @@ enum UISmokeTest {
                 (controller?.document as? SequenceDocument)?.core.select(start: 500, length: 22)
                 controller?.addPrimer(nil)
             }),
+            ("9h-primer-his-tail", { PrimerWizard.insertFirstTag() }),
             ("9h-primer-added", {
                 let core = (controller?.document as? SequenceDocument)?.core
                 let before = core?.primers.count ?? 0
                 PrimerWizard.acceptAll()
                 guard let core = core, core.primers.count == before + 1,
                       core.primers.last?.start == 500, core.primers.last?.length == 22,
+                      core.primers.last?.bases.hasPrefix("catcatcaccaccatcac") == true,
+                      core.primers.last?.bases.count == 40,
                       PrimerWizard.openWindows.isEmpty else {
                     FileHandle.standardError.write("ui-smoke: the primer wizard didn't add the primer\n".data(using: .utf8)!)
                     exit(5)

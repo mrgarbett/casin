@@ -112,7 +112,7 @@ struct OCDocument {
     Document doc;
     OCChangeCallback cb = nullptr;
     void *ctx = nullptr;
-    std::string scratch1, scratch2, scratch3;   // backing for const char * results
+    std::string scratch1, scratch2, scratch3, scratch4;   // backing for const char * results
 };
 
 struct OCMapLayout {
@@ -418,6 +418,8 @@ bool oc_document_primer(OCDocument *doc, int index, OCPrimerInfo *out)
     out->strand = p.strand == Strand::Reverse ? OC_STRAND_REVERSE : OC_STRAND_FORWARD;
     doc->scratch3 = p.color;
     out->color = doc->scratch3.c_str();
+    doc->scratch4 = p.description;
+    out->description = doc->scratch4.c_str();
     return true;
 }
 
@@ -463,7 +465,7 @@ int oc_primer_sites(const OCDocument *doc, const char *bases, OCPrimerSite *out,
 }
 
 int oc_document_add_primer_at(OCDocument *doc, const char *name, const char *bases, const char *color,
-                              const OCPrimerSite *site)
+                              const char *description, const OCPrimerSite *site)
 {
     const std::string typed = cleanPrimerBases(bases ? bases : "");
     const int n = doc->doc.sequence().length();
@@ -476,6 +478,7 @@ int oc_document_add_primer_at(OCDocument *doc, const char *name, const char *bas
     p.binding = {site->start, site->start + site->length};
     p.strand = site->strand == OC_STRAND_REVERSE ? Strand::Reverse : Strand::Forward;
     p.color = color ? color : "";
+    p.description = description ? description : "";
     doc->doc.addPrimers({p}, "Add Primer");
     return int(doc->doc.sequence().primers.size()) - 1;
 }

@@ -110,6 +110,7 @@ void parsePrimers(const std::string &xmlText, Sequence &seq)
         p.name = pe->attr("name");
         p.bases = cleanPrimerBases(pe->attr("sequence"));
         p.color = pe->attr("color");   // ours; SnapGene doesn't write one
+        p.description = xml::stripHtml(pe->attr("description"));
         const xml::Element *site = pe->child("BindingSite");
         if (!site)
             continue;
@@ -232,7 +233,11 @@ std::string primersXml(const Sequence &seq)
     int id = 0;
     for (const Primer &p : seq.primers) {
         x += "<Primer recentID=\"" + std::to_string(id++) + "\" name=\"" + escapeXml(p.name) + "\" sequence=\""
-           + escapeXml(p.bases) + "\"" + (p.color.empty() ? "" : " color=\"" + escapeXml(p.color) + "\"") + ">";
+           + escapeXml(p.bases) + "\"" + (p.color.empty() ? "" : " color=\"" + escapeXml(p.color) + "\"")
+           + (p.description.empty()
+                  ? ""
+                  : " description=\"" + escapeXml("<html><body>" + escapeXml(p.description) + "</body></html>") + "\"")
+           + ">";
         if (p.binding.length() > 0)
             x += "<BindingSite location=\"" + std::to_string(p.binding.start) + "-" + std::to_string(p.binding.end - 1)
                + "\" boundStrand=\"" + (p.strand == Strand::Reverse ? "1" : "0") + "\"/>";
