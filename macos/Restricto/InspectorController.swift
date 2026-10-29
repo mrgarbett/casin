@@ -5,7 +5,7 @@ import RestrictoCore
 /// The window's right-hand panel: the sequence (when the map sits beside it),
 /// Enzymes, Features or Primers, picked from a vertical pill. The window floats
 /// the pill at the top right of the middle, beside this panel, where it stays
-/// when the panel is hidden. Vibrant on Ventura, glass on macOS 26.
+/// when the panel is hidden.
 final class InspectorController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     enum Pane: String, CaseIterable {
         case sequence, enzymes, features, primers
@@ -73,18 +73,16 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         ])
         // macOS 26 draws no line between the middle and the panel. Draw one
         // (with a grab handle) over the panel's edge; the drag stays the split
-        // view's. Earlier systems draw their own divider.
-        if Glass.isAvailable {
-            let edge = PanelEdgeLine()
-            edge.translatesAutoresizingMaskIntoConstraints = false
-            root.addSubview(edge)
-            NSLayoutConstraint.activate([
-                edge.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-                edge.topAnchor.constraint(equalTo: root.topAnchor),
-                edge.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-                edge.widthAnchor.constraint(equalToConstant: 5),
-            ])
-        }
+        // view's.
+        let edge = PanelEdgeLine()
+        edge.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(edge)
+        NSLayoutConstraint.activate([
+            edge.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            edge.topAnchor.constraint(equalTo: root.topAnchor),
+            edge.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            edge.widthAnchor.constraint(equalToConstant: 5),
+        ])
         view = root
 
         document.observe { [weak self] what in

@@ -87,21 +87,19 @@ flatpak-builder --user --install-deps-from=flathub --force-clean --install \
 ```
 
 CI (`.github/workflows/ci.yml`) builds and tests on Fedora, produces the RPM and a
-Flatpak bundle, and builds the macOS app with both an older Xcode and Xcode 26.
+Flatpak bundle, and builds the macOS app with Xcode 26.
 
 ## Building on macOS
 
 ```sh
-xcode-select --install                 # or a full Xcode, 15 or newer
+xcode-select --install                 # or a full Xcode 26
 scripts/build_macos_app.sh             # -> build/macos/Restricto.app
 open build/macos/Restricto.app
 ```
 
-The app runs on macOS 13 Ventura and later, with the same features everywhere.
-Built with Xcode 26 and run on macOS 26 or later, it also adopts Liquid Glass: the
-Features/Enzymes sidebar floats as glass with the map running underneath, and the
-status line becomes a floating glass capsule. An older Xcode builds the app
-without that code (see `macos/Restricto/Glass.swift`).
+The app needs macOS 26 Tahoe or later and builds with Xcode 26. It uses Liquid
+Glass throughout: the status floats over the document as glass capsules, and the
+right panel's switcher is a glass pill (see `macos/Restricto/Glass.swift`).
 
 You can also open `Package.swift` in Xcode, or run `swift build`. The C++ core and
 its tests still build with CMake on macOS:
