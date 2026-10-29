@@ -65,6 +65,11 @@ enum PrimerParts {
         Tag(name: "Enterokinase site", protein: "DDDDK/", bases: "GATGACGATGACAAG"),
     ]
 
+    /// Bases put before an enzyme site at a primer's 5' end: most enzymes
+    /// need a few bases past their site to cut near a DNA end. Chosen to make
+    /// no common site of its own.
+    static let sitePadding = "TTCTAT"
+
     /// The reverse complement, keeping case and IUPAC codes.
     static func reverseComplement(_ s: String) -> String {
         let pairs: [Character: Character] = [

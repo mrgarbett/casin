@@ -111,6 +111,26 @@ enum UISmokeTest {
                 }
                 oc_document_undo(core.handle)
             }),
+            ("9h-primer-fit-tm", {
+                // Fitting to a hotter Tm grows the annealing part at its 5' end only.
+                let core = (controller?.document as? SequenceDocument)?.core
+                core?.select(start: 500, length: 22)
+                controller?.addPrimer(nil)
+                let sites = PrimerEditor.fitAll(to: 70)
+                guard let s = sites.first, s.start + s.length == 522, s.length > 22,
+                      let core = core, oc_document_has_pending_primer(core.handle) else {
+                    FileHandle.standardError.write("ui-smoke: fitting a primer to a Tm failed\n".data(using: .utf8)!)
+                    exit(5)
+                }
+            }),
+            ("9h-primer-cancelled", {
+                PrimerEditor.cancelAll()
+                let core = (controller?.document as? SequenceDocument)?.core
+                guard let core = core, !oc_document_has_pending_primer(core.handle), !PrimerEditor.isAnyOpen else {
+                    FileHandle.standardError.write("ui-smoke: cancelling left a primer behind\n".data(using: .utf8)!)
+                    exit(5)
+                }
+            }),
             ("9e-edited", { (controller?.document as? NSDocument)?.updateChangeCount(.changeDone) }),
             ("9f-saved", { (controller?.document as? NSDocument)?.updateChangeCount(.changeCleared) }),
             ("10-below-minimum", { resize(NSSize(width: 600, height: 400)) }),

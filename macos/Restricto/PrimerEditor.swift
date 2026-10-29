@@ -31,6 +31,13 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
     private let codonPopup = NSPopUpButton()
     private let enzymePopup = NSPopUpButton()
     private let tagPopup = NSPopUpButton()
+    /// Target Tm for the annealing part, and the stepper beside it.
+    private let tmField = NSTextField(string: "60")
+    private let tmStepper = NSStepper()
+    /// Another primer to pair this one with: their product, Tm gap and dimers.
+    private let partnerPopup = NSPopUpButton()
+    /// Pads an enzyme site put at the 5' end with a few bases, so it cuts.
+    private let padSwitch = NSButton(checkboxWithTitle: "Pad a 5′-end site so it cuts", target: nil, action: nil)
     private let info = NSTextField(wrappingLabelWithString: "")
     private let warnings = NSTextField(wrappingLabelWithString: "")
     private let addButton = NSButton(title: "Add", target: nil, action: nil)
@@ -154,6 +161,44 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
             enzymePopup.selectItem(at: i)
         }
         let enzymeRow = insertRow([enzymePopup], action: #selector(insertEnzymeSite(_:)))
+        padSwitch.controlSize = .small
+        padSwitch.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        padSwitch.state = .on
+        padSwitch.toolTip = "Most enzymes cut poorly right at a DNA end; \(PrimerParts.sitePadding) goes in before a site at the 5′ end."
+
+        // Target Tm: the annealing part grows or shrinks along the template to meet it.
+        tmField.controlSize = .small
+        tmField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        tmField.alignment = .right
+        tmField.target = self
+        tmField.action = #selector(tmFieldChanged(_:))
+        tmField.widthAnchor.constraint(equalToConstant: 40).isActive = true
+        tmStepper.controlSize = .small
+        tmStepper.minValue = 45
+        tmStepper.maxValue = 75
+        tmStepper.increment = 1
+        tmStepper.integerValue = 60
+        tmStepper.valueWraps = false
+        tmStepper.target = self
+        tmStepper.action = #selector(tmStepped(_:))
+        let fit = NSButton(title: "Fit", target: self, action: #selector(fitToTm(_:)))
+        fit.controlSize = .small
+        fit.toolTip = "Grow or shrink the annealing part along the template to this Tm"
+        let degrees = NSTextField(labelWithString: "°C")
+        degrees.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        let tmRow = NSStackView(views: [tmField, degrees, tmStepper, NSView(), fit])
+        tmRow.spacing = 4
+
+        // Partner: none, or one of the document's primers.
+        partnerPopup.controlSize = .small
+        partnerPopup.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        partnerPopup.addItem(withTitle: "None")
+        for p in document.primers where p.length > 0 {
+            partnerPopup.addItem(withTitle: p.name)
+            partnerPopup.lastItem?.representedObject = p.index
+        }
+        partnerPopup.target = self
+        partnerPopup.action = #selector(partnerChanged(_:))
 
         // Tags and protease sites.
         for tag in PrimerParts.tags {
@@ -187,21 +232,23 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
             heading("TAG"), colorRow,
             heading("SEQUENCE (5′ → 3′)"), textScroll, flipRow,
             info, warnings,
+            heading("ANNEALING Tm"), tmRow,
+            heading("PARTNER PRIMER"), partnerPopup,
             heading("CODON"), codonRow,
-            heading("ENZYME SITE"), enzymeRow,
+            heading("ENZYME SITE"), enzymeRow, padSwitch,
             heading("TAG OR PROTEASE SITE"), tagRow,
             insertHint,
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 6
-        for v in [nameField, descriptionField, colorRow, flipRow, codonRow, enzymeRow] as [NSView] {
+        for v in [nameField, descriptionField, colorRow, flipRow, tmRow, partnerPopup, codonRow, padSwitch] as [NSView] {
             stack.setCustomSpacing(14, after: v)
         }
         stack.setCustomSpacing(18, after: warnings)
         stack.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 12, right: 14)
-        for v in [nameField, descriptionField, textScroll, info, warnings, codonRow, enzymeRow, tagRow,
-                  insertHint] as [NSView] {
+        for v in [nameField, descriptionField, textScroll, info, warnings, tmRow, partnerPopup, codonRow, enzymeRow,
+                  tagRow, insertHint] as [NSView] {
             v.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24).isActive = true
         }
 
@@ -310,10 +357,16 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
             if tail > 0 { lines.append("\(tail)-nt 5′ tail") }
             if s.mismatches > 0 { warn.append("\(s.mismatches) mismatch\(s.mismatches == 1 ? "" : "es") where it anneals.") }
             if count > 1 { warn.append("Also binds \(count - 1) other place\(count == 2 ? "" : "s"); the best site is shown.") }
+            checkFrames(site: s, tail: tail, lines: &lines, warnings: &warn)
+            // With a partner the selection shows the product; alone, the site.
+            var shown = (start: Int(s.start), length: Int(s.length))
+            if let product = checkPartner(typed: typed, site: s, lines: &lines, warnings: &warn) {
+                shown = product
+            }
             oc_document_set_pending_primer(document.handle, primerName, typed, hexColor, &sites[0])
-            if select, !document.hasSelection || document.selectionStart != Int(s.start)
-                || document.selectionLength != Int(s.length) {
-                document.select(start: Int(s.start), length: Int(s.length))
+            if select, !document.hasSelection || document.selectionStart != shown.start
+                || document.selectionLength != shown.length {
+                document.select(start: shown.start, length: shown.length)
             }
         } else {
             oc_document_clear_pending_primer(document.handle)
@@ -326,12 +379,107 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         if !checkWarnings.isEmpty {
             warn.append(contentsOf: checkWarnings.split(separator: "\n").map { String($0) })
         }
+        // The 3' end: its last five bases tinted, green with one to three G/C.
+        if typed.count >= 5 {
+            let clamp = Int(check.clampGC)
+            let good = (1...3).contains(clamp)
+            lines.append("3′ end …\(typed.suffix(5).uppercased()): \(clamp) G/C" + (good ? " ✓" : ""))
+            sequenceText.threePrimeTint = good ? .systemGreen : .systemOrange
+        } else {
+            sequenceText.threePrimeTint = nil
+        }
+        sequenceText.annealingLength = site.map { Int($0.length) } ?? 0
         info.stringValue = lines.joined(separator: "\n")
         info.textColor = typed.isEmpty ? .secondaryLabelColor : .labelColor
         warnings.stringValue = warn.joined(separator: "\n")
         warnings.isHidden = warn.isEmpty
         info.isHidden = lines.isEmpty
         addButton.isEnabled = site != nil
+    }
+
+    /// For each codon or tag in the tail: whether it lands in frame with the
+    /// CDS the primer joins, and how to fix it when it doesn't.
+    private func checkFrames(site s: OCPrimerSite, tail: Int, lines: inout [String], warnings: inout [String]) {
+        var site = s
+        for mark in sequenceText.marks where mark.part.kind != .enzymeSite && mark.start + mark.length <= tail {
+            var frame = OCFrameCheck()
+            oc_primer_part_frame(document.handle, &site, Int32(tail), Int32(mark.start), Int32(mark.length),
+                                 mark.forward, &frame)
+            guard frame.applies else { continue }
+            let cds = withUnsafeBytes(of: frame.cds) { raw in
+                String(decoding: raw.prefix(while: { $0 != 0 }), as: UTF8.self)
+            }
+            let name = mark.part.name
+            if frame.against_cds {
+                warnings.append("\(name) reads against \(cds); turn it round with the switch before inserting.")
+            } else if frame.in_frame {
+                lines.append("\(name) in frame with \(cds) ✓")
+            } else {
+                warnings.append("\(name) is out of frame with \(cds): add \(frame.fix) base\(frame.fix == 1 ? "" : "s") "
+                                + "between it and the annealing part.")
+            }
+        }
+    }
+
+    /// With a partner chosen: the product, the gap between the annealing Tms
+    /// and any dimer. Returns the product's span on the template, to select.
+    private func checkPartner(typed: String, site s: OCPrimerSite, lines: inout [String],
+                              warnings: inout [String]) -> (start: Int, length: Int)? {
+        guard let index = partnerPopup.selectedItem?.representedObject as? Int,
+              let partner = document.primers.first(where: { $0.index == index }), partner.length > 0 else { return nil }
+        var mine = s
+        var theirs = OCPrimerSite(start: Int32(partner.start), length: Int32(partner.length), strand: partner.strand,
+                                  mismatches: 0)
+        let product = Int(oc_pcr_product_length(document.handle, &mine, Int32(typed.count - Int(s.length)), &theirs,
+                                                Int32(partner.bases.count - partner.length)))
+        var a = OCPrimerCheck(), b = OCPrimerCheck()
+        oc_string_free(oc_primer_check(String(typed.suffix(Int(s.length))), &a))
+        oc_string_free(oc_primer_check(String(partner.bases.suffix(partner.length)), &b))
+        var line = "With \(partner.name): "
+        line += product > 0 ? "\(product.formatted()) bp product" : "no product (they don't face each other)"
+        if !a.tm.isNaN, !b.tm.isNaN {
+            let gap = abs(a.tm - b.tm)
+            line += " · Tm gap \(String(format: "%.1f", gap)) °C"
+            if gap > 5 { warnings.append("The Tms differ by more than 5 °C; fit this one to \(String(format: "%.0f", b.tm)) °C.") }
+        }
+        lines.append(line)
+        let pair = takeString(oc_primer_pair_check(typed, partner.bases))
+        if !pair.isEmpty { warnings.append(contentsOf: pair.split(separator: "\n").map { String($0) }) }
+        guard product > 0 else { return nil }
+        // The template stretch the product covers (tails aside).
+        let forwardSite = s.strand == Int32(OC_STRAND_FORWARD) ? (Int(s.start), Int(s.length)) : (partner.start, partner.length)
+        let reverseSite = s.strand == Int32(OC_STRAND_FORWARD) ? (partner.start, partner.length) : (Int(s.start), Int(s.length))
+        var length = reverseSite.0 + reverseSite.1 - forwardSite.0
+        if length <= 0 { length += document.length }
+        return (forwardSite.0, length)
+    }
+
+    @objc private func partnerChanged(_ sender: Any?) { refresh() }
+
+    @objc private func tmStepped(_ sender: Any?) {
+        tmField.integerValue = tmStepper.integerValue
+        fitToTm(nil)
+    }
+
+    @objc private func tmFieldChanged(_ sender: Any?) {
+        let value = min(75, max(45, tmField.integerValue))
+        tmField.integerValue = value
+        tmStepper.integerValue = value
+        fitToTm(nil)
+    }
+
+    /// Grows or shrinks the annealing part along the template to the target Tm.
+    @objc private func fitToTm(_ sender: Any?) {
+        guard var s = site else { NSSound.beep(); return }
+        sequenceText.removeWhitespace()
+        let typed = bases
+        var fitted = OCPrimerSite()
+        let result = takeString(oc_primer_fit_tm(document.handle, typed, &s, Double(tmStepper.integerValue), &fitted))
+        guard fitted.length > 0, result.count >= Int(fitted.length) else { return }
+        let total = (typed as NSString).length
+        sequenceText.replaceBases(in: NSRange(location: total - Int(s.length), length: Int(s.length)),
+                                  with: String(result.suffix(Int(fitted.length))))
+        refresh()
     }
 
     private func nextPrimerName() -> String {
@@ -416,7 +564,9 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
     private func insert(_ part: PrimerPart?) {
         guard let part = part else { NSSound.beep(); return }
         view.window?.makeFirstResponder(sequenceText)
-        sequenceText.insertPart(part, forward: flipSwitch.state != .on)
+        let atFivePrimeEnd = sequenceText.selectedRange().location == 0
+        let pad = part.kind == .enzymeSite && atFivePrimeEnd && padSwitch.state == .on
+        sequenceText.insertPart(part, forward: flipSwitch.state != .on, padding: pad ? PrimerParts.sitePadding : "")
     }
 
     @objc private func accept(_ sender: Any?) {
@@ -445,6 +595,16 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
     static var isAnyOpen: Bool { !showing.isEmpty }
     /// Presses Add on each open editor.
     static func acceptAll() { showing.forEach { $0.accept(nil) } }
+    /// Fits each open editor's primer to `tm` and returns where each now binds.
+    static func fitAll(to tm: Int) -> [OCPrimerSite] {
+        showing.compactMap {
+            $0.tmStepper.integerValue = tm
+            $0.tmStepped(nil)
+            return $0.site
+        }
+    }
+    /// Presses Cancel on each open editor.
+    static func cancelAll() { showing.forEach { $0.cancel(nil) } }
     /// Inserts the first tag (His6) at each open editor's cursor.
     static func insertFirstTag() {
         showing.forEach {
@@ -533,16 +693,90 @@ final class PrimerTextView: NSTextView {
 
     /// Inserts a part at the cursor as one undo step, reading forward (as
     /// typed) or, reverse complemented, backward.
-    func insertPart(_ part: PrimerPart, forward: Bool) {
+    func insertPart(_ part: PrimerPart, forward: Bool, padding: String = "") {
         let bases = (forward ? part.bases : PrimerParts.reverseComplement(part.bases)).uppercased()
         let range = selectedRange()
-        guard shouldChangeText(in: range, replacementString: bases) else { return }
+        guard shouldChangeText(in: range, replacementString: padding + bases) else { return }
         var attributes = baseAttributes
         attributes[Self.markKey] = PartMark(part: part, forward: forward)
-        textStorage?.replaceCharacters(in: range, with: NSAttributedString(string: bases, attributes: attributes))
+        let text = NSMutableAttributedString(string: padding, attributes: baseAttributes)
+        text.append(NSAttributedString(string: bases, attributes: attributes))
+        textStorage?.replaceCharacters(in: range, with: text)
         didChangeText()
-        setSelectedRange(NSRange(location: range.location + (bases as NSString).length, length: 0))
+        setSelectedRange(NSRange(location: range.location + text.length, length: 0))
         needsDisplay = true
+    }
+
+    /// The marked parts, counted in bases from the 5' end (spaces and line
+    /// breaks don't count).
+    var marks: [(start: Int, length: Int, part: PrimerPart, forward: Bool)] {
+        guard let storage = textStorage else { return [] }
+        let text = storage.string as NSString
+        var out: [(start: Int, length: Int, part: PrimerPart, forward: Bool)] = []
+        storage.enumerateAttribute(Self.markKey, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+            guard let mark = value as? PartMark else { return }
+            func bases(_ r: NSRange) -> Int {
+                (text.substring(with: r) as String).filter { !$0.isWhitespace }.count
+            }
+            out.append((bases(NSRange(location: 0, length: range.location)), bases(range), mark.part, mark.forward))
+        }
+        return out
+    }
+
+    /// Deletes spaces and line breaks, keeping the marks on their bases.
+    func removeWhitespace() {
+        guard let storage = textStorage else { return }
+        let text = storage.string as NSString
+        var i = text.length - 1
+        storage.beginEditing()
+        while i >= 0 {
+            if let scalar = UnicodeScalar(text.character(at: i)), CharacterSet.whitespacesAndNewlines.contains(scalar) {
+                storage.deleteCharacters(in: NSRange(location: i, length: 1))
+            }
+            i -= 1
+        }
+        storage.endEditing()
+    }
+
+    /// Replaces some bases with unmarked ones, as one undo step.
+    func replaceBases(in range: NSRange, with bases: String) {
+        guard shouldChangeText(in: range, replacementString: bases) else { return }
+        textStorage?.replaceCharacters(in: range, with: NSAttributedString(string: bases, attributes: baseAttributes))
+        didChangeText()
+        setSelectedRange(NSRange(location: 0, length: 0))
+        needsDisplay = true
+    }
+
+    /// How many bases at the 3' end anneal; a grey line marks them.
+    var annealingLength = 0 {
+        didSet { if annealingLength != oldValue { needsDisplay = true } }
+    }
+
+    /// The tint behind the last five bases (the 3' end), or nil for none.
+    var threePrimeTint: NSColor? {
+        didSet { applyThreePrimeTint() }
+    }
+
+    private func applyThreePrimeTint() {
+        guard let layout = layoutManager, let storage = textStorage else { return }
+        let all = NSRange(location: 0, length: storage.length)
+        layout.removeTemporaryAttribute(.backgroundColor, forCharacterRange: all)
+        guard let tint = threePrimeTint, let end = lastBases(5) else { return }
+        layout.addTemporaryAttribute(.backgroundColor, value: tint.withAlphaComponent(0.22), forCharacterRange: end)
+    }
+
+    /// The character range of the last `count` bases (skipping spaces), or nil if there are fewer.
+    private func lastBases(_ count: Int) -> NSRange? {
+        guard let storage = textStorage, count > 0 else { return nil }
+        let text = storage.string as NSString
+        var i = text.length, found = 0
+        while i > 0, found < count {
+            i -= 1
+            if let scalar = UnicodeScalar(text.character(at: i)), !CharacterSet.whitespacesAndNewlines.contains(scalar) {
+                found += 1
+            }
+        }
+        return found == count ? NSRange(location: i, length: text.length - i) : nil
     }
 
     /// Reverse complements the bases, keeping each mark on its bases with its
@@ -566,47 +800,55 @@ final class PrimerTextView: NSTextView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        guard let layout = layoutManager, let container = textContainer, let storage = textStorage else { return }
-        let origin = textContainerOrigin
-        let descent = abs(baseFont.descender)
+        guard let storage = textStorage else { return }
         storage.enumerateAttribute(Self.markKey, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
             guard let mark = value as? PartMark else { return }
-            let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-            var first = true
-            layout.enumerateLineFragments(forGlyphRange: glyphs) { lineRect, _, _, lineGlyphs, _ in
-                let piece = NSIntersectionRange(glyphs, lineGlyphs)
-                guard piece.length > 0 else { return }
-                let box = layout.boundingRect(forGlyphRange: piece, in: container)
-                let baseline = origin.y + lineRect.minY + layout.location(forGlyphAt: piece.location).y
-                let y = baseline + descent + 3
-                let x0 = origin.x + box.minX + 1, x1 = origin.x + box.maxX - 1
-                let color = mark.part.color
-                color.setStroke()
-                color.setFill()
-                let line = NSBezierPath()
-                line.lineWidth = 1.5
-                line.move(to: NSPoint(x: x0, y: y))
-                line.line(to: NSPoint(x: x1, y: y))
-                line.stroke()
-                // The arrowhead where the part ends, the way it reads.
-                let lastPiece = NSMaxRange(piece) == NSMaxRange(glyphs)
-                if mark.forward ? lastPiece : first {
-                    let tip = mark.forward ? x1 : x0, back: CGFloat = mark.forward ? -5 : 5
-                    let head = NSBezierPath()
-                    head.move(to: NSPoint(x: tip, y: y))
-                    head.line(to: NSPoint(x: tip + back, y: y - 3))
-                    head.line(to: NSPoint(x: tip + back, y: y + 3))
-                    head.close()
-                    head.fill()
-                }
-                if first {
-                    let label = NSAttributedString(string: mark.part.name, attributes: [
-                        .font: Self.markFont, .foregroundColor: color,
-                    ])
-                    label.draw(at: NSPoint(x: x0, y: y + 2))
-                }
-                first = false
+            drawMark(range, color: mark.part.color, name: mark.part.name, forward: mark.forward)
+        }
+        // The annealing part: a grey line along the bases that bind.
+        if annealingLength > 0, let range = lastBases(annealingLength) {
+            drawMark(range, color: .tertiaryLabelColor, name: "anneals", forward: true)
+        }
+    }
+
+    /// A line under the characters in `range`, with an arrowhead the way it
+    /// reads and `name` under its start.
+    private func drawMark(_ range: NSRange, color: NSColor, name: String, forward: Bool) {
+        guard let layout = layoutManager, let container = textContainer else { return }
+        let origin = textContainerOrigin
+        let descent = abs(baseFont.descender)
+        let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        var first = true
+        layout.enumerateLineFragments(forGlyphRange: glyphs) { lineRect, _, _, lineGlyphs, _ in
+            let piece = NSIntersectionRange(glyphs, lineGlyphs)
+            guard piece.length > 0 else { return }
+            let box = layout.boundingRect(forGlyphRange: piece, in: container)
+            let baseline = origin.y + lineRect.minY + layout.location(forGlyphAt: piece.location).y
+            let y = baseline + descent + 3
+            let x0 = origin.x + box.minX + 1, x1 = origin.x + box.maxX - 1
+            color.setStroke()
+            color.setFill()
+            let line = NSBezierPath()
+            line.lineWidth = 1.5
+            line.move(to: NSPoint(x: x0, y: y))
+            line.line(to: NSPoint(x: x1, y: y))
+            line.stroke()
+            // The arrowhead where the part ends, the way it reads.
+            let lastPiece = NSMaxRange(piece) == NSMaxRange(glyphs)
+            if forward ? lastPiece : first {
+                let tip = forward ? x1 : x0, back: CGFloat = forward ? -5 : 5
+                let head = NSBezierPath()
+                head.move(to: NSPoint(x: tip, y: y))
+                head.line(to: NSPoint(x: tip + back, y: y - 3))
+                head.line(to: NSPoint(x: tip + back, y: y + 3))
+                head.close()
+                head.fill()
             }
+            if first {
+                NSAttributedString(string: name, attributes: [.font: Self.markFont, .foregroundColor: color])
+                    .draw(at: NSPoint(x: x0, y: y + 2))
+            }
+            first = false
         }
     }
 }
