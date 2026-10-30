@@ -1024,6 +1024,12 @@ MapHit MapLayout::hitTest(Point p) const
     MapHit hit;
     if (m_n == 0)
         return hit;
+    if (const int pr = primerAt(p); pr >= 0) {
+        hit.kind = MapHit::Primer;
+        hit.index = pr;
+        hit.position = positionAt(p);
+        return hit;
+    }
     for (const LabelGlyph &g : m_labels)
         if (g.primer < 0 && g.rect.adjusted(2).contains(p)) {
             hit.kind = g.feature >= 0 ? MapHit::Feature : MapHit::Site;
@@ -1040,6 +1046,38 @@ MapHit MapLayout::hitTest(Point p) const
     hit.kind = MapHit::Sequence;
     hit.position = positionAt(p);
     return hit;
+}
+
+// The primer whose arrow or name is at p, or -1. The arrows are drawn
+// as in render(): a band just outside the features, or the linear primer row.
+int MapLayout::primerAt(Point p) const
+{
+    if (!m_options.primers)
+        return -1;
+    for (const LabelGlyph &g : m_labels)
+        if (g.primer >= 0 && g.rect.adjusted(2).contains(p))
+            return g.primer;
+    for (int i = int(m_seq.primers.size()) - 1; i >= 0; --i) {
+        const Primer &pr = m_seq.primers[size_t(i)];
+        if (pr.binding.length() <= 0 || pr.binding.end > m_n)
+            continue;
+        if (m_circular) {
+            const double r = std::hypot(p.x - m_c.x, p.y - m_c.y);
+            const double r0 = m_featureOuter + 2;
+            if (r < r0 - 3 || r > r0 + 10)
+                continue;
+            const double pos = angleAt(p) / (2 * kPi) * m_n;
+            const double slack = 3.0 / std::max(1.0, r) / (2 * kPi) * m_n;   // 3 px either side
+            if (pos >= pr.binding.start - slack && pos <= pr.binding.end + slack)
+                return i;
+        } else {
+            if (m_primerRowY <= 0 || p.y < m_primerRowY - 3 || p.y > m_primerRowY + 10)
+                continue;
+            if (p.x >= xOfPos(pr.binding.start) - 3 && p.x <= xOfPos(pr.binding.end) + 3)
+                return i;
+        }
+    }
+    return -1;
 }
 
 std::string MapLayout::featureTooltip(int i) const

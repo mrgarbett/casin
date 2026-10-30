@@ -1040,6 +1040,7 @@ void oc_map_layout_hit(const OCMapLayout *layout, double x, double y, int *kind,
         *kind = h.kind == view::MapHit::Feature ? OC_HIT_FEATURE
               : h.kind == view::MapHit::Site    ? OC_HIT_SITE
               : h.kind == view::MapHit::Sequence ? OC_HIT_SEQUENCE
+              : h.kind == view::MapHit::Primer   ? OC_HIT_PRIMER
                                                  : OC_HIT_NONE;
     if (index)
         *index = h.index;

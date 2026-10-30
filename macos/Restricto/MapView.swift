@@ -17,6 +17,9 @@ final class MapView: NSView {
     var onHoverBase: ((Int) -> Void)?
     /// Called with a feature's index when it is double-clicked.
     var onEditFeature: ((Int) -> Void)?
+    /// Called with a primer's index when it is clicked, and whether shift
+    /// was down. Without it, a click on a primer selects where it binds.
+    var onPickPrimer: ((Int, Bool) -> Void)?
 
     init(document: CoreDocument) {
         self.document = document
@@ -104,6 +107,12 @@ final class MapView: NSView {
             if event.clickCount == 2 { onEditFeature?(Int(index)) }
         case Int32(OC_HIT_SITE):
             document.activateSite(Int(index))
+        case Int32(OC_HIT_PRIMER):
+            if let pick = onPickPrimer {
+                pick(Int(index), event.modifierFlags.contains(.shift))
+            } else if let p = document.primers.first(where: { $0.index == Int(index) }), p.length > 0 {
+                document.select(start: p.start, length: p.length)
+            }
         case Int32(OC_HIT_SEQUENCE):
             selecting = true
             anchor = Int(position)

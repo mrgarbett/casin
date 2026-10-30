@@ -37,7 +37,7 @@ enum {
 };
 enum { OC_FORMAT_GENBANK = 1, OC_FORMAT_FASTA = 2, OC_FORMAT_SNAPGENE = 3, OC_FORMAT_EMBL = 4 };
 enum { OC_STRAND_NONE = 0, OC_STRAND_FORWARD = 1, OC_STRAND_REVERSE = 2 };
-enum { OC_HIT_NONE = 0, OC_HIT_FEATURE = 1, OC_HIT_SITE = 2, OC_HIT_SEQUENCE = 3 };
+enum { OC_HIT_NONE = 0, OC_HIT_FEATURE = 1, OC_HIT_SITE = 2, OC_HIT_SEQUENCE = 3, OC_HIT_PRIMER = 4 };
 enum { OC_ITEM_PATH = 0, OC_ITEM_TEXT = 1 };
 enum { OC_HALIGN_LEFT = 0, OC_HALIGN_CENTER = 1, OC_HALIGN_RIGHT = 2 };
 enum { OC_VALIGN_BASELINE = 0, OC_VALIGN_MIDDLE = 1, OC_VALIGN_TOP = 2 };
@@ -247,7 +247,7 @@ OCMapLayout *oc_map_layout_new_frames(const OCDocument *doc, double width, doubl
                                       OCMeasureText measure, void *context);
 void oc_map_layout_free(OCMapLayout *layout);
 OCScene *oc_map_layout_render(const OCMapLayout *layout, const OCDocument *doc);
-/* kind = OC_HIT_*; index = feature or visible-site index; position = base boundary. */
+/* kind = OC_HIT_*; index = feature, visible-site or primer index; position = base boundary. */
 void oc_map_layout_hit(const OCMapLayout *layout, double x, double y, int *kind, int *index, int *position);
 bool oc_map_layout_is_circular(const OCMapLayout *layout);
 double oc_map_layout_angle_at(const OCMapLayout *layout, double x, double y);

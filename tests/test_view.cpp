@@ -130,6 +130,35 @@ int main(int argc, char **argv)
         CHECK(h.kind == MapHit::Sequence);
     }
 
+    // Primers can be clicked on the map, circular and linear; the rest of
+    // the map still hits the sequence.
+    {
+        Sequence primed = seq;
+        primed.primers.push_back({"fwd", primed.bases.substr(400, 24), {400, 424}, Strand::Forward});
+        for (bool circular : {true, false}) {
+            primed.circular = circular;
+            MapLayout m(primed, {}, theme, tm, 900, 700);
+            int hits = 0;
+            for (double y = 0; y < 700; y += 2)
+                for (double x = 0; x < 900; x += 2) {
+                    const MapHit h = m.hitTest({x, y});
+                    if (h.kind == MapHit::Primer) {
+                        ++hits;
+                        CHECK_EQ(h.index, 0);
+                    }
+                }
+            CHECK(hits > 10);
+            MapOptions none;
+            none.primers = false;
+            MapLayout hidden(primed, {}, theme, tm, 900, 700, none);
+            bool any = false;
+            for (double y = 0; y < 700 && !any; y += 2)
+                for (double x = 0; x < 900 && !any; x += 2)
+                    any = hidden.hitTest({x, y}).kind == MapHit::Primer;
+            CHECK(!any);
+        }
+    }
+
     // Linear layout of the same sequence.
     Sequence lin = seq;
     lin.circular = false;

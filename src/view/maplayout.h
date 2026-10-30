@@ -27,9 +27,9 @@ struct MapOptions {
 };
 
 struct MapHit {
-    enum Kind { None, Feature, Site, Sequence } kind = None;
-    int index = -1;          // feature index, or site index for Site
-    int position = 0;        // nearest base boundary for Sequence
+    enum Kind { None, Feature, Site, Sequence, Primer } kind = None;
+    int index = -1;          // feature, site or primer index
+    int position = 0;        // nearest base boundary (Sequence and Primer)
 };
 
 // Lays out a circular map (circular sequences) or a linear map (otherwise)
@@ -91,6 +91,7 @@ private:
     void renderLabels(Scene &s, const MapState &st) const;
     void findMapOrfs();
     void renderOrfs(Scene &s) const;
+    int primerAt(Point p) const;
     std::string featureTooltip(int i) const;
     std::string siteTooltip(const std::vector<int> &sites) const;
 

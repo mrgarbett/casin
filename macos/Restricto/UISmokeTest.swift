@@ -150,6 +150,25 @@ enum UISmokeTest {
                     exit(6)
                 }
             }),
+            ("9i-pcr-pick", {
+                // Clicking primers on the vector map: a plain click starts over
+                // with one primer (no product), shift-click adds the second.
+                let primers = (controller?.document as? SequenceDocument)?.core.primers.filter { $0.length > 0 } ?? []
+                let expected = PcrWizard.productLengths.first ?? 0
+                guard let f = primers.first(where: { $0.strand == Int32(OC_STRAND_FORWARD) }),
+                      let r = primers.first(where: { $0.strand == Int32(OC_STRAND_REVERSE) }) else {
+                    FileHandle.standardError.write("ui-smoke: the sample has no primer pair\n".data(using: .utf8)!)
+                    exit(6)
+                }
+                PcrWizard.pickOnMap(f.index, adding: false)
+                let one = PcrWizard.productLengths.first ?? -1
+                let tabOff = !PcrWizard.productTabEnabled
+                PcrWizard.pickOnMap(r.index, adding: true)
+                guard one == 0, tabOff, PcrWizard.productLengths.first == expected, PcrWizard.productTabEnabled else {
+                    FileHandle.standardError.write("ui-smoke: picking primers on the PCR map went wrong\n".data(using: .utf8)!)
+                    exit(6)
+                }
+            }),
             ("9i-pcr-opened", {
                 func note(_ text: String) { print("ui-smoke: 9i \(text)"); fflush(stdout) }
                 note("capture")
