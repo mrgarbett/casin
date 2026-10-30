@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // EXPERIMENTAL: the gel photographed on a blue-light box, by path tracing on
 // the GPU (Metal). Nothing here is painted to look like a gel: the scene is
-// a block of agarose (a refracting, faintly scattering, stain-filled medium)
-// lying on a glowing plate under a dark room with one lamp, and the
+// a block of agarose (a refracting, faintly scattering, stain-filled medium,
+// shaped as a cast gel is: a sagging top, a lip at the edges, wells cut in)
+// lying on a glowing plate, in spilt buffer, under a dark room with one lamp, and the
 // picture is what a camera would see. Light enters the block from the plate,
 // the stain fluoresces faintly everywhere and brightly where the DNA is, rays
 // that leave at a shallow angle bounce inside the slab until they escape at
@@ -576,24 +577,6 @@ final class Gel3DView: NSView, MTKViewDelegate {
 
     // The ray against the slab, an axis-aligned box: where it goes in and
     // out, and the outward normals there.
-    inline bool slabHit(float3 o, float3 d, float3 bmin, float3 bmax,
-                        thread float &t0, thread float &t1, thread float3 &n0, thread float3 &n1) {
-        float3 inv = 1.0 / d;
-        float3 ta = (bmin - o) * inv, tb = (bmax - o) * inv;
-        float3 tmin = min(ta, tb), tmax = max(ta, tb);
-        t0 = max(max(tmin.x, tmin.y), tmin.z);
-        t1 = min(min(tmax.x, tmax.y), tmax.z);
-        if (t1 <= max(t0, 0.0)) return false;
-        if (t0 == tmin.x) n0 = float3(-sign(d.x), 0, 0);
-        else if (t0 == tmin.y) n0 = float3(0, -sign(d.y), 0);
-        else n0 = float3(0, 0, -sign(d.z));
-        if (t1 == tmax.x) n1 = float3(sign(d.x), 0, 0);
-        else if (t1 == tmax.y) n1 = float3(0, sign(d.y), 0);
-        else n1 = float3(0, 0, sign(d.z));
-        return true;
-    }
-
-    // Reflectance of a dielectric; eta = n1 / n2.
     inline float fresnel(float cosi, float cost, float eta) {
         float rs = (eta * cosi - cost) / (eta * cosi + cost);
         float rp = (cosi - eta * cost) / (cosi + eta * cost);
@@ -634,7 +617,14 @@ final class Gel3DView: NSView, MTKViewDelegate {
         float edge = smoothstep(0.0, 0.012, halfX - abs(q.x))
                    * smoothstep(0.0, 0.012, q.y - zmin) * smoothstep(0.0, 0.012, front - q.y);
         float3 dark = u.plate.xyz * 0.016 + 0.0004;
-        if (edge <= 0.0) return dark;
+        if (edge <= 0.0) {
+            // The box's black frame around the glass: matte, with a faint
+            // bevel lit by the glass beside it.
+            float past = max(max(abs(q.x) - halfX, q.y - front), zmin - q.y);
+            float bevel = smoothstep(0.004, 0.0, past);
+            float frame = smoothstep(0.03, 0.018, past);
+            return dark + frame * (float3(0.012) * (0.8 + 0.4 * vnoise(q * 300.0)) + u.plate.xyz * u.emitter.w * 0.05 * bevel);
+        }
         // Brightest a little behind the gel, near black at the corners.
         float2 rel = (q - float2(0.0, -0.3 * front)) / float2(halfX, front);
         float fall = mix(1.0, 0.06, smoothstep(0.12, 1.1, length(rel)));
@@ -658,23 +648,115 @@ final class Gel3DView: NSView, MTKViewDelegate {
         return dark + float3(14.0, 13.0, 12.0) * lx * lz;
     }
 
-    // The wet top isn't flat: a slight ripple tilts its reflections.
+    // The wet top isn't quite smooth: a fine ripple tilts its reflections.
     inline float3 ripple(float3 x, float3 n) {
         if (n.y < 0.5) return n;
         float2 q = x.xz * 160.0;
         float dx = vnoise(q + float2(0.7, 0.0)) - vnoise(q - float2(0.7, 0.0));
         float dz = vnoise(q + float2(0.0, 0.7)) - vnoise(q - float2(0.0, 0.7));
-        return normalize(n + float3(dx, 0.0, dz) * 0.06);
+        return normalize(n + float3(dx, 0.0, dz) * 0.035);
     }
 
-    // What a ray sees once it's clear of the slab.
-    inline float3 outside(float3 p, float3 d, constant Uniforms &u) {
-        if (d.y < -0.0001) {
-            float t = -p.y / d.y;
-            float3 h = p + d * t;
-            return plate(h.xz, u);
+    // The slab's shape. A cast gel isn't a box: its top sags a little and
+    // climbs the tray's walls in a lip, its outline wanders by a fraction
+    // of a millimetre, its edges are softened, and the wells are cut into
+    // it. Height of the top at xz:
+    inline float slabTop(float2 xz, constant Uniforms &u, texture2d<float> bands) {
+        constexpr sampler s(address::clamp_to_edge, filter::linear);
+        float hw = u.slab.x * 0.5, hd = u.slab.y * 0.5, thick = u.slab.z;
+        float2 uv = float2(xz.x / u.slab.x + 0.5, xz.y / u.slab.y + 0.5);
+        float well = bands.sample(s, uv).b;
+        float inset = min(hw - abs(xz.x), hd - abs(xz.y));
+        float lip = exp(-max(inset, 0.0) / 0.0015) * 0.00055;
+        float sag = (vnoise(xz * 120.0) - 0.5) * 0.00014 + (vnoise(xz * 23.0 + 7.0) - 0.5) * 0.0003;
+        float cut = smoothstep(0.55, 0.85, well) * u.slab.w * thick;
+        return thick + lip + sag - cut;
+    }
+    // Signed distance to the slab: negative inside.
+    inline float slabSDF(float3 p, constant Uniforms &u, texture2d<float> bands) {
+        float hw = u.slab.x * 0.5, hd = u.slab.y * 0.5;
+        float r = 0.0007;
+        float2 e = float2(hw + (vnoise(float2(p.z * 90.0, 1.5)) - 0.5) * 0.0006,
+                          hd + (vnoise(float2(p.x * 90.0, 8.5)) - 0.5) * 0.0006);
+        float2 q = abs(p.xz) - (e - r);
+        float dxz = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+        float dy = max(p.y - slabTop(p.xz, u, bands), -p.y);
+        // Softened where the top meets the sides.
+        float k = 0.0004;
+        float h = clamp(0.5 + 0.5 * (dxz - dy) / k, 0.0, 1.0);
+        return mix(dy, dxz, h) + k * h * (1.0 - h);
+    }
+    inline float3 slabNormal(float3 p, constant Uniforms &u, texture2d<float> bands) {
+        float e = 0.00003;
+        float3 n = float3(slabSDF(p + float3(e, 0, 0), u, bands) - slabSDF(p - float3(e, 0, 0), u, bands),
+                          slabSDF(p + float3(0, e, 0), u, bands) - slabSDF(p - float3(0, e, 0), u, bands),
+                          slabSDF(p + float3(0, 0, e), u, bands) - slabSDF(p - float3(0, 0, e), u, bands));
+        return normalize(n);
+    }
+    // The box around the slab with room for its lip and wandering outline;
+    // where a ray crosses it, or false.
+    inline bool slabBox(float3 o, float3 d, constant Uniforms &u, thread float &t0, thread float &t1) {
+        float pad = 0.0015;
+        float3 bmin = float3(-u.slab.x * 0.5 - pad, -0.0001, -u.slab.y * 0.5 - pad);
+        float3 bmax = float3(u.slab.x * 0.5 + pad, u.slab.z + pad, u.slab.y * 0.5 + pad);
+        float3 inv = 1.0 / d;
+        float3 ta = (bmin - o) * inv, tb = (bmax - o) * inv;
+        float3 tmin = min(ta, tb), tmax = max(ta, tb);
+        t0 = max(max(max(tmin.x, tmin.y), tmin.z), 0.0);
+        t1 = min(min(tmax.x, tmax.y), tmax.z);
+        return t1 > t0;
+    }
+    // Where a ray from outside meets the slab, walking the distance field;
+    // false if it misses. Starts a little along, so a ray that has just
+    // left the slab doesn't find the face it left.
+    inline bool enterSlab(float3 o, float3 d, constant Uniforms &u, texture2d<float> bands, thread float &tHit) {
+        float t0, t1;
+        if (!slabBox(o, d, u, t0, t1)) return false;
+        float t = max(t0, 0.0002), prev = t;
+        float dp = slabSDF(o + d * t, u, bands);
+        for (int i = 0; i < 80 && t < t1; i++) {
+            if (dp < 0.00002) {
+                if (dp < -0.00002) {
+                    // Stepped through a well's wall or the lip: find the face.
+                    float a = prev, b = t;
+                    for (int j = 0; j < 5; j++) {
+                        float m = 0.5 * (a + b);
+                        if (slabSDF(o + d * m, u, bands) > 0.0) a = m; else b = m;
+                    }
+                    t = b;
+                }
+                tHit = t;
+                return true;
+            }
+            prev = t;
+            t += max(dp * 0.9, 0.00004);
+            dp = slabSDF(o + d * t, u, bands);
         }
-        return room(p, d);
+        return false;
+    }
+
+    // What a ray sees once it's clear of the slab: the plate, wet around the
+    // gel where buffer spilt (a film that mirrors the room), or the room.
+    inline float3 outside(float3 p, float3 d, constant Uniforms &u) {
+        if (d.y >= -0.0001) return room(p, d);
+        float t = -p.y / d.y;
+        float3 h = p + d * t;
+        float3 c = plate(h.xz, u);
+        float2 q = abs(h.xz) - float2(u.slab.x * 0.5, u.slab.y * 0.5);
+        float away = length(max(q, 0.0));
+        float wet = smoothstep(0.012, 0.0, away + (vnoise(h.xz * 180.0) - 0.5) * 0.008)
+                  + smoothstep(0.64, 0.76, vnoise(h.xz * 45.0 + 3.0)) * 0.7;
+        wet = clamp(wet, 0.0, 1.0);
+        if (wet > 0.0) {
+            float2 w = h.xz * 320.0;
+            float3 n = normalize(float3((vnoise(w) - 0.5) * 0.10, 1.0, (vnoise(w + 5.0) - 0.5) * 0.10));
+            float cosi = max(0.01, -dot(d, n));
+            float eta = 1.0 / 1.33;
+            float cost = sqrt(max(0.0, 1.0 - eta * eta * (1.0 - cosi * cosi)));
+            float F = fresnel(cosi, cost, eta);
+            c = mix(c, c * (1.0 - F) + room(h, reflect(d, n)) * F, wet);
+        }
+        return c;
     }
 
     // The gel at a point: what it gives off and what it drinks.
@@ -686,15 +768,13 @@ final class Gel3DView: NSView, MTKViewDelegate {
         float yf = p.y / u.slab.z;
         // The DNA fills the thickness, fading at the faces.
         float prof = smoothstep(0.0, 0.15, yf) * smoothstep(1.0, 0.85, yf);
-        // A well is a slot of buffer cut into the top: no stain there.
-        float inWell = (m.b > 0.8 && yf > 1.0 - u.slab.w) ? 1.0 : 0.0;
-        // The well's walls scatter the light: a bright rim.
+        // The well's cut walls scatter the light: a bright rim.
         float wall = (m.b > 0.2 && m.b <= 0.8 && yf > 1.0 - u.slab.w) ? 1.0 : 0.0;
         // The stain is never quite even.
         float uneven = 0.72 + 0.36 * vnoise(uv * float2(9.0, 5.0) + 1.0) + 0.12 * vnoise(uv * float2(60.0, 33.0));
         float3 stain = u.stain.xyz * u.stain.w, band = u.band.xyz * u.band.w;
         Medium md;
-        md.emit = (stain * uneven * (1.0 + 6.0 * wall) + band * m.r * prof) * u.look.z * (1.0 - inWell);
+        md.emit = (stain * uneven * (1.0 + 6.0 * wall) + band * m.r * prof) * u.look.z;
         md.absorb = u.sigma.xyz + float3(0.6, 0.9, 0.15) * 260.0 * m.g;
         return md;
     }
@@ -721,48 +801,65 @@ final class Gel3DView: NSView, MTKViewDelegate {
             dir = normalize(focus - o);
         }
 
-        float3 bmin = float3(-u.slab.x * 0.5, 0.0, -u.slab.y * 0.5);
-        float3 bmax = float3(u.slab.x * 0.5, u.slab.z, u.slab.y * 0.5);
+        float hw = u.slab.x * 0.5, hd = u.slab.y * 0.5;
         float3 L = float3(0.0), T = float3(1.0);
         float3 p = o, d = dir;
         bool inside = false;
         int scatters = 0;
         for (int bounce = 0; bounce < 12; bounce++) {
-            float t0, t1;
-            float3 n0, n1;
-            bool hit = slabHit(p, d, bmin, bmax, t0, t1, n0, n1);
             if (!inside) {
-                if (!hit || t0 < 0.0) { L += T * outside(p, d, u); break; }
+                float tHit;
+                if (!enterSlab(p, d, u, bands, tHit)) { L += T * outside(p, d, u); break; }
                 // Into the gel, or off its surface.
-                float3 x = p + d * t0;
+                float3 x = p + d * tHit;
+                float3 ng = slabNormal(x, u, bands);
                 // The top's cut edges scatter the trapped light: a thin bright lip.
-                if (n0.y > 0.5) {
-                    float ex = min(bmax.x - abs(x.x), bmax.z - abs(x.z));
+                if (ng.y > 0.5) {
+                    float ex = min(hw - abs(x.x), hd - abs(x.z));
                     float lip = smoothstep(0.0012, 0.0, ex);
                     L += T * u.lip.xyz * u.lip.w * lip * u.emitter.w;
                 }
-                float3 n = ripple(x, n0);
+                float3 n = ripple(x, ng);
                 float cosi = max(0.01, -dot(d, n));
                 float eta = 1.0 / IOR;
                 float sin2t = eta * eta * (1.0 - cosi * cosi);
                 float cost = sqrt(max(0.0, 1.0 - sin2t));
                 float F = fresnel(cosi, cost, eta);
-                if (rnd(seed) < F) { d = reflect(d, n); p = x + n0 * EPS; continue; }
+                if (rnd(seed) < F) { d = reflect(d, n); p = x + ng * EPS; continue; }
                 d = normalize(eta * d + (eta * cosi - cost) * n);
-                p = x - n0 * EPS;
+                p = x - ng * EPS;
                 inside = true;
                 continue;
             }
-            if (!hit) break;
-            // Through the gel to its far face, gathering the stain's light,
-            // sometimes scattered off course.
+            // Through the gel, gathering the stain's light step by step until
+            // the ray leaves the block or is scattered off course.
+            float t0, t1;
+            if (!slabBox(p - d * 0.001, d, u, t0, t1)) break;
+            t1 = max(t1 - 0.001, 0.0005);
             int steps = clamp(int(t1 / 0.0005) + 1, 3, 64);
             float ds = t1 / float(steps);
             float ps = 1.0 - exp(-u.sigma.w * ds);
-            bool scattered = false;
+            bool scattered = false, left = false;
+            float tPrev = 0.0, tExit = 0.0;
             for (int i = 0; i < steps; i++) {
-                float3 q = p + d * ((float(i) + 0.5) * ds);
-                Medium m = medium(q, u, bands);
+                float tq = (float(i) + 1.0) * ds;
+                float3 q = p + d * tq;
+                if (slabSDF(q, u, bands) > 0.0) {
+                    // Crossed a face: find it, and take the gel up to it.
+                    float a = tPrev, b = tq;
+                    for (int j = 0; j < 5; j++) {
+                        float m = 0.5 * (a + b);
+                        if (slabSDF(p + d * m, u, bands) > 0.0) b = m; else a = m;
+                    }
+                    float dl = a - tPrev;
+                    Medium m = medium(p + d * (tPrev + 0.5 * dl), u, bands);
+                    L += T * m.emit * dl;
+                    T *= exp(-m.absorb * dl);
+                    tExit = 0.5 * (a + b);
+                    left = true;
+                    break;
+                }
+                Medium m = medium(p + d * (tq - 0.5 * ds), u, bands);
                 L += T * m.emit * ds;
                 T *= exp(-m.absorb * ds);
                 if (scatters < 4 && rnd(seed) < ps) {
@@ -772,23 +869,26 @@ final class Gel3DView: NSView, MTKViewDelegate {
                     scattered = true;
                     break;
                 }
+                tPrev = tq;
             }
             if (scattered) continue;
-            // At the far face: out, or back in off the inside of the face.
-            float3 x = p + d * t1;
-            float3 n = ripple(x, n1);
+            if (!left) break;
+            // At the face: out, or back in off its inside.
+            float3 x = p + d * tExit;
+            float3 ng = slabNormal(x, u, bands);
+            float3 n = ripple(x, ng);
             float cosi = max(0.01, dot(d, n));
             float eta = IOR;
             float sin2t = eta * eta * (1.0 - cosi * cosi);
-            if (sin2t >= 1.0) { d = reflect(d, n); p = x - n1 * EPS; continue; }
+            if (sin2t >= 1.0) { d = reflect(d, n); p = x - ng * EPS; continue; }
             float cost = sqrt(1.0 - sin2t);
             float F = fresnel(cosi, cost, eta);
-            if (rnd(seed) < F) { d = reflect(d, n); p = x - n1 * EPS; continue; }
+            if (rnd(seed) < F) { d = reflect(d, n); p = x - ng * EPS; continue; }
             d = normalize(eta * d - (eta * cosi - cost) * n);
-            p = x + n1 * EPS;
+            p = x + ng * EPS;
             inside = false;
             // The bottom face lies on the plate.
-            if (n1.y < -0.5) { L += T * plate(x.xz, u); break; }
+            if (ng.y < -0.5) { L += T * plate(x.xz, u); break; }
         }
         L = min(L, float3(6.0));
         float4 acc = (u.counts.y == 0u) ? float4(0.0) : prev.read(gid);
