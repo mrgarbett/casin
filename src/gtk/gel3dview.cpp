@@ -600,7 +600,10 @@ Gel3DView::Gel3DView()
                              self->pan(dx, dy);
                          } else {
                              self->m_yaw -= float(dx) * 0.008f;
-                             self->m_pitch = std::clamp(self->m_pitch + float(dy) * 0.008f, 0.22f, 1.45f);
+                             // Past the top it snaps to straight down, the imager's view.
+                             self->m_pitch = std::clamp(self->m_pitch + float(dy) * 0.008f, 0.22f, float(M_PI_2));
+                             if (self->m_pitch > 1.5f)
+                                 self->m_pitch = float(M_PI_2);
                          }
                          self->interacted();
                      }),
@@ -762,7 +765,9 @@ Gel3DView::Camera Gel3DView::camera() const
     c.position = target + Vec3{c.distance * std::sin(m_yaw) * std::cos(m_pitch), c.distance * std::sin(m_pitch),
                                c.distance * std::cos(m_yaw) * std::cos(m_pitch)};
     c.forward = normalize(target - c.position);
-    c.right = normalize(cross(c.forward, {0, 1, 0}));
+    // Right comes from the yaw alone, so looking straight down still has a
+    // well-defined up (the wells' side at the top of the picture).
+    c.right = {std::cos(m_yaw), 0, -std::sin(m_yaw)};
     c.up = cross(c.right, c.forward);
     return c;
 }
