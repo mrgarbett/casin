@@ -39,6 +39,10 @@ public:
     Document &document() { return m_doc; }
     const Document &document() const { return m_doc; }
     bool isEmpty() const { return m_doc.isEmpty(); }
+    // The file it was opened from or saved to, or empty.
+    const std::string &path() const { return m_doc.path(); }
+    // A wizard (gel, PCR) is open over this tab.
+    bool hasTools() const { return m_pcr || m_gel; }
     bool isCurrent() const;
     bool load(const std::string &path, std::string *error);
     // Shows this tab and brings its window to the front.

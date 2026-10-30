@@ -2505,9 +2505,42 @@ std::string withSandboxHint(const std::string &path, const std::string &error)
     return error + " (inside Flatpak, pass files with --file-forwarding @@ FILE @@)";
 }
 
+namespace {
+
+std::string canonical(const std::string &path)
+{
+    char *c = g_canonicalize_filename(path.c_str(), nullptr);
+    char *real = realpath(c, nullptr);
+    std::string out = real ? real : c;
+    free(real);
+    g_free(c);
+    return out;
+}
+
+} // namespace
+
 void openFiles(GtkApplication *app, const std::vector<std::string> &paths, Window *preferred)
 {
+    // While a wizard is open over the current tab, new tabs open behind it,
+    // so the wizard stays over the tab it belongs to (the gel lists them).
+    Shell *activeShell = Shell::active(app);
+    Window *busy = activeShell ? activeShell->current() : nullptr;
+    if (busy && !busy->hasTools())
+        busy = nullptr;
     for (const std::string &path : paths) {
+        // A file that's already open: go to its tab rather than open it twice.
+        const std::string want = canonical(path);
+        Window *open = nullptr;
+        for (Window *w : Window::all(app))
+            if (!w->path().empty() && canonical(w->path()) == want)
+                open = w;
+        if (open) {
+            if (busy && open != busy)
+                busy->toast(baseName(path) + " is already open in another tab");
+            else if (!busy)
+                open->present();
+            continue;
+        }
         Window *target = (preferred && preferred->isEmpty()) ? preferred : nullptr;
         if (!target) {
             // Reuse the current tab if it is still empty.
@@ -2521,7 +2554,12 @@ void openFiles(GtkApplication *app, const std::vector<std::string> &paths, Windo
             target->showError("Could not open " + baseName(path), withSandboxHint(path, error));
             continue;
         }
-        target->present();
+        if (busy) {
+            busy->present();
+            busy->toast("Opened " + baseName(path) + " in a new tab");
+        } else {
+            target->present();
+        }
         preferred = nullptr;
     }
 }
