@@ -1362,6 +1362,13 @@ static void testPrimerHelpers()
     CHECK(revHot.size() > rev.size() && fitted.binding.start == 160 && fitted.strand == Strand::Reverse);
     CHECK_EQ(revHot, reverseComplement(s.bases.substr(160, size_t(fitted.binding.length()))));
     CHECK_EQ(fitAnnealingToTm(s, fwd, f, meltingTemperature(fwd), &fitted), fwd);   // already there
+    // In Q5's buffer: the fitted part comes closest to the target as NEB works the Tm out.
+    auto q5 = [](const std::string &b) { return polymeraseTmExact(b, Polymerase::Q5); };
+    const double q5Tm20 = q5(fwd);
+    const std::string q5Hot = fitAnnealingToTm(s, fwd, f, q5Tm20 + 6, &fitted, q5);
+    CHECK(q5Hot.size() > fwd.size() && fitted.binding.end == 80);
+    for (int len = 15; len <= 40 && 80 - len >= 0; ++len)
+        CHECK(std::fabs(q5(q5Hot) - (q5Tm20 + 6)) <= std::fabs(q5(s.bases.substr(size_t(80 - len), size_t(len))) - (q5Tm20 + 6)) + 1e-9);
 
     // Product: from the forward primer's 5' end to the reverse one's, tails included.
     CHECK_EQ(pcrProductLength(s, f, 0, r, 0), 120);

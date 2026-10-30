@@ -375,8 +375,12 @@ std::vector<PrimerSite> findPrimerSites(const Sequence &seq, const std::string &
 }
 
 std::string fitAnnealingToTm(const Sequence &seq, const std::string &primer, const PrimerSite &site,
-                             double targetTm, PrimerSite *fitted)
+                             double targetTm, PrimerSite *fitted,
+                             const std::function<double(const std::string &)> &tm)
 {
+    auto tmOf = [&](const std::string &bases) {
+        return tm ? tm(cleanBases(bases)) : meltingTemperature(cleanBases(bases));
+    };
     const int n = seq.length(), length = site.binding.length();
     if (fitted)
         *fitted = site;
@@ -392,12 +396,12 @@ std::string fitAnnealingToTm(const Sequence &seq, const std::string &primer, con
         return pos >= 0 && pos < n ? pos : -1;
     };
     std::string best = annealing;
-    double bestGap = std::fabs(meltingTemperature(cleanBases(annealing)) - targetTm);
+    double bestGap = std::fabs(tmOf(annealing) - targetTm);
     int bestLength = length;
     // Shorter: drop bases from the 5' end.
     for (int len = std::min(length - 1, 40); len >= 15; --len) {
         const std::string a = annealing.substr(size_t(length - len));
-        const double gap = std::fabs(meltingTemperature(cleanBases(a)) - targetTm);
+        const double gap = std::fabs(tmOf(a) - targetTm);
         if (std::isfinite(gap) && (!std::isfinite(bestGap) || gap < bestGap)) {
             best = a;
             bestGap = gap;
@@ -414,7 +418,7 @@ std::string fitAnnealingToTm(const Sequence &seq, const std::string &primer, con
         grown.insert(grown.begin(), b);
         if (length + k < 15)
             continue;
-        const double gap = std::fabs(meltingTemperature(cleanBases(grown)) - targetTm);
+        const double gap = std::fabs(tmOf(grown) - targetTm);
         if (std::isfinite(gap) && (!std::isfinite(bestGap) || gap < bestGap)) {
             best = grown;
             bestGap = gap;

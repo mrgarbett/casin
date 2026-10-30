@@ -7,12 +7,14 @@
 #include "core/version.h"
 #include "core/primercheck.h"
 #include "core/seqio.h"
+#include "core/tm.h"
 #include "view/cairo_render.h"
 #include "view/style.h"
 #include "view/printlayout.h"
 #include "view/tracelayout.h"
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -1232,20 +1234,31 @@ void Window::rebuildPrimerList()
         GtkWidget *row = adw_action_row_new();
         adw_preferences_row_set_use_markup(ADW_PREFERENCES_ROW(row), FALSE);
         adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), pr.name.c_str());
+        // Q5's Tm (as NEB's calculator gives it) of the part that anneals.
         const PrimerCheck check = checkPrimer(pr.bases);
+        const int annealing = pr.binding.length() > 0 && pr.binding.length() <= int(pr.bases.size())
+                                ? pr.binding.length() : int(pr.bases.size());
+        const int tm = polymeraseTm(cleanBases(pr.bases.substr(pr.bases.size() - size_t(annealing))), Polymerase::Q5);
         std::string sub = std::to_string(pr.bases.size()) + " nt";
-        if (!std::isnan(check.tm)) {
+        if (tm != INT_MIN && !std::isnan(check.gc)) {
             char buf[48];
-            std::snprintf(buf, sizeof buf, " · Tm %.1f °C · GC %.0f%%", check.tm, check.gc * 100);
+            std::snprintf(buf, sizeof buf, " · Q5 Tm %d °C · GC %.0f%%", tm, check.gc * 100);
             sub += buf;
         }
         if (pr.binding.length() > 0)
             sub += " · " + view::withThousands(pr.binding.start + 1) + "–" + view::withThousands(pr.binding.end)
                  + (pr.strand == Strand::Reverse ? " · ←" : " · →");
         adw_action_row_set_subtitle(ADW_ACTION_ROW(row), sub.c_str());
-        if (!check.warnings.empty()) {
+        // The Tm warned about is Q5's, as shown.
+        std::vector<std::string> warnings;
+        for (const std::string &w : check.warnings)
+            if (w.rfind("Tm ", 0) != 0)
+                warnings.push_back(w);
+        if (tm != INT_MIN && (tm < 50 || tm > 72))
+            warnings.push_back("Q5 Tm " + std::to_string(tm) + " °C; 50–72 °C is typical");
+        if (!warnings.empty()) {
             std::string tip;
-            for (const std::string &w : check.warnings)
+            for (const std::string &w : warnings)
                 tip += (tip.empty() ? "" : "\n") + w;
             GtkWidget *warn = gtk_image_new_from_icon_name("dialog-warning-symbolic");
             gtk_widget_add_css_class(warn, "warning");

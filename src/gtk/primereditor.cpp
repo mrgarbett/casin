@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "primereditor.h"
 
+#include "core/tm.h"
 #include "view/maplayout.h"
 
 #include <adwaita.h>
@@ -109,6 +110,13 @@ std::string fmt(const char *format, double v)
     char buf[32];
     std::snprintf(buf, sizeof buf, format, v);
     return buf;
+}
+
+// The Tm NEB's calculator gives for these bases in Q5's buffer (NaN for
+// anything but ACGT): what the pane shows, and what Fit aims at.
+double q5Tm(const std::string &bases)
+{
+    return polymeraseTmExact(cleanBases(bases), Polymerase::Q5);
 }
 
 std::string joinLines(const std::vector<std::string> &lines)
@@ -308,13 +316,13 @@ GtkWidget *PrimerEditor::buildView()
 
     // Target Tm: the annealing part grows or shrinks along the template to meet it.
     m_tm = gtk_spin_button_new_with_range(30, 80, 1);
-    gtk_spin_button_set_value(GTK_SPIN_BUTTON(m_tm), 60);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(m_tm), 65);
     g_signal_connect_swapped(m_tm, "value-changed", G_CALLBACK(+[](gpointer p) {
                                  static_cast<PrimerEditor *>(p)->fitToTm();
                              }),
                              this);
     GtkWidget *fit = gtk_button_new_with_label("Fit");
-    gtk_widget_set_tooltip_text(fit, "Grow or shrink the annealing part along the template to this Tm");
+    gtk_widget_set_tooltip_text(fit, "Grow or shrink the annealing part along the template to this Tm (Q5, as NEB works it out)");
     g_signal_connect_swapped(fit, "clicked", G_CALLBACK(+[](gpointer p) {
                                  static_cast<PrimerEditor *>(p)->fitToTm();
                              }),
@@ -417,7 +425,7 @@ GtkWidget *PrimerEditor::buildView()
     struct Item { const char *heading; GtkWidget *w; };
     for (const Item &it : {Item{"NAME", m_name}, Item{"DESCRIPTION", m_description}, Item{"TAG", colorRow},
                            Item{"SEQUENCE (5′ → 3′)", frame}, Item{nullptr, flipRow}, Item{nullptr, m_info},
-                           Item{nullptr, m_warnings}, Item{"ANNEALING Tm", tmRow},
+                           Item{nullptr, m_warnings}, Item{"ANNEALING Tm (Q5)", tmRow},
                            Item{"PARTNER PRIMER", m_partner}, Item{"CODON", codonRow},
                            Item{"ENZYME SITE", enzymeRow}, Item{nullptr, m_pad},
                            Item{"TAG OR PROTEASE SITE", tagRow}, Item{nullptr, hint}}) {
@@ -595,14 +603,14 @@ void PrimerEditor::refresh(bool select)
         std::string line = std::to_string(check.length) + " nt · GC " + fmt("%.0f", check.gc * 100) + "%";
         if (m_site) {
             // Tm of the part that anneals; a 5' tail doesn't count.
-            const PrimerCheck a = checkPrimer(t.substr(t.size() - size_t(m_site->binding.length())));
-            if (!std::isnan(a.tm)) {
-                line += " · Tm " + fmt("%.1f", a.tm) + " °C";
+            const double tm = q5Tm(t.substr(t.size() - size_t(m_site->binding.length())));
+            if (!std::isnan(tm)) {
+                line += " · Q5 Tm " + fmt("%.0f", tm) + " °C";
                 if (int(t.size()) > m_site->binding.length())
                     line += " annealing";
             }
-        } else if (!std::isnan(check.tm)) {
-            line += " · Tm " + fmt("%.1f", check.tm) + " °C";
+        } else if (!std::isnan(q5Tm(t))) {
+            line += " · Q5 Tm " + fmt("%.0f", q5Tm(t)) + " °C";
         }
         lines.push_back(line);
     }
@@ -644,13 +652,18 @@ void PrimerEditor::refresh(bool select)
         else
             lines.push_back("Type or paste a primer; the map and sequence show where it binds.");
     }
-    // With a tail, the warned Tm is the whole primer's, not the annealing
-    // part's; and a long primer is expected once it has a tail.
+    // A long primer is expected once it has a tail. The Tm warned about is
+    // Q5's, as shown, and the annealing part's.
     const bool tailed = m_site && int(t.size()) > m_site->binding.length();
     for (const std::string &w : check.warnings) {
-        if (tailed && startsWith(w, "Long ("))
+        if ((tailed && startsWith(w, "Long (")) || startsWith(w, "Tm "))
             continue;
-        warn.push_back(tailed && startsWith(w, "Tm ") ? "Full-length " + w : w);
+        warn.push_back(w);
+    }
+    if (m_site) {
+        const double tm = q5Tm(t.substr(t.size() - size_t(m_site->binding.length())));
+        if (!std::isnan(tm) && (tm < 50 || tm > 72))
+            warn.push_back("Q5 Tm " + fmt("%.0f", tm) + " °C; 50–72 °C is typical");
     }
     // The 3' end: its last five bases tinted, green with one to three G/C.
     if (t.size() >= 5) {
@@ -748,15 +761,15 @@ std::optional<Span> PrimerEditor::checkPartner(const std::string &t, const Prime
     const int partnerLength = partner.binding.length();
     const int product = pcrProductLength(m_doc->sequence(), s, int(t.size()) - s.binding.length(), theirs,
                                          int(partner.bases.size()) - partnerLength);
-    const PrimerCheck a = checkPrimer(t.substr(t.size() - size_t(s.binding.length())));
-    const PrimerCheck b = checkPrimer(partner.bases.substr(partner.bases.size() - size_t(partnerLength)));
+    const double a = q5Tm(t.substr(t.size() - size_t(s.binding.length())));
+    const double b = q5Tm(partner.bases.substr(partner.bases.size() - size_t(partnerLength)));
     std::string line = "With " + partner.name + ": ";
     line += product > 0 ? view::withThousands(product) + " bp product" : "no product (they don't face each other)";
-    if (!std::isnan(a.tm) && !std::isnan(b.tm)) {
-        const double gap = std::abs(a.tm - b.tm);
-        line += " · Tm gap " + fmt("%.1f", gap) + " °C";
+    if (!std::isnan(a) && !std::isnan(b)) {
+        const double gap = std::abs(std::round(a) - std::round(b));
+        line += " · Q5 Tm gap " + fmt("%.0f", gap) + " °C";
         if (gap > 5)
-            warnings.push_back("The Tms differ by more than 5 °C; fit this one to " + fmt("%.0f", b.tm) + " °C.");
+            warnings.push_back("The Tms differ by more than 5 °C; fit this one to " + fmt("%.0f", b) + " °C.");
     }
     lines.push_back(line);
     // The Tm gap above is the annealing parts'; the pair check's own is the full primers'.
@@ -802,7 +815,7 @@ void PrimerEditor::fitToTm()
     }
     PrimerSite fitted;
     const std::string result = fitAnnealingToTm(m_doc->sequence(), t, site,
-                                                gtk_spin_button_get_value(GTK_SPIN_BUTTON(m_tm)), &fitted);
+                                                gtk_spin_button_get_value(GTK_SPIN_BUTTON(m_tm)), &fitted, q5Tm);
     const int len = fitted.binding.length();
     if (len <= 0 || int(result.size()) < len)
         return;
