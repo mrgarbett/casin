@@ -21,9 +21,9 @@ struct SceneLook {
 const SceneLook &lookOf(Gel3DScene scene)
 {
     static const SceneLook looks[] = {
-        {{0.02f, 0.0f, 0.75f, 0}, {1.0f, 0.10f, 0.50f, 1.0f}, {1.0f, 0.22f, 0.60f, 12}, {0.55f, 0.12f, 0.9f, 0.6f},
+        {{0.02f, 0.0f, 0.75f, 0}, {1.0f, 0.10f, 0.50f, 0.7f}, {1.0f, 0.22f, 0.60f, 13}, {0.55f, 0.12f, 0.9f, 0.5f},
          {8, 40, 6, 18}},
-        {{0.0f, 0.10f, 0.70f, 0}, {0.30f, 0.95f, 0.40f, 0.45f}, {0.50f, 1.0f, 0.35f, 14}, {0.35f, 0.9f, 0.55f, 0.5f},
+        {{0.0f, 0.10f, 0.70f, 0}, {0.30f, 0.95f, 0.40f, 0.38f}, {0.50f, 1.0f, 0.35f, 14}, {0.35f, 0.9f, 0.55f, 0.45f},
          {10, 8, 34, 18}},
         {{0.06f, 0.06f, 0.07f, 1}, {0.6f, 0.6f, 0.6f, 0.7f}, {1.0f, 1.0f, 1.0f, 16}, {0.8f, 0.8f, 0.8f, 0.5f},
          {12, 12, 12, 18}},
@@ -183,9 +183,10 @@ vec3 room(vec3 p, vec3 d) {
     if (d.y <= 0.0001) return dark;
     float t = (0.55 - p.y) / d.y;
     vec3 h = p + d * t;
-    float lx = smoothstep(0.0, 0.02, 0.05 - abs(h.x - 0.03));
-    float lz = smoothstep(0.0, 0.02, 0.05 - abs(h.z + 0.30));
-    return dark + vec3(14.0, 13.0, 12.0) * lx * lz;
+    // A small lamp with a soft edge, as a shaded bulb or a window looks in a glossy surface.
+    float lx = smoothstep(0.0, 0.035, 0.045 - abs(h.x - 0.03));
+    float lz = smoothstep(0.0, 0.035, 0.045 - abs(h.z + 0.30));
+    return dark + vec3(7.0, 6.6, 6.0) * lx * lz;
 }
 
 // The wet top isn't quite smooth: a fine ripple tilts its reflections.
@@ -1009,7 +1010,7 @@ void Gel3DView::render()
         v4("u.camR", r.x, r.y, r.z, 0);
         v4("u.camU", up.x, up.y, up.z, 0);
         v4a("u.sigma", look.sigma);
-        v4("u.lens", std::tan(17.5f * float(M_PI) / 180), float(w) / float(h), 0.0012f, distance);
+        v4("u.lens", std::tan(17.5f * float(M_PI) / 180), float(w) / float(h), 0.0005f, cam.distance);
         v4("u.slab", m_width, kDepth, kThick, 0.7f);
         v4("u.emitter", m_width / 2 + 0.13f, kDepth / 2 + 0.11f, 0.025f, 1.0f);
         v4("u.look", 0.75f, 0.02f, 14, 0.75f);
