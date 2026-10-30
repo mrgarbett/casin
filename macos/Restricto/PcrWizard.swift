@@ -73,10 +73,15 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
             window.title = "PCR · \(Self.withoutExtension(parent.title))"
             wizard.parentResize = NotificationCenter.default.addObserver(
                 forName: NSWindow.didResizeNotification, object: parent, queue: .main) { [weak wizard] _ in
-                wizard?.dim?.setFrame(parent.frame, display: true)
+                wizard?.followParent()
             }
         }
         wizard.showWindow(nil)
+        // Kept above the template's window, moving with it, so clicking that
+        // window never buries the wizard behind it.
+        if let parent = parent, let window = wizard.window { parent.addChildWindow(window, ordered: .above) }
+        // Nothing focused: Return opens the product until the primer box is clicked.
+        wizard.window?.makeFirstResponder(nil)
         // The map takes a little over half the height, the sequence the rest.
         wizard.window?.layoutIfNeeded()
         let split = wizard.productSplit
@@ -322,7 +327,10 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
         return Choice(index: index, start: p.start, length: p.length, forward: p.strand == Int32(OC_STRAND_FORWARD))
     }
 
-    @objc private func inputsChanged(_ sender: Any?) { refresh() }
+    @objc private func inputsChanged(_ sender: Any?) {
+        window?.makeFirstResponder(nil)
+        refresh()
+    }
 
     /// A primer clicked on the map goes in for its strand. A plain click
     /// starts over with it; shift-click adds it to the one already picked.
@@ -333,6 +341,7 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
         guard let item = popup.itemArray.first(where: { ($0.representedObject as? NSNumber)?.intValue == index }) else {
             return
         }
+        window?.makeFirstResponder(nil)
         popup.select(item)
         if !adding { (forward ? reversePopup : forwardPopup).selectItem(at: 0) }
         refresh()
@@ -342,7 +351,12 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
     /// primer (one undo step there) and picks it.
     @objc private func typedPrimer(_ sender: Any?) {
         let bases = typedField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !bases.isEmpty else { return }
+        guard !bases.isEmpty else {
+            // Return in an empty box does what Return does elsewhere.
+            window?.makeFirstResponder(nil)
+            if hasProduct { openProduct(sender) }
+            return
+        }
         let names = Set(template.primers.map { $0.name })
         var n = 1
         while names.contains("primer\(n)") { n += 1 }
@@ -351,14 +365,20 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
         if index < 0 {
             let text = takeString(err)
             typedError.stringValue = text.isEmpty ? "That primer doesn't bind." : text.prefix(1).uppercased() + text.dropFirst() + "."
+            typedError.textColor = .systemOrange
             typedError.isHidden = false
             NSSound.beep()
             return
         }
-        typedError.isHidden = true
         typedField.stringValue = ""
         fillPrimers()
         pick(primer: Int(index), adding: true)
+        if let p = template.primers.first(where: { $0.index == Int(index) }) {
+            let arrow = p.strand == Int32(OC_STRAND_FORWARD) ? "→" : "←"
+            typedError.stringValue = "Added \(p.name) \(arrow) \((p.start + 1).formatted())–\((p.start + p.length).formatted()) to \(template.name)."
+            typedError.textColor = .secondaryLabelColor
+            typedError.isHidden = false
+        }
     }
 
     // Return in the primer box adds the primer rather than opening the product.
@@ -501,6 +521,20 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
         return known.contains(ext) ? (title as NSString).deletingPathExtension : title
     }
 
+    // MARK: Following the template's window
+
+    /// Re-centres the wizard on the template's window at 80% of its size
+    /// when that window is resized, and moves the dark layer with it.
+    private func followParent() {
+        guard let parent = parentWindow, let window = window else { return }
+        dim?.setFrame(parent.frame, display: true)
+        let f = parent.frame
+        let size = NSSize(width: max(window.minSize.width, f.width * 0.8),
+                          height: max(window.minSize.height, f.height * 0.8))
+        window.setFrame(NSRect(x: f.midX - size.width / 2, y: f.midY - size.height / 2,
+                               width: size.width, height: size.height), display: true)
+    }
+
     // MARK: Dimming
 
     func windowDidBecomeKey(_ notification: Notification) { setDimmed(true) }
@@ -520,6 +554,11 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
             overlay.alphaValue = 0
             parent.addChildWindow(overlay, ordered: .above)
             dim = overlay
+            // The wizard goes back on top of the dark layer.
+            if let window = window, window.parent === parent {
+                parent.removeChildWindow(window)
+                parent.addChildWindow(window, ordered: .above)
+            }
         }
         guard let overlay = dim else { return }
         overlay.setFrame(parent.frame, display: false)
@@ -536,6 +575,7 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
             dim = nil
         }
         if let observer = parentResize { NotificationCenter.default.removeObserver(observer) }
+        if let window = window { window.parent?.removeChildWindow(window) }
         // Let go after the close finishes: dropping the last reference here
         // would free the window while it's still closing.
         DispatchQueue.main.async { Self.showing.removeAll { $0 === self } }
