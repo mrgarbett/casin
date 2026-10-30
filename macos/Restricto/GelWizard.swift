@@ -99,7 +99,8 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
     private var fragments: [[Fragment]] = []
     private var drawnKeys: [String] = []
     private var observed: Set<ObjectIdentifier> = []
-    private static let maxLanes = 12
+    /// The comb sets how many lanes fit the gel.
+    private var comb: GelComb = .standard
 
     private let gelView = GelView()
     private let laneList = NSStackView()
@@ -116,6 +117,7 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
     private let fragmentHeading = NSTextField(labelWithString: "FRAGMENTS")
     private let fragmentList = NSStackView()
     private let agarosePopup = NSPopUpButton()
+    private let combPopup = NSPopUpButton()
     private let stainPopup = NSPopUpButton()
     /// EXPERIMENTAL: three ways to look at the same gel.
     private let lookTabs = NSSegmentedControl(labels: ["Imager", "3D"], trackingMode: .selectOne,
@@ -232,6 +234,14 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         agarosePopup.toolTip = "Denser gels separate small fragments; thinner ones, large ones"
         agarosePopup.target = self
         agarosePopup.action = #selector(agaroseChanged(_:))
+        // The comb: how many wells, and how thick a plug each loads.
+        for c in GelComb.common { combPopup.addItem(withTitle: c.name) }
+        let savedComb = UserDefaults.standard.object(forKey: "GelComb") as? Int ?? 1
+        combPopup.selectItem(at: savedComb >= 0 && savedComb < GelComb.common.count ? savedComb : 1)
+        comb = GelComb.common[max(0, combPopup.indexOfSelectedItem)]
+        combPopup.toolTip = "The comb that cast the wells: a thin one gives sharper bands"
+        combPopup.target = self
+        combPopup.action = #selector(combChanged(_:))
 
         symbolButton(addLaneButton, "plus", "Add a lane after this one", #selector(addLane(_:)))
         symbolButton(removeLaneButton, "minus", "Remove this lane", #selector(removeLane(_:)))
@@ -280,7 +290,7 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
 
         let inputs = NSStackView(views: [
             header, subtitle,
-            heading("GEL"), agarosePopup,
+            heading("GEL"), agarosePopup, combPopup,
             lanesRow, laneList,
             laneHeading, sequencePopup, enzymeRow, enzymeHint, enzymeNote,
             fragmentHeading, fragmentList,
@@ -289,12 +299,12 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         inputs.alignment = .leading
         inputs.spacing = 6
         inputs.edgeInsets = NSEdgeInsets(top: 38, left: 16, bottom: 16, right: 16)
-        for v in [header, subtitle, agarosePopup, lanesRow, laneList, sequencePopup, enzymeRow, enzymeNote, enzymeHint,
+        for v in [header, subtitle, agarosePopup, combPopup, lanesRow, laneList, sequencePopup, enzymeRow, enzymeNote, enzymeHint,
                   fragmentList] as [NSView] {
             v.widthAnchor.constraint(equalTo: inputs.widthAnchor, constant: -32).isActive = true
         }
         inputs.setCustomSpacing(16, after: subtitle)
-        inputs.setCustomSpacing(16, after: agarosePopup)
+        inputs.setCustomSpacing(16, after: combPopup)
         inputs.setCustomSpacing(16, after: laneList)
         inputs.setCustomSpacing(16, after: enzymeNote)
         inputs.setCustomSpacing(16, after: enzymeHint)
@@ -336,6 +346,7 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         let saved = GelStain(rawValue: UserDefaults.standard.integer(forKey: "GelStain")) ?? .ethidiumUV
         imagerStain = Self.imagerStains.contains(saved) ? saved : .ethidiumUV
         gelView.stain = imagerStain
+        gelView.comb = comb
         scene3D = Gel3DScene(rawValue: UserDefaults.standard.integer(forKey: "Gel3DScene")) ?? .pinkOnBlue
         fillStainPopup()
         stainPopup.isBordered = false
@@ -516,7 +527,7 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
             laneList.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: laneList.widthAnchor).isActive = true
         }
-        addLaneButton.isEnabled = lanes.count < Self.maxLanes
+        addLaneButton.isEnabled = lanes.count < comb.teeth
         removeLaneButton.isEnabled = lanes.count > 1
         moveLeftButton.isEnabled = selected > 0
         moveRightButton.isEnabled = selected < lanes.count - 1
@@ -632,7 +643,7 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
     }
 
     @objc private func addLane(_ sender: Any?) {
-        guard lanes.count < Self.maxLanes else { return }
+        guard lanes.count < comb.teeth else { return }
         // After the lane being edited: the same sequence, uncut, ready for an
         // enzyme (a ladder's neighbour takes the first sample's sequence).
         let doc = lanes[selected].isLadder ? (lanes.first(where: { !$0.isLadder })?.doc ?? template) : lanes[selected].doc
@@ -732,11 +743,22 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
             ])
             view.ignoredViews = pills
             view.scene = scene3D
+            view.comb = comb
             gel3D = view
             view.show(models, runLevel: runSlider.doubleValue, dyeRuns: gelView.dyeRuns)
         }
         gel3D?.isHidden = look != 1
         gelView.isHidden = look == 1
+    }
+
+    @objc private func combChanged(_ sender: Any?) {
+        let i = combPopup.indexOfSelectedItem
+        guard i >= 0 && i < GelComb.common.count else { return }
+        comb = GelComb.common[i]
+        UserDefaults.standard.set(i, forKey: "GelComb")
+        gelView.comb = comb
+        gel3D?.comb = comb
+        fillSidebar()
     }
 
     @objc private func agaroseChanged(_ sender: Any?) {
@@ -766,7 +788,8 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
             let name = lane.doc.name.isEmpty ? "Untitled" : lane.doc.name
             legend.append((lane: names[i], what: "\(name) · \(lane.enzymes.isEmpty ? "uncut" : lane.enzymes.joined(separator: " + "))"))
         }
-        let caption = [agarosePopup.titleOfSelectedItem ?? "", gelView.stain.title, runLabel.stringValue.lowercased()]
+        let caption = [agarosePopup.titleOfSelectedItem ?? "", "\(comb.name) comb", gelView.stain.title,
+                       runLabel.stringValue.lowercased()]
             .filter { !$0.isEmpty }.joined(separator: " · ")
         guard let image = gelView.snapshot(legend: legend, caption: caption) else { return }
         NSPasteboard.general.clearContents()

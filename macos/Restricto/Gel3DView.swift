@@ -153,6 +153,13 @@ final class Gel3DView: NSView, MTKViewDelegate {
     var scene: Gel3DScene = .pinkOnBlue {
         didSet { if scene != oldValue { restart() } }
     }
+    /// The comb that cast the wells; the tray is 7 cm wide whatever it is.
+    var comb: GelComb = .standard {
+        didSet { if comb != oldValue { rebuild() } }
+    }
+    /// Where the wells sit across the tray.
+    private var pitch: Float { max(0.062 / Float(comb.teeth), Float(comb.width) / 1000 + 0.0008) }
+    private var margin: Float { (0.070 - pitch * Float(comb.teeth)) / 2 }
     private var width: Float = 0.1
     private let depth: Float = 0.10
     private let thick: Float = 0.006
@@ -269,8 +276,8 @@ final class Gel3DView: NSView, MTKViewDelegate {
 
     private func rebuild() {
         lastBuild = Date()
-        let n = Float(max(1, lanes.count))
-        width = n * 0.010 + (n + 1) * 0.004 + 0.012
+        // The tray's width; more lanes than the comb has teeth spill over it.
+        width = 2 * margin + pitch * Float(max(comb.teeth, lanes.count))
         fit = max(width * 1.15, depth * 1.6)
         bandMap = makeBandMap()
         restart()
@@ -439,8 +446,9 @@ final class Gel3DView: NSView, MTKViewDelegate {
         let w = 1024, h = max(128, min(2048, Int(Float(w) * depth / width)))
         let ppm = Float(w) / width
         let mm = ppm / 1000
-        let laneW: Float = 0.010, gap: Float = 0.004
-        let laneX = { (i: Int) -> Float in -self.width / 2 + 0.006 + gap + Float(i) * (laneW + gap) + laneW / 2 }
+        let laneW = Float(comb.width) / 1000, pitch = self.pitch, margin = self.margin
+        let thickness = Float(comb.thickness)
+        let laneX = { (i: Int) -> Float in -self.width / 2 + margin + (Float(i) + 0.5) * pitch }
         let px = { (x: Float) -> Float in (x + self.width / 2) * ppm }
         let pz = { (z: Float) -> Float in (z + self.depth / 2) * ppm }
         let wellZ = -depth / 2 + 0.010
@@ -483,10 +491,12 @@ final class Gel3DView: NSView, MTKViewDelegate {
             for band in lane.bands {
                 let p = band.run * runLevel
                 guard p <= 1.03 else { continue }
-                let k = min(1, Float(band.intensity) * load)
+                // A thin comb loads a thin plug, so its bands start sharper and brighter.
+                let k = min(1, Float(band.intensity) * load / sqrt(thickness))
                 let y0 = pz(runZ(p))
-                // How far the DNA has spread: more for a longer run, a touch more when there's more of it.
-                let sigma = (0.20 + 0.22 * k) * mm * (1 + 0.7 * Float(p))
+                // How far the DNA has spread: the plug's thickness, more for a
+                // longer run, a touch more when there's more of it.
+                let sigma = (0.12 + 0.22 * thickness + 0.22 * k) * mm * (1 + 0.7 * Float(p))
                 let smile = (0.12 + 0.12 * random.next()) * mm * (1 + Float(p))
                 let lean = (random.next() - 0.5) * 0.3 * mm
                 let reach = half * (0.97 + 0.05 * random.next())
@@ -511,9 +521,13 @@ final class Gel3DView: NSView, MTKViewDelegate {
                     }
                 }
             }
-            // The well: its cavity, and its walls (half blue) which catch the light.
+        }
+        // Every well the comb cast, loaded or not: its cavity, and its walls
+        // (half blue) which catch the light.
+        for i in 0..<max(comb.teeth, lanes.count) {
+            let cx = px(laneX(i))
             let wx0 = cx - half * 0.95, wx1 = cx + half * 0.95
-            let wy0 = pz(wellZ) - 0.9 * mm, wy1 = pz(wellZ) + 0.9 * mm
+            let wy0 = pz(wellZ) - 0.5 * thickness * mm, wy1 = pz(wellZ) + 0.5 * thickness * mm
             let wall = 0.3 * mm
             for row in rows(wy0 - wall, wy1 + wall) {
                 let yy = Float(row) + 0.5
