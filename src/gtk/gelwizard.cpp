@@ -753,8 +753,9 @@ void GelWizard::addLane()
     copy.ladder = -1;
     m_lanes.insert(m_lanes.begin() + m_selected + 1, copy);
     ++m_selected;
+    // Focus stays on +: moving it to the enzyme box would scroll the sidebar
+    // and slide + away from under the pointer.
     refresh();
-    gtk_widget_grab_focus(m_enzymeEntry);
 }
 
 void GelWizard::removeLane()
