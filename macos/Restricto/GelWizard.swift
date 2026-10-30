@@ -116,6 +116,8 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
     private var imagerStain: GelStain = .ethidiumUV
     /// Made the first time the 3D tab is opened.
     private var gel3D: Gel3DView?
+    /// The glass pills floating over the gel.
+    private var pills: [NSView] = []
     private var models: [GelLaneModel] = []
     private let stage = NSView()
     /// How long the gel ran: drag it back to see the gel part way through.
@@ -363,6 +365,7 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         lookTabs.setToolTip("The gel as an imager prints it", forSegment: 0)
         lookTabs.setToolTip("The gel in 3D: drag to turn it, scroll to come closer", forSegment: 1)
         let tabsPill = Glass.capsule(around: lookTabs, height: 30)
+        pills = [pill, tabsPill]
         for v in [gelView, pill, tabsPill] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             stage.addSubview(v)
@@ -644,6 +647,7 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
                 view.leadingAnchor.constraint(equalTo: stage.leadingAnchor),
                 view.trailingAnchor.constraint(equalTo: stage.trailingAnchor),
             ])
+            view.ignoredViews = pills
             gel3D = view
             view.show(models, runLevel: runSlider.doubleValue, dyeRuns: gelView.dyeRuns)
         }

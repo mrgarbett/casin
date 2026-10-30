@@ -20,11 +20,17 @@ private final class TracerView: MTKView {
     var onDrag: ((CGFloat, CGFloat) -> Void)?
     var onScroll: ((CGFloat) -> Void)?
     var onReset: (() -> Void)?
+    /// Views floating over the gel (the pills): a drag from one of them,
+    /// even from its empty glass, doesn't turn the gel.
+    var ignoredViews: [NSView] = []
     /// Only a drag that started on the gel turns it.
     private var grabbed = false
     override func mouseDown(with event: NSEvent) {
-        grabbed = true
-        if event.clickCount == 2 { onReset?() }
+        let overPill = ignoredViews.contains {
+            !$0.isHidden && $0.convert($0.bounds, to: nil).contains(event.locationInWindow)
+        }
+        grabbed = !overPill
+        if grabbed, event.clickCount == 2 { onReset?() }
     }
     override func mouseUp(with event: NSEvent) { grabbed = false }
     override func mouseDragged(with event: NSEvent) {
@@ -65,7 +71,12 @@ final class Gel3DView: NSView, MTKViewDelegate {
     private var samples: UInt32 = 0
     private var frameIndex: UInt32 = 0
     /// Enough for a clean picture; then the GPU rests until something changes.
-    private let maxSamples: UInt32 = 256
+    private let maxSamples: UInt32 = 160
+    /// Views floating over the gel that a drag may start on without turning it.
+    var ignoredViews: [NSView] {
+        get { metalView.ignoredViews }
+        set { metalView.ignoredViews = newValue }
+    }
 
     private static let homePitch: Float = 0.80
     private var yaw: Float = 0
@@ -269,9 +280,9 @@ final class Gel3DView: NSView, MTKViewDelegate {
         // 1% agarose scatters gently, mostly forward.
         u.sigma = SIMD4<Float>(10, 26, 7, 18)
         u.lens = SIMD4<Float>(tan(17.5 * .pi / 180), Float(w) / Float(h), 0.0012, distance)
-        u.slab = SIMD4<Float>(width, depth, thick, 0.6)
+        u.slab = SIMD4<Float>(width, depth, thick, 0.7)
         u.emitter = SIMD4<Float>(width / 2 + 0.13, depth / 2 + 0.11, 0.025, 1.0)
-        u.look = SIMD4<Float>(1.15, 0.045, 46, 0.75)
+        u.look = SIMD4<Float>(0.7, 0.035, 40, 0.75)
         u.counts = SIMD4<UInt32>(frameIndex, samples, UInt32(w), UInt32(h))
         return u
     }
@@ -379,7 +390,7 @@ final class Gel3DView: NSView, MTKViewDelegate {
                 lowest = max(lowest, p)
                 let k = min(1, CGFloat(band.intensity) * load)
                 let y = pz(runZ(p))
-                let th = (0.55 + 1.0 * k) * mm * (1 + 0.4 * CGFloat(p))
+                let th = (0.35 + 0.55 * k) * mm * (1 + 0.3 * CGFloat(p))
                 let smile = 0.2 * mm * (1 + CGFloat(p))
                 // No two bands quite the same: ends and thickness waver.
                 let left = cx - half + (random.next() - 0.5) * 0.4 * mm
@@ -393,8 +404,8 @@ final class Gel3DView: NSView, MTKViewDelegate {
                 path.addQuadCurve(to: CGPoint(x: left, y: bottom + lean), control: CGPoint(x: cx, y: bottom + 2 * smile))
                 path.closeSubpath()
                 // DNA diffuses a little: a soft edge, and a faint wider fringe lower down.
-                Self.softFill(ctx, path, color: Self.rgb(1, 0, 0, 0.3 * k), blur: (0.6 + 1.2 * CGFloat(p)) * mm)
-                Self.softFill(ctx, path, color: Self.rgb(1, 0, 0, k), blur: 0.25 * mm)
+                Self.softFill(ctx, path, color: Self.rgb(1, 0, 0, 0.25 * k), blur: (0.3 + 0.6 * CGFloat(p)) * mm)
+                Self.softFill(ctx, path, color: Self.rgb(1, 0, 0, k), blur: 0.15 * mm)
             }
             if !lane.isLadder, lowest > 0 {
                 let top = pz(wellZ) + 1.5 * mm, bottom = pz(runZ(lowest))
@@ -412,9 +423,13 @@ final class Gel3DView: NSView, MTKViewDelegate {
                                   blur: 1.0 * mm)
                 }
             }
+            // The well: its cavity, and its walls (half blue) which catch the light.
             let well = CGRect(x: cx - half * 0.95, y: pz(wellZ) - 0.9 * mm, width: 1.9 * half, height: 1.8 * mm)
             ctx.setFillColor(Self.rgb(0, 0, 1))
             ctx.fill(well)
+            ctx.setStrokeColor(Self.rgb(0, 0, 0.5))
+            ctx.setLineWidth(0.3 * mm)
+            ctx.stroke(well)
         }
 
         guard let data = ctx.data else { return nil }
@@ -503,6 +518,15 @@ final class Gel3DView: NSView, MTKViewDelegate {
         return normalize(t * (sinT * cos(phi)) + b * (sinT * sin(phi)) + d * cosT);
     }
 
+    // Dust on the plate: a round speck in a few of the cells.
+    inline float dust(float2 p, float share) {
+        float2 cell = floor(p);
+        if (hashf(cell) > share) return 1.0;
+        float2 c = cell + float2(hashf(cell + 13.0), hashf(cell + 29.0));
+        float r = 0.18 + 0.22 * hashf(cell + 41.0);
+        return mix(0.3, 1.0, smoothstep(r * 0.7, r, length(p - c)));
+    }
+
     // The blue plate: a diffuser lit from below, brightest under the gel,
     // mottled, dusty, dark beyond its edges.
     inline float3 plate(float2 q, constant Uniforms &u) {
@@ -515,21 +539,30 @@ final class Gel3DView: NSView, MTKViewDelegate {
         float2 rel = q / float2(halfX, front);
         float fall = mix(1.0, 0.3, smoothstep(0.15, 1.25, length(rel)));
         float mott = 0.82 + 0.36 * vnoise(q * 70.0 + 3.0);
-        float sp = hashf(q * 2200.0);
-        float speck = sp < 0.010 ? 0.3 : (sp < 0.016 ? 1.35 : 1.0);
+        float speck = dust(q * 1800.0, 0.05) * dust(q * 700.0 + 5.0, 0.02);
+        float grain = 0.93 + 0.14 * vnoise(q * 900.0);
         float3 blue = float3(0.09, 0.10, 1.0) * u.emitter.w;
-        return mix(dark, blue * fall * mott * speck, edge);
+        return mix(dark, blue * fall * mott * speck * grain, edge);
     }
 
-    // The dark room above, with one lamp behind and above the gel.
+    // The dim room above, with one small lamp high up behind the gel.
     inline float3 room(float3 p, float3 d) {
-        float3 dark = float3(0.003, 0.003, 0.005);
+        float3 dark = float3(0.012, 0.012, 0.018);
         if (d.y <= 0.0001) return dark;
-        float t = (0.30 - p.y) / d.y;
+        float t = (0.55 - p.y) / d.y;
         float3 h = p + d * t;
-        float lx = smoothstep(0.0, 0.03, 0.14 - abs(h.x));
-        float lz = smoothstep(0.0, 0.03, 0.07 - abs(h.z + 0.24));
-        return dark + float3(5.0, 4.6, 4.2) * lx * lz;
+        float lx = smoothstep(0.0, 0.02, 0.05 - abs(h.x - 0.03));
+        float lz = smoothstep(0.0, 0.02, 0.05 - abs(h.z + 0.30));
+        return dark + float3(14.0, 13.0, 12.0) * lx * lz;
+    }
+
+    // The wet top isn't flat: a slight ripple tilts its reflections.
+    inline float3 ripple(float3 x, float3 n) {
+        if (n.y < 0.5) return n;
+        float2 q = x.xz * 160.0;
+        float dx = vnoise(q + float2(0.7, 0.0)) - vnoise(q - float2(0.7, 0.0));
+        float dz = vnoise(q + float2(0.0, 0.7)) - vnoise(q - float2(0.0, 0.7));
+        return normalize(n + float3(dx, 0.0, dz) * 0.06);
     }
 
     // What a ray sees once it's clear of the slab.
@@ -552,12 +585,14 @@ final class Gel3DView: NSView, MTKViewDelegate {
         // The DNA fills the thickness, fading at the faces.
         float prof = smoothstep(0.0, 0.15, yf) * smoothstep(1.0, 0.85, yf);
         // A well is a slot of buffer cut into the top: no stain there.
-        float inWell = (m.b > 0.5 && yf > 1.0 - u.slab.w) ? 1.0 : 0.0;
+        float inWell = (m.b > 0.8 && yf > 1.0 - u.slab.w) ? 1.0 : 0.0;
+        // The well's walls scatter the light: a bright rim.
+        float wall = (m.b > 0.2 && m.b <= 0.8 && yf > 1.0 - u.slab.w) ? 1.0 : 0.0;
         // The stain is never quite even.
-        float uneven = 0.85 + 0.3 * vnoise(uv * float2(9.0, 5.0) + 1.0);
+        float uneven = 0.72 + 0.36 * vnoise(uv * float2(9.0, 5.0) + 1.0) + 0.12 * vnoise(uv * float2(60.0, 33.0));
         float3 pink = float3(1.0, 0.36, 0.60), orange = float3(1.0, 0.50, 0.33);
         Medium md;
-        md.emit = (pink * uneven + orange * m.r * 14.0 * prof) * u.look.z * (1.0 - inWell);
+        md.emit = (pink * uneven * (1.0 + 2.5 * wall) + orange * m.r * 3.5 * prof) * u.look.z * (1.0 - inWell);
         md.absorb = u.sigma.xyz + float3(0.9, 0.6, 0.12) * 260.0 * m.g;
         return md;
     }
@@ -598,13 +633,14 @@ final class Gel3DView: NSView, MTKViewDelegate {
                 if (!hit || t0 < 0.0) { L += T * outside(p, d, u); break; }
                 // Into the gel, or off its surface.
                 float3 x = p + d * t0;
-                float cosi = -dot(d, n0);
+                float3 n = ripple(x, n0);
+                float cosi = max(0.01, -dot(d, n));
                 float eta = 1.0 / IOR;
                 float sin2t = eta * eta * (1.0 - cosi * cosi);
                 float cost = sqrt(max(0.0, 1.0 - sin2t));
                 float F = fresnel(cosi, cost, eta);
-                if (rnd(seed) < F) { d = reflect(d, n0); p = x + n0 * EPS; continue; }
-                d = normalize(eta * d + (eta * cosi - cost) * n0);
+                if (rnd(seed) < F) { d = reflect(d, n); p = x + n0 * EPS; continue; }
+                d = normalize(eta * d + (eta * cosi - cost) * n);
                 p = x - n0 * EPS;
                 inside = true;
                 continue;
@@ -632,20 +668,21 @@ final class Gel3DView: NSView, MTKViewDelegate {
             if (scattered) continue;
             // At the far face: out, or back in off the inside of the face.
             float3 x = p + d * t1;
-            float cosi = dot(d, n1);
+            float3 n = ripple(x, n1);
+            float cosi = max(0.01, dot(d, n));
             float eta = IOR;
             float sin2t = eta * eta * (1.0 - cosi * cosi);
-            if (sin2t >= 1.0) { d = reflect(d, n1); p = x - n1 * EPS; continue; }
+            if (sin2t >= 1.0) { d = reflect(d, n); p = x - n1 * EPS; continue; }
             float cost = sqrt(1.0 - sin2t);
             float F = fresnel(cosi, cost, eta);
-            if (rnd(seed) < F) { d = reflect(d, n1); p = x - n1 * EPS; continue; }
-            d = normalize(eta * d - (eta * cosi - cost) * n1);
+            if (rnd(seed) < F) { d = reflect(d, n); p = x - n1 * EPS; continue; }
+            d = normalize(eta * d - (eta * cosi - cost) * n);
             p = x + n1 * EPS;
             inside = false;
             // The bottom face lies on the plate.
             if (n1.y < -0.5) { L += T * plate(x.xz, u); break; }
         }
-        L = min(L, float3(40.0));
+        L = min(L, float3(6.0));
         float4 acc = (u.counts.y == 0u) ? float4(0.0) : prev.read(gid);
         next.write(acc + float4(L, 1.0), gid);
     }
@@ -660,6 +697,18 @@ final class Gel3DView: NSView, MTKViewDelegate {
         if (gid.x >= W || gid.y >= H) return;
         float n = max(1.0, float(u.counts.y));
         float3 c = accum.read(gid).rgb / n;
+        // With few samples yet, blur the grain a little: a moving picture is soft anyway.
+        float soft = clamp(1.0 - n / 10.0, 0.0, 0.75);
+        if (soft > 0.0) {
+            float3 avg = float3(0.0);
+            for (int j = -1; j <= 1; j++) {
+                for (int i = -1; i <= 1; i++) {
+                    int2 q = clamp(int2(gid) + int2(i, j), int2(0), int2(int(W) - 1, int(H) - 1));
+                    avg += accum.read(uint2(q)).rgb / n;
+                }
+            }
+            c = mix(c, avg / 9.0, soft);
+        }
         float3 bloom = float3(0.0);
         float wsum = 0.0;
         float step = max(1.0, float(W) / 420.0) * 2.0;
@@ -669,7 +718,7 @@ final class Gel3DView: NSView, MTKViewDelegate {
                 q = clamp(q, int2(0), int2(int(W) - 1, int(H) - 1));
                 float w = exp(-0.35 * float(i * i + j * j));
                 float3 s = accum.read(uint2(q)).rgb / n;
-                bloom += max(s - float3(0.9), float3(0.0)) * w;
+                bloom += max(s - float3(1.0), float3(0.0)) * w;
                 wsum += w;
             }
         }
