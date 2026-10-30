@@ -348,7 +348,13 @@ void main() {
             float sin2t = eta * eta * (1.0 - cosi * cosi);
             float cost = sqrt(max(0.0, 1.0 - sin2t));
             float F = fresnel(cosi, cost, eta);
-            if (rnd(seed) < F) { d = reflect(d, n); p = x + ng * EPS; continue; }
+            // What the wet surface mirrors (the lamp, the room, the plate) is
+            // taken outright rather than by chance: a lamp 14 times brighter
+            // than anything else, found by a few rays in a hundred, would
+            // leave white specks that take ages to average out.
+            vec3 rd = reflect(d, n);
+            if (dot(rd, ng) > 0.0) L += T * F * outside(x + ng * EPS, rd);
+            T *= 1.0 - F;
             d = normalize(eta * d + (eta * cosi - cost) * n);
             p = x - ng * EPS;
             inside = true;
@@ -407,12 +413,16 @@ void main() {
         if (sin2t >= 1.0) { d = reflect(d, n); p = x - ng * EPS; continue; }
         float cost = sqrt(1.0 - sin2t);
         float F = fresnel(cosi, cost, eta);
-        if (rnd(seed) < F) { d = reflect(d, n); p = x - ng * EPS; continue; }
-        d = normalize(eta * d - (eta * cosi - cost) * n);
-        p = x + ng * EPS;
-        inside = false;
+        vec3 out_ = normalize(eta * d - (eta * cosi - cost) * n);
         // The bottom face lies on the plate.
-        if (ng.y < -0.5) { L += T * plate(x.xz); break; }
+        if (ng.y < -0.5) { L += T * (1.0 - F) * plate(x.xz); T *= F; d = reflect(d, n); p = x - ng * EPS; continue; }
+        // Out through the top or a side: what's there is taken outright, and the
+        // ray goes on inside with what the face reflected (a small share).
+        L += T * (1.0 - F) * outside(x + ng * EPS, out_);
+        T *= F;
+        if (max(T.x, max(T.y, T.z)) < 0.01) break;
+        d = reflect(d, n);
+        p = x - ng * EPS;
     }
     // A stray NaN would stain the pixel for good.
     if (any(isnan(L)) || any(isinf(L))) L = vec3(0.0);
