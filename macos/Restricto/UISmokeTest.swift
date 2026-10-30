@@ -29,8 +29,9 @@ enum UISmokeTest {
                 _exit(128 + code)
             }
         }
-        // Give up rather than hang CI if the window never appears.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+        // Give up rather than hang CI if the window never appears. The whole run
+        // now takes about a minute on CI, so leave it room.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 150) {
             FileHandle.standardError.write("ui-smoke: timed out\n".data(using: .utf8)!)
             exit(3)
         }
