@@ -108,6 +108,16 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
     private let fragmentList = NSStackView()
     private let agarosePopup = NSPopUpButton()
     private let stainPopup = NSPopUpButton()
+    /// EXPERIMENTAL: three ways to look at the same gel.
+    private let lookTabs = NSSegmentedControl(labels: ["Imager", "UV Box", "3D"], trackingMode: .selectOne,
+                                              target: nil, action: nil)
+    /// The stains the Imager tab offers, in the popup's order.
+    private static let imagerStains: [GelStain] = [.ethidiumUV, .sybrSafe, .blackAndWhite]
+    private var imagerStain: GelStain = .ethidiumUV
+    /// Made the first time the 3D tab is opened.
+    private var gel3D: Gel3DView?
+    private var models: [GelLaneModel] = []
+    private let stage = NSView()
     /// How long the gel ran: drag it back to see the gel part way through.
     private let runSlider = NSSlider(value: 1, minValue: 0.1, maxValue: 1, target: nil, action: nil)
     private let runLabel = NSTextField(labelWithString: "Full run")
@@ -310,10 +320,11 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         // The gel, always dark as an imager is, with its controls floating over it.
         gelView.onSelectLane = { [weak self] lane in self?.selectLane(lane) }
         gelView.onPickBand = { [weak self] lane, band in self?.pickFragment(lane: lane, index: band) }
-        let saved = UserDefaults.standard.integer(forKey: "GelStain")
-        gelView.stain = GelStain(rawValue: saved) ?? .ethidiumUV
-        for stain in GelStain.allCases { stainPopup.addItem(withTitle: stain.title) }
-        stainPopup.selectItem(at: gelView.stain.rawValue)
+        let saved = GelStain(rawValue: UserDefaults.standard.integer(forKey: "GelStain")) ?? .ethidiumUV
+        imagerStain = Self.imagerStains.contains(saved) ? saved : .ethidiumUV
+        gelView.stain = imagerStain
+        for stain in Self.imagerStains { stainPopup.addItem(withTitle: stain.title) }
+        stainPopup.selectItem(at: Self.imagerStains.firstIndex(of: imagerStain) ?? 0)
         stainPopup.isBordered = false
         stainPopup.toolTip = "How the gel was stained and photographed"
         stainPopup.target = self
@@ -345,9 +356,15 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         pillContent.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 10)
         let pill = Glass.capsule(around: pillContent, height: 36)
 
-        let stage = NSView()
         stage.appearance = NSAppearance(named: .darkAqua)
-        for v in [gelView, pill] as [NSView] {
+        lookTabs.target = self
+        lookTabs.action = #selector(lookChanged(_:))
+        lookTabs.selectedSegment = 0
+        lookTabs.setToolTip("The gel as an imager prints it", forSegment: 0)
+        lookTabs.setToolTip("The gel as a photo on the UV box, through the GPU", forSegment: 1)
+        lookTabs.setToolTip("The gel in 3D: drag to turn it, scroll to come closer", forSegment: 2)
+        let tabsPill = Glass.capsule(around: lookTabs, height: 30)
+        for v in [gelView, pill, tabsPill] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             stage.addSubview(v)
         }
@@ -358,6 +375,8 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
             gelView.trailingAnchor.constraint(equalTo: stage.trailingAnchor),
             pill.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
             pill.bottomAnchor.constraint(equalTo: stage.bottomAnchor, constant: -16),
+            tabsPill.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
+            tabsPill.topAnchor.constraint(equalTo: stage.topAnchor, constant: 10),
         ])
         gelView.bottomInset = 68
 
@@ -410,6 +429,8 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         selected = min(max(1, selected), lanes.count)
         gelView.selectedLane = selected
         gelView.setLanes(models, running: running)
+        self.models = models
+        gel3D?.show(models, runLevel: runSlider.doubleValue)
         fillSidebar()
     }
 
@@ -601,8 +622,35 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
     }
 
     @objc private func stainChanged(_ sender: Any?) {
-        gelView.stain = GelStain(rawValue: stainPopup.indexOfSelectedItem) ?? .ethidiumUV
-        UserDefaults.standard.set(gelView.stain.rawValue, forKey: "GelStain")
+        let i = stainPopup.indexOfSelectedItem
+        imagerStain = i >= 0 && i < Self.imagerStains.count ? Self.imagerStains[i] : .ethidiumUV
+        UserDefaults.standard.set(imagerStain.rawValue, forKey: "GelStain")
+        if lookTabs.selectedSegment == 0 { gelView.stain = imagerStain }
+    }
+
+    /// Imager: the flat imager print, in the chosen stain. UV Box: the same
+    /// gel as a photo on the UV box. 3D: a lit scene to turn around.
+    @objc private func lookChanged(_ sender: Any?) {
+        let look = lookTabs.selectedSegment
+        gelView.stain = look == 1 ? .transilluminator : imagerStain
+        stainPopup.isEnabled = look == 0
+        // Copy Image takes the 2D gel; the 3D scene isn't copied yet.
+        copyButton.isEnabled = look != 2
+        if look == 2 && gel3D == nil {
+            let view = Gel3DView(frame: stage.bounds)
+            view.translatesAutoresizingMaskIntoConstraints = false
+            stage.addSubview(view, positioned: .above, relativeTo: gelView)
+            NSLayoutConstraint.activate([
+                view.topAnchor.constraint(equalTo: stage.topAnchor),
+                view.bottomAnchor.constraint(equalTo: stage.bottomAnchor),
+                view.leadingAnchor.constraint(equalTo: stage.leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: stage.trailingAnchor),
+            ])
+            gel3D = view
+            view.show(models, runLevel: runSlider.doubleValue)
+        }
+        gel3D?.isHidden = look != 2
+        gelView.isHidden = look == 2
     }
 
     @objc private func agaroseChanged(_ sender: Any?) {
@@ -614,6 +662,7 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
 
     @objc private func runChanged(_ sender: Any?) {
         gelView.runLevel = runSlider.doubleValue
+        if gel3D?.isHidden == false { gel3D?.show(models, runLevel: runSlider.doubleValue) }
         runLabel.stringValue = runSlider.doubleValue >= 0.995 ? "Full run"
             : "\(Int((runSlider.doubleValue * 100).rounded()))% run"
     }
@@ -758,7 +807,7 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         guard let w = visible.first else { return }
         w.runSlider.doubleValue = level
         w.runChanged(nil)
-        w.stainPopup.selectItem(at: stain.rawValue)
+        w.stainPopup.selectItem(at: imagerStains.firstIndex(of: stain) ?? 0)
         w.stainChanged(nil)
     }
     static func closeAll() { visible.forEach { $0.window?.close() } }
