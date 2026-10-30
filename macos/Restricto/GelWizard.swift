@@ -632,11 +632,11 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         NSPasteboard.general.clearContents()
         NSPasteboard.general.writeObjects([image])
         // A moment's tick on the button says it worked.
+        // Only the image changes: setting an image-only button's title draws
+        // the title too, and the pill grows.
         copyButton.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Copied")
-        copyButton.title = "Copied"
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             self?.copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy Image")
-            self?.copyButton.title = "Copy Image"
         }
     }
 
