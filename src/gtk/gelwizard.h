@@ -18,16 +18,17 @@ struct GelSource {
     std::string name;
 };
 
-// The gel wizard (as on the Mac, #34): a dialog over the template's window.
-// Lanes on the left (a ladder, then any open sequence, cut with any enzymes
-// or left uncut), and the gel on the right as an imager shows it. Changing a
-// lane runs it again. Hovering a band names it; clicking a fragment selects
-// it in its sequence. Copy Image puts the gel on the clipboard.
+// The gel wizard (as on the Mac, #34 and #35): a dialog over the template's
+// window. Lanes on the left (ladders and any open sequence, cut with any
+// enzymes or left uncut, in any order), and the gel on the right as an
+// imager shows it. Changing or moving a lane runs it again. Hovering a band
+// names it; clicking a fragment selects it in its sequence. Copy Image puts
+// the gel on the clipboard for a notebook.
 class GelWizard {
 public:
-    // A gel for `templ`: uncut, and cut with the first enzyme on its map.
-    // `sources` lists the sequences open now. It deletes itself when it
-    // closes, calling onClosed first.
+    // A gel for `templ`: as it was last left, or a ladder, the sequence
+    // uncut, and cut with the first enzyme on its map. `sources` lists the
+    // sequences open now. It deletes itself when it closes, calling onClosed first.
     GelWizard(Document *templ, GtkWidget *parent, const std::string &name,
               std::function<std::vector<GelSource>()> sources);
     void present();
@@ -37,15 +38,19 @@ public:
 
     std::function<void()> onClosed;
 
-private:
+    // What a lane holds; kept per sequence so a gel reopens as it was left.
     struct Lane {
         Document *doc;      // compared with the open sequences, never used once it closed
         std::string name;
         Sequence seq;       // as last seen
         std::vector<std::string> enzymes;
+        int ladder = -1;    // which of the common ladders, or -1 for a sample
+        bool isLadder() const { return ladder >= 0; }
         // What decides the bands: when it changes, the lane runs again.
         std::string key() const;
     };
+
+private:
     struct Fragment {
         int start = 0, length = 0;
         std::string caption;
@@ -56,30 +61,35 @@ private:
     GtkWidget *buildSidebar();
     void refresh();
     void fillSidebar();
+    void fillSequences();
+    std::vector<std::string> laneNames() const;
     std::vector<Fragment> fragmentsOf(const Lane &lane) const;
+    double percent() const;
     void selectLane(int lane);
     void pickFragment(int lane, int index);
     void addLane();
     void removeLane();
+    void moveLane(int step);
     void addEnzyme(const std::string &typed);
     void removeEnzyme(const std::string &name);
     void sequenceChosen();
+    void runChanged();
     void copyImage();
     Document *live(const Lane &lane) const;
 
     Document *m_template;
     std::function<std::vector<GelSource>()> m_sources;
-    std::vector<GelSource> m_listed;   // in the sequence row, in its order
-    std::vector<Lane> m_lanes;
-    int m_selected = 1;                 // the lane being edited, as on the gel (0 is the ladder)
+    std::vector<GelSource> m_listed;   // in the sequence row, in its order, before the ladders
+    std::vector<Lane> m_lanes;         // as on the gel, ladders among them
+    int m_selected = 0;                // the lane being edited
     std::vector<std::vector<Fragment>> m_fragments;
     std::vector<std::string> m_drawnKeys;
     bool m_filling = false;
     guint m_copiedTimer = 0, m_refreshIdle = 0;
     std::unique_ptr<GelView> m_gel;
-    GtkWidget *m_parent, *m_dialog, *m_ladder, *m_laneList, *m_add, *m_remove, *m_laneGroup, *m_sequence;
-    GtkWidget *m_enzymeEntry, *m_enzymeMenu, *m_chips, *m_enzymeNote, *m_fragmentGroup, *m_fragmentList;
-    GtkWidget *m_uv, *m_blue, *m_copy;
+    GtkWidget *m_parent, *m_dialog, *m_agarose, *m_comb, *m_laneList, *m_add, *m_remove, *m_left, *m_right;
+    GtkWidget *m_laneGroup, *m_sequence, *m_enzymeEntry, *m_enzymeMenu, *m_chips, *m_enzymeNote;
+    GtkWidget *m_fragmentGroup, *m_fragmentList, *m_stain, *m_run, *m_runLabel, *m_copy;
 };
 
 } // namespace oc::gtk

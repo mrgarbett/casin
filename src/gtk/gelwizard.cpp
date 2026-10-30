@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <cstdio>
 #include <map>
 #include <set>
 
@@ -15,10 +17,18 @@ namespace oc::gtk {
 
 namespace {
 
-const int kMaxLanes = 10;
 // Kept while the app runs: the gel opens as it was last left.
 int g_ladder = 0;
-GelStain g_stain = GelStain::UV;
+int g_comb = 1;
+double g_percent = 1.0;
+GelStain g_stain = GelStain::EthidiumUV;
+// Each sequence's lanes as its gel was last closed, so reopening it keeps them.
+struct Remembered {
+    Document *doc;
+    std::vector<GelWizard::Lane> lanes;
+    int selected;
+};
+std::vector<Remembered> g_remembered;
 
 std::string lower(std::string s)
 {
@@ -35,7 +45,6 @@ std::string joined(const std::vector<std::string> &v, const char *sep)
     return out;
 }
 
-
 std::vector<Enzyme> named(const std::vector<std::string> &names)
 {
     std::vector<Enzyme> out;
@@ -45,10 +54,35 @@ std::vector<Enzyme> named(const std::vector<std::string> &names)
     return out;
 }
 
+const Ladder &ladderAt(int i)
+{
+    return commonLadders()[size_t(std::clamp(i, 0, int(commonLadders().size()) - 1))];
+}
+
+// "0.5% agarose", "1% agarose".
+std::string percentTitle(double percent)
+{
+    char buf[32];
+    std::snprintf(buf, sizeof buf, std::fabs(percent - std::round(percent)) < 0.01 ? "%.0f%% agarose" : "%.1f%% agarose",
+                  percent);
+    return buf;
+}
+
+GtkStringList *stringList(const std::vector<std::string> &items)
+{
+    std::vector<const char *> strings;
+    for (const std::string &t : items)
+        strings.push_back(t.c_str());
+    strings.push_back(nullptr);
+    return gtk_string_list_new(strings.data());
+}
+
 } // namespace
 
 std::string GelWizard::Lane::key() const
 {
+    if (isLadder())
+        return "ladder " + std::to_string(ladder);
     return std::to_string(reinterpret_cast<uintptr_t>(doc)) + "|" + std::to_string(seq.length()) + "|"
          + joined(enzymes, ",");
 }
@@ -57,11 +91,20 @@ GelWizard::GelWizard(Document *templ, GtkWidget *parent, const std::string &name
                      std::function<std::vector<GelSource>()> sources)
     : m_template(templ), m_sources(std::move(sources)), m_parent(parent)
 {
-    const std::string laneName = templ->sequence().name.empty() ? name : templ->sequence().name;
-    m_lanes.push_back({templ, laneName, templ->sequence(), {}});
-    if (!templ->visibleSites().empty() && templ->visibleSites().front().enzyme)
-        m_lanes.push_back({templ, laneName, templ->sequence(), {templ->visibleSites().front().enzyme->name}});
-    m_selected = int(m_lanes.size());
+    const auto saved = std::find_if(g_remembered.begin(), g_remembered.end(),
+                                    [&](const Remembered &r) { return r.doc == templ; });
+    if (saved != g_remembered.end()) {
+        m_lanes = saved->lanes;
+        m_selected = saved->selected;
+    } else {
+        // The ladder last used, the sequence uncut, and cut with its first enzyme.
+        const std::string laneName = templ->sequence().name.empty() ? name : templ->sequence().name;
+        m_lanes.push_back({templ, ladderAt(g_ladder).name, {}, {}, std::clamp(g_ladder, 0, int(commonLadders().size()) - 1)});
+        m_lanes.push_back({templ, laneName, templ->sequence(), {}});
+        if (!templ->visibleSites().empty() && templ->visibleSites().front().enzyme)
+            m_lanes.push_back({templ, laneName, templ->sequence(), {templ->visibleSites().front().enzyme->name}});
+        m_selected = int(m_lanes.size()) - 1;
+    }
     m_gel = std::make_unique<GelView>();
     m_dialog = GTK_WIDGET(adw_dialog_new());
     adw_dialog_set_title(ADW_DIALOG(m_dialog), ("Gel · " + name).c_str());
@@ -69,6 +112,20 @@ GelWizard::GelWizard(Document *templ, GtkWidget *parent, const std::string &name
     const int w = parent ? gtk_widget_get_width(parent) : 1300, h = parent ? gtk_widget_get_height(parent) : 820;
     adw_dialog_set_content_width(ADW_DIALOG(m_dialog), std::max(780, int(w * 0.8)));
     adw_dialog_set_content_height(ADW_DIALOG(m_dialog), std::max(520, int(h * 0.8)));
+    // Esc while typing an enzyme only leaves the box; otherwise it closes the gel.
+    adw_dialog_set_can_close(ADW_DIALOG(m_dialog), FALSE);
+    g_signal_connect_swapped(m_dialog, "close-attempt", G_CALLBACK(+[](gpointer p) {
+                                 auto *self = static_cast<GelWizard *>(p);
+                                 GtkRoot *root = gtk_widget_get_root(self->m_dialog);
+                                 GtkWidget *focus = root ? gtk_root_get_focus(root) : nullptr;
+                                 if (focus && (focus == self->m_enzymeEntry
+                                               || gtk_widget_is_ancestor(focus, self->m_enzymeEntry))) {
+                                     gtk_widget_grab_focus(self->m_laneList);
+                                     return;
+                                 }
+                                 self->close();
+                             }),
+                             this);
     g_signal_connect_swapped(m_dialog, "destroy", G_CALLBACK(+[](gpointer p) {
                                  auto *self = static_cast<GelWizard *>(p);
                                  if (self->onClosed)
@@ -97,6 +154,10 @@ void GelWizard::present()
 
 void GelWizard::close()
 {
+    g_remembered.erase(std::remove_if(g_remembered.begin(), g_remembered.end(),
+                                      [&](const Remembered &r) { return r.doc == m_template; }),
+                       g_remembered.end());
+    g_remembered.push_back({m_template, m_lanes, m_selected});
     adw_dialog_force_close(ADW_DIALOG(m_dialog));
 }
 
@@ -109,34 +170,42 @@ GtkWidget *GelWizard::buildView()
 {
     // The gel, always dark as an imager is, with its controls floating over it.
     m_gel->setStain(g_stain);
+    m_gel->setComb(gelCombs()[size_t(std::clamp(g_comb, 0, int(gelCombs().size()) - 1))]);
     m_gel->setBottomInset(72);
     m_gel->onSelectLane = [this](int lane) { selectLane(lane); };
     m_gel->onPickBand = [this](int lane, int band) { pickFragment(lane, band); };
 
-    m_uv = gtk_toggle_button_new_with_label("UV");
-    gtk_widget_set_tooltip_text(m_uv, "Ethidium bromide under UV");
-    m_blue = gtk_toggle_button_new_with_label("Blue Light");
-    gtk_widget_set_tooltip_text(m_blue, "SYBR Safe under blue light");
-    gtk_toggle_button_set_group(GTK_TOGGLE_BUTTON(m_blue), GTK_TOGGLE_BUTTON(m_uv));
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g_stain == GelStain::UV ? m_uv : m_blue), TRUE);
-    g_signal_connect_swapped(m_uv, "toggled", G_CALLBACK(+[](gpointer p) {
+    // How the gel was stained and photographed.
+    GtkStringList *stains = stringList({gelStainTitle(GelStain::EthidiumUV), gelStainTitle(GelStain::SybrSafe),
+                                        gelStainTitle(GelStain::BlackAndWhite)});
+    m_stain = gtk_drop_down_new(G_LIST_MODEL(stains), nullptr);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(m_stain), guint(g_stain));
+    gtk_widget_set_tooltip_text(m_stain, "How the gel was stained and photographed");
+    g_signal_connect_swapped(m_stain, "notify::selected", G_CALLBACK(+[](gpointer p) {
                                  auto *self = static_cast<GelWizard *>(p);
-                                 g_stain = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(self->m_uv))
-                                               ? GelStain::UV
-                                               : GelStain::BlueLight;
+                                 g_stain = GelStain(gtk_drop_down_get_selected(GTK_DROP_DOWN(self->m_stain)));
                                  self->m_gel->setStain(g_stain);
                              }),
                              this);
-    GtkWidget *stain = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_add_css_class(stain, "linked");
-    gtk_box_append(GTK_BOX(stain), m_uv);
-    gtk_box_append(GTK_BOX(stain), m_blue);
-    m_copy = gtk_button_new();
-    GtkWidget *copyContent = adw_button_content_new();
-    adw_button_content_set_icon_name(ADW_BUTTON_CONTENT(copyContent), "edit-copy-symbolic");
-    adw_button_content_set_label(ADW_BUTTON_CONTENT(copyContent), "Copy Image");
-    gtk_button_set_child(GTK_BUTTON(m_copy), copyContent);
-    gtk_widget_add_css_class(m_copy, "flat");
+    // How long the gel ran: drag it back to see the gel part way through.
+    GtkWidget *runIcon = gtk_image_new_from_icon_name("restricto-run-symbolic");
+    gtk_widget_set_tooltip_text(runIcon, "How long the gel ran");
+    m_run = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0.1, 1, 0.01);
+    gtk_range_set_value(GTK_RANGE(m_run), 1);
+    gtk_scale_set_draw_value(GTK_SCALE(m_run), FALSE);
+    gtk_widget_set_size_request(m_run, 110, -1);
+    gtk_widget_set_tooltip_text(m_run, "How long the gel ran");
+    g_signal_connect_swapped(m_run, "value-changed", G_CALLBACK(+[](gpointer p) {
+                                 static_cast<GelWizard *>(p)->runChanged();
+                             }),
+                             this);
+    m_runLabel = gtk_label_new("Full run");
+    gtk_widget_add_css_class(m_runLabel, "numeric");
+    gtk_widget_add_css_class(m_runLabel, "dim-label");
+    gtk_widget_set_size_request(m_runLabel, 58, -1);
+    gtk_label_set_xalign(GTK_LABEL(m_runLabel), 0);
+    // Icon only, so the pill fits over the gel at the dialog's smallest.
+    m_copy = gtk_button_new_from_icon_name("edit-copy-symbolic");
     gtk_widget_set_tooltip_text(m_copy, "Copy the gel as a picture");
     g_signal_connect_swapped(m_copy, "clicked", G_CALLBACK(+[](gpointer p) {
                                  static_cast<GelWizard *>(p)->copyImage();
@@ -147,7 +216,11 @@ GtkWidget *GelWizard::buildView()
     gtk_widget_set_halign(pill, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(pill, GTK_ALIGN_END);
     gtk_widget_set_margin_bottom(pill, 16);
-    gtk_box_append(GTK_BOX(pill), stain);
+    gtk_box_append(GTK_BOX(pill), m_stain);
+    gtk_widget_set_margin_end(m_stain, 8);
+    gtk_box_append(GTK_BOX(pill), runIcon);
+    gtk_box_append(GTK_BOX(pill), m_run);
+    gtk_box_append(GTK_BOX(pill), m_runLabel);
     gtk_box_append(GTK_BOX(pill), m_copy);
     GtkWidget *stage = gtk_overlay_new();
     gtk_overlay_set_child(GTK_OVERLAY(stage), m_gel->widget());
@@ -191,46 +264,81 @@ GtkWidget *GelWizard::buildView()
 
 GtkWidget *GelWizard::buildSidebar()
 {
-    GtkWidget *intro = gtk_label_new("Digests run side by side, as on a 1% agarose gel.");
+    GtkWidget *intro = gtk_label_new("Digests run side by side on an agarose gel.");
     gtk_label_set_wrap(GTK_LABEL(intro), TRUE);
     gtk_label_set_xalign(GTK_LABEL(intro), 0);
     gtk_widget_add_css_class(intro, "dim-label");
 
-    GtkWidget *ladderGroup = adw_preferences_group_new();
-    m_ladder = adw_combo_row_new();
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(m_ladder), "Ladder");
-    std::vector<const char *> names;
-    for (const Ladder &l : commonLadders())
-        names.push_back(l.name.c_str());
-    names.push_back(nullptr);
-    GtkStringList *ladders = gtk_string_list_new(names.data());
-    adw_combo_row_set_model(ADW_COMBO_ROW(m_ladder), G_LIST_MODEL(ladders));
-    g_object_unref(ladders);
-    adw_combo_row_set_selected(ADW_COMBO_ROW(m_ladder), guint(std::clamp(g_ladder, 0, int(commonLadders().size()) - 1)));
-    g_signal_connect_swapped(m_ladder, "notify::selected", G_CALLBACK(+[](gpointer p) {
+    // The gel: how dense it was cast, and the comb that cut its wells.
+    GtkWidget *gelGroup = adw_preferences_group_new();
+    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(gelGroup), "Gel");
+    m_agarose = adw_combo_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(m_agarose), "Agarose");
+    std::vector<std::string> percents;
+    guint pickPercent = 0;
+    for (int i = 0; i < view::gelPercentCount(); ++i) {
+        percents.push_back(percentTitle(view::gelPercent(i)));
+        if (std::fabs(view::gelPercent(i) - g_percent) < 0.01)
+            pickPercent = guint(i);
+    }
+    GtkStringList *percentModel = stringList(percents);
+    adw_combo_row_set_model(ADW_COMBO_ROW(m_agarose), G_LIST_MODEL(percentModel));
+    g_object_unref(percentModel);
+    adw_combo_row_set_selected(ADW_COMBO_ROW(m_agarose), pickPercent);
+    gtk_widget_set_tooltip_text(m_agarose, "Denser gels separate small fragments; thinner ones, large ones");
+    g_signal_connect_swapped(m_agarose, "notify::selected", G_CALLBACK(+[](gpointer p) {
                                  auto *self = static_cast<GelWizard *>(p);
-                                 g_ladder = int(adw_combo_row_get_selected(ADW_COMBO_ROW(self->m_ladder)));
+                                 g_percent = self->percent();
                                  self->refresh();
                              }),
                              this);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(ladderGroup), m_ladder);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(gelGroup), m_agarose);
+    m_comb = adw_combo_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(m_comb), "Comb");
+    std::vector<std::string> combs;
+    for (const GelComb &c : gelCombs())
+        combs.push_back(c.name);
+    GtkStringList *combModel = stringList(combs);
+    adw_combo_row_set_model(ADW_COMBO_ROW(m_comb), G_LIST_MODEL(combModel));
+    g_object_unref(combModel);
+    adw_combo_row_set_selected(ADW_COMBO_ROW(m_comb), guint(std::clamp(g_comb, 0, int(gelCombs().size()) - 1)));
+    gtk_widget_set_tooltip_text(m_comb, "The comb that cast the wells: a thin one gives sharper bands");
+    g_signal_connect_swapped(m_comb, "notify::selected", G_CALLBACK(+[](gpointer p) {
+                                 auto *self = static_cast<GelWizard *>(p);
+                                 g_comb = int(adw_combo_row_get_selected(ADW_COMBO_ROW(self->m_comb)));
+                                 self->m_gel->setComb(gelCombs()[size_t(g_comb)]);
+                                 self->fillSidebar();
+                             }),
+                             this);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(gelGroup), m_comb);
 
-    // The lanes, numbered as on the gel.
+    // The lanes, named as on the gel; the buttons move, add and remove them.
     GtkWidget *lanes = adw_preferences_group_new();
     adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(lanes), "Lanes");
-    m_add = gtk_button_new_from_icon_name("list-add-symbolic");
-    gtk_widget_set_tooltip_text(m_add, "Add a lane");
-    m_remove = gtk_button_new_from_icon_name("list-remove-symbolic");
-    gtk_widget_set_tooltip_text(m_remove, "Remove the selected lane");
-    GtkWidget *laneButtons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_add_css_class(laneButtons, "linked");
+    auto button = [this](const char *icon, const char *tip, void (*clicked)(GelWizard *)) {
+        GtkWidget *b = gtk_button_new_from_icon_name(icon);
+        gtk_widget_set_tooltip_text(b, tip);
+        g_object_set_data(G_OBJECT(b), "oc-clicked", reinterpret_cast<gpointer>(clicked));
+        g_signal_connect(b, "clicked", G_CALLBACK(+[](GtkButton *b, gpointer p) {
+                             reinterpret_cast<void (*)(GelWizard *)>(g_object_get_data(G_OBJECT(b), "oc-clicked"))(
+                                 static_cast<GelWizard *>(p));
+                         }),
+                         this);
+        return b;
+    };
+    m_left = button("go-previous-symbolic", "Move this lane left", [](GelWizard *w) { w->moveLane(-1); });
+    m_right = button("go-next-symbolic", "Move this lane right", [](GelWizard *w) { w->moveLane(1); });
+    m_add = button("list-add-symbolic", "Add a lane after this one", [](GelWizard *w) { w->addLane(); });
+    m_remove = button("list-remove-symbolic", "Remove this lane", [](GelWizard *w) { w->removeLane(); });
+    GtkWidget *laneButtons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_set_valign(laneButtons, GTK_ALIGN_CENTER);
-    gtk_box_append(GTK_BOX(laneButtons), m_add);
-    gtk_box_append(GTK_BOX(laneButtons), m_remove);
-    g_signal_connect_swapped(m_add, "clicked", G_CALLBACK(+[](gpointer p) { static_cast<GelWizard *>(p)->addLane(); }),
-                             this);
-    g_signal_connect_swapped(m_remove, "clicked",
-                             G_CALLBACK(+[](gpointer p) { static_cast<GelWizard *>(p)->removeLane(); }), this);
+    for (auto pair : {std::make_pair(m_left, m_right), std::make_pair(m_add, m_remove)}) {
+        GtkWidget *linked = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+        gtk_widget_add_css_class(linked, "linked");
+        gtk_box_append(GTK_BOX(linked), pair.first);
+        gtk_box_append(GTK_BOX(linked), pair.second);
+        gtk_box_append(GTK_BOX(laneButtons), linked);
+    }
     adw_preferences_group_set_header_suffix(ADW_PREFERENCES_GROUP(lanes), laneButtons);
     m_laneList = gtk_list_box_new();
     gtk_widget_add_css_class(m_laneList, "boxed-list");
@@ -238,22 +346,29 @@ GtkWidget *GelWizard::buildSidebar()
     g_signal_connect(m_laneList, "row-selected", G_CALLBACK(+[](GtkListBox *, GtkListBoxRow *row, gpointer p) {
                          auto *self = static_cast<GelWizard *>(p);
                          if (!self->m_filling && row)
-                             self->selectLane(gtk_list_box_row_get_index(row) + 1);
+                             self->selectLane(gtk_list_box_row_get_index(row));
                      }),
                      this);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(lanes), m_laneList);
 
-    // The selected lane: its sequence and enzymes.
+    // The selected lane: what's loaded, and a sample's enzymes.
     m_laneGroup = adw_preferences_group_new();
-    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(m_laneGroup), "Enzymes in one lane cut together.");
     m_sequence = adw_combo_row_new();
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(m_sequence), "Sequence");
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(m_sequence), "Loaded");
     g_signal_connect_swapped(m_sequence, "notify::selected", G_CALLBACK(+[](gpointer p) {
                                  auto *self = static_cast<GelWizard *>(p);
                                  if (!self->m_filling)
                                      self->sequenceChosen();
                              }),
                              this);
+    // Refilled as it opens, so a sequence opened after the gel is there too.
+    GtkGesture *opening = gtk_gesture_click_new();
+    gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(opening), GTK_PHASE_CAPTURE);
+    g_signal_connect_swapped(opening, "pressed", G_CALLBACK(+[](gpointer p) {
+                                 static_cast<GelWizard *>(p)->fillSequences();
+                             }),
+                             this);
+    gtk_widget_add_controller(m_sequence, GTK_EVENT_CONTROLLER(opening));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(m_laneGroup), m_sequence);
     m_enzymeEntry = adw_entry_row_new();
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(m_enzymeEntry), "Add an enzyme");
@@ -305,7 +420,7 @@ GtkWidget *GelWizard::buildSidebar()
     gtk_widget_set_margin_end(inputs, 16);
     gtk_widget_set_margin_top(inputs, 12);
     gtk_widget_set_margin_bottom(inputs, 18);
-    for (GtkWidget *w : {intro, ladderGroup, lanes, m_laneGroup, m_fragmentGroup})
+    for (GtkWidget *w : {intro, gelGroup, lanes, m_laneGroup, m_fragmentGroup})
         gtk_box_append(GTK_BOX(inputs), w);
     GtkWidget *sidebar = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(sidebar), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
@@ -323,54 +438,78 @@ Document *GelWizard::live(const Lane &lane) const
     return nullptr;
 }
 
+double GelWizard::percent() const
+{
+    return view::gelPercent(int(adw_combo_row_get_selected(ADW_COMBO_ROW(m_agarose))));
+}
+
+// What each lane is called on the gel: "L" for a ladder, the samples
+// numbered among themselves.
+std::vector<std::string> GelWizard::laneNames() const
+{
+    std::vector<std::string> out;
+    int n = 0;
+    for (const Lane &lane : m_lanes)
+        out.push_back(lane.isLadder() ? "L" : std::to_string(++n));
+    return out;
+}
+
 // Rebuilds the gel from the lanes, running the ones that changed.
 void GelWizard::refresh()
 {
     // Lanes follow their sequences while those are open.
     for (Lane &lane : m_lanes)
-        if (Document *d = live(lane))
+        if (Document *d = !lane.isLadder() ? live(lane) : nullptr)
             lane.seq = d->sequence();
-    const Ladder &ladder = commonLadders()[size_t(std::clamp(g_ladder, 0, int(commonLadders().size()) - 1))];
-    std::vector<view::GelLane> gel{{"L", ladder.bands, ladder.bright, true, false}};
-    m_fragments = {{}};
-    for (const Lane &lane : m_lanes) {
-        view::GelLane l{std::to_string(gel.size()), {}, {}, false, false};
-        std::vector<Fragment> frags = fragmentsOf(lane);
-        if (lane.enzymes.empty()) {
-            l.bands = {lane.seq.length()};
-            l.uncutCircular = lane.seq.circular;
-        } else {
-            const DigestResult r = digest(lane.seq, named(lane.enzymes));
-            l.uncutCircular = r.uncut && lane.seq.circular;
-            for (const DigestFragment &f : r.fragments)
-                l.bands.push_back(f.length);
-            std::sort(l.bands.rbegin(), l.bands.rend());
-        }
-        gel.push_back(l);
-        m_fragments.push_back(std::move(frags));
-    }
+    const double pc = percent();
+    // Bromophenol blue runs with ~300 bp fragments, xylene cyanol with ~4 kb.
+    m_gel->setDyeRuns({view::gelRunFraction(300, false, pc), view::gelRunFraction(4000, false, pc)});
+    const std::vector<std::string> names = laneNames();
+    m_fragments.clear();
     std::vector<GelLaneModel> models;
-    for (size_t i = 0; i < gel.size(); ++i) {
-        GelLaneModel m{i == 0 ? "L" : std::to_string(i), {}, i == 0};
-        for (size_t j = 0; j < gel[i].bands.size(); ++j) {
-            const int bp = gel[i].bands[j];
-            const bool reference = std::find(gel[i].bright.begin(), gel[i].bright.end(), bp) != gel[i].bright.end();
-            m.bands.push_back({bp, view::gelRunFraction(bp, gel[i].uncutCircular), view::gelBandIntensity(gel[i], bp),
-                               reference, i < m_fragments.size() && j < m_fragments[i].size()
-                                              ? m_fragments[i][j].caption
-                                              : std::string()});
+    for (size_t i = 0; i < m_lanes.size(); ++i) {
+        const Lane &lane = m_lanes[i];
+        view::GelLane l{names[i], {}, {}, lane.isLadder(), false, {}};
+        if (lane.isLadder()) {
+            l.bands = ladderAt(lane.ladder).bands;
+            l.bright = ladderAt(lane.ladder).bright;
+        } else {
+            const std::vector<Enzyme> use = named(lane.enzymes);
+            const DigestResult r = use.empty() ? DigestResult{} : digest(lane.seq, use);
+            if (use.empty() || r.uncut) {
+                l.bands = {lane.seq.length()};
+                if (lane.seq.circular) {
+                    // The nicked open circle trails the supercoiled plasmid.
+                    l.uncutCircular = true;
+                    l.bands = {lane.seq.length(), lane.seq.length()};
+                    l.forms = {view::GelForm::OpenCircular, view::GelForm::Supercoiled};
+                }
+            } else {
+                for (const DigestFragment &f : r.fragments)
+                    l.bands.push_back(f.length);
+                std::sort(l.bands.rbegin(), l.bands.rend());
+            }
+        }
+        m_fragments.push_back(lane.isLadder() ? std::vector<Fragment>{} : fragmentsOf(lane));
+        GelLaneModel m{names[i], {}, lane.isLadder()};
+        for (size_t j = 0; j < l.bands.size(); ++j) {
+            const int bp = l.bands[j];
+            const bool reference = std::find(l.bright.begin(), l.bright.end(), bp) != l.bright.end();
+            m.bands.push_back({bp, view::gelRunFraction(bp, view::gelBandForm(l, j), pc), view::gelBandIntensity(l, j),
+                               reference, j < m_fragments[i].size() ? m_fragments[i][j].caption : std::string()});
         }
         models.push_back(std::move(m));
     }
-    std::vector<std::string> keys{"ladder " + std::to_string(g_ladder)};
+    // A new percentage runs every lane again; so does a lane that moved.
+    std::vector<std::string> keys;
     for (const Lane &lane : m_lanes)
-        keys.push_back(lane.key());
+        keys.push_back(std::to_string(pc) + " " + lane.key());
     std::set<int> running;
     for (size_t i = 0; i < keys.size(); ++i)
         if (i >= m_drawnKeys.size() || m_drawnKeys[i] != keys[i])
             running.insert(int(i));
     m_drawnKeys = keys;
-    m_selected = std::clamp(m_selected, 1, int(m_lanes.size()));
+    m_selected = std::clamp(m_selected, 0, int(m_lanes.size()) - 1);
     m_gel->setSelectedLane(m_selected);
     m_gel->setLanes(std::move(models), running);
     fillSidebar();
@@ -379,8 +518,15 @@ void GelWizard::refresh()
 // The lane's fragments, largest first as its bands are, with their ends.
 std::vector<GelWizard::Fragment> GelWizard::fragmentsOf(const Lane &lane) const
 {
+    // An uncut plasmid runs twice: the nicked open circle, then the
+    // supercoiled form, as the gel draws it.
+    const int n = lane.seq.length();
+    auto uncutCircle = [n](const char *uncut) {
+        return std::vector<Fragment>{{0, n, std::string(uncut) + ", nicked (open circle)"},
+                                     {0, n, std::string(uncut) + ", supercoiled"}};
+    };
     if (lane.enzymes.empty())
-        return {{0, lane.seq.length(), lane.seq.circular ? "uncut, supercoiled" : "uncut, linear"}};
+        return lane.seq.circular ? uncutCircle("uncut") : std::vector<Fragment>{{0, n, "uncut, linear"}};
     std::vector<Fragment> out;
     for (const DigestFragment &f : digest(lane.seq, named(lane.enzymes)).fragments) {
         const std::string ends = f.leftEnzyme.empty() && f.rightEnzyme.empty()
@@ -389,62 +535,86 @@ std::vector<GelWizard::Fragment> GelWizard::fragmentsOf(const Lane &lane) const
                                            + (f.rightEnzyme.empty() ? "end" : f.rightEnzyme);
         out.push_back({f.start, f.length, ends});
     }
-    // Nothing cut a circle: it runs supercoiled, as the gel draws it.
+    // Nothing cut a circle: it runs as an uncut plasmid does.
     if (out.size() == 1 && lane.seq.circular && out[0].caption == "uncut")
-        return {{0, lane.seq.length(), "not cut, supercoiled"}};
+        return uncutCircle("not cut");
     std::stable_sort(out.begin(), out.end(), [](const Fragment &a, const Fragment &b) { return a.length > b.length; });
     return out;
 }
 
-void GelWizard::fillSidebar()
+// Every open sequence, with the lane's own first if it has since been
+// closed, then the ladders.
+void GelWizard::fillSequences()
 {
-    m_filling = true;
-    gtk_list_box_remove_all(GTK_LIST_BOX(m_laneList));
-    for (size_t i = 0; i < m_lanes.size(); ++i) {
-        const Lane &lane = m_lanes[i];
-        GtkWidget *row = adw_action_row_new();
-        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), lane.name.empty() ? "Untitled" : lane.name.c_str());
-        adw_preferences_row_set_use_markup(ADW_PREFERENCES_ROW(row), FALSE);
-        adw_action_row_set_subtitle(ADW_ACTION_ROW(row),
-                                    lane.enzymes.empty() ? "Uncut" : joined(lane.enzymes, " + ").c_str());
-        GtkWidget *badge = gtk_label_new(std::to_string(i + 1).c_str());
-        gtk_widget_add_css_class(badge, "restricto-lane-badge");
-        gtk_widget_set_valign(badge, GTK_ALIGN_CENTER);
-        adw_action_row_add_prefix(ADW_ACTION_ROW(row), badge);
-        gtk_list_box_append(GTK_LIST_BOX(m_laneList), row);
-        if (int(i) + 1 == m_selected)
-            gtk_list_box_select_row(GTK_LIST_BOX(m_laneList), GTK_LIST_BOX_ROW(row));
-    }
-    gtk_widget_set_sensitive(m_add, m_lanes.size() < kMaxLanes);
-    gtk_widget_set_sensitive(m_remove, m_lanes.size() > 1);
-
-    // The selected lane's sequence and enzymes.
-    const Lane &lane = m_lanes[size_t(m_selected - 1)];
-    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(m_laneGroup), ("Lane " + std::to_string(m_selected)).c_str());
+    const Lane &lane = m_lanes[size_t(m_selected)];
     m_listed = m_sources ? m_sources() : std::vector<GelSource>{};
     m_listed.erase(std::remove_if(m_listed.begin(), m_listed.end(),
                                   [](const GelSource &s) { return s.doc->isEmpty(); }),
                    m_listed.end());
-    if (!live(lane))
+    if (!lane.isLadder() && !live(lane))
         m_listed.insert(m_listed.begin(), {lane.doc, lane.name});
     std::vector<std::string> titles;
     guint pick = 0;
     for (size_t i = 0; i < m_listed.size(); ++i) {
         const GelSource &s = m_listed[i];
-        const int length = s.doc == lane.doc ? lane.seq.length() : s.doc->sequence().length();
+        const int length = s.doc == lane.doc && !lane.isLadder() ? lane.seq.length() : s.doc->sequence().length();
         titles.push_back((s.name.empty() ? std::string("Untitled") : s.name) + "  ·  " + view::withThousands(length)
                          + " bp");
-        if (s.doc == lane.doc)
+        if (s.doc == lane.doc && !lane.isLadder())
             pick = guint(i);
     }
-    std::vector<const char *> strings;
-    for (const std::string &t : titles)
-        strings.push_back(t.c_str());
-    strings.push_back(nullptr);
-    GtkStringList *model = gtk_string_list_new(strings.data());
+    for (size_t i = 0; i < commonLadders().size(); ++i)
+        titles.push_back("Ladder  ·  " + commonLadders()[i].name);
+    if (lane.isLadder())
+        pick = guint(m_listed.size() + size_t(lane.ladder));
+    const bool filling = m_filling;
+    m_filling = true;
+    GtkStringList *model = stringList(titles);
     adw_combo_row_set_model(ADW_COMBO_ROW(m_sequence), G_LIST_MODEL(model));
     g_object_unref(model);
     adw_combo_row_set_selected(ADW_COMBO_ROW(m_sequence), pick);
+    m_filling = filling;
+}
+
+void GelWizard::fillSidebar()
+{
+    m_filling = true;
+    const std::vector<std::string> names = laneNames();
+    gtk_list_box_remove_all(GTK_LIST_BOX(m_laneList));
+    for (size_t i = 0; i < m_lanes.size(); ++i) {
+        const Lane &lane = m_lanes[i];
+        GtkWidget *row = adw_action_row_new();
+        adw_preferences_row_set_use_markup(ADW_PREFERENCES_ROW(row), FALSE);
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), lane.isLadder()     ? ladderAt(lane.ladder).name.c_str()
+                                                                : lane.name.empty() ? "Untitled"
+                                                                                    : lane.name.c_str());
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(row), lane.isLadder()         ? "Ladder"
+                                                         : lane.enzymes.empty() ? "Uncut"
+                                                                                : joined(lane.enzymes, " + ").c_str());
+        GtkWidget *badge = gtk_label_new(names[i].c_str());
+        gtk_widget_add_css_class(badge, "restricto-lane-badge");
+        gtk_widget_set_valign(badge, GTK_ALIGN_CENTER);
+        adw_action_row_add_prefix(ADW_ACTION_ROW(row), badge);
+        gtk_list_box_append(GTK_LIST_BOX(m_laneList), row);
+        if (int(i) == m_selected)
+            gtk_list_box_select_row(GTK_LIST_BOX(m_laneList), GTK_LIST_BOX_ROW(row));
+    }
+    const int teeth = gelCombs()[size_t(std::clamp(g_comb, 0, int(gelCombs().size()) - 1))].teeth;
+    gtk_widget_set_sensitive(m_add, int(m_lanes.size()) < teeth);
+    gtk_widget_set_sensitive(m_remove, m_lanes.size() > 1);
+    gtk_widget_set_sensitive(m_left, m_selected > 0);
+    gtk_widget_set_sensitive(m_right, m_selected < int(m_lanes.size()) - 1);
+
+    // The selected lane: what's loaded, and a sample's enzymes.
+    const Lane &lane = m_lanes[size_t(m_selected)];
+    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(m_laneGroup),
+                                    lane.isLadder() ? "Ladder" : ("Lane " + names[size_t(m_selected)]).c_str());
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(m_laneGroup),
+                                          lane.isLadder() ? nullptr : "Enzymes in one lane cut together.");
+    fillSequences();
+    gtk_widget_set_visible(m_enzymeEntry, !lane.isLadder());
+    if (lane.isLadder())
+        gtk_widget_set_visible(m_enzymeNote, FALSE);
 
     gtk_flow_box_remove_all(GTK_FLOW_BOX(m_chips));
     for (const std::string &e : lane.enzymes) {
@@ -463,13 +633,14 @@ void GelWizard::fillSidebar()
                          this);
         gtk_flow_box_append(GTK_FLOW_BOX(m_chips), chip);
     }
-    gtk_widget_set_visible(m_chips, !lane.enzymes.empty());
+    gtk_widget_set_visible(m_chips, !lane.isLadder() && !lane.enzymes.empty());
 
     // Enzymes that cut this sequence, the fewest cuts first.
     std::map<std::string, int> cuts;
-    for (const CutSite &s : findSites(lane.seq, commonEnzymes()))
-        if (s.enzyme)
-            ++cuts[s.enzyme->name];
+    if (!lane.isLadder())
+        for (const CutSite &s : findSites(lane.seq, commonEnzymes()))
+            if (s.enzyme)
+                ++cuts[s.enzyme->name];
     GMenu *menu = g_menu_new();
     const struct {
         const char *title;
@@ -495,6 +666,7 @@ void GelWizard::fillSidebar()
     gtk_list_box_remove_all(GTK_LIST_BOX(m_fragmentList));
     const std::vector<Fragment> &frags = size_t(m_selected) < m_fragments.size() ? m_fragments[size_t(m_selected)]
                                                                                  : std::vector<Fragment>{};
+    gtk_widget_set_visible(m_fragmentGroup, !lane.isLadder());
     adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(m_fragmentGroup),
                                     frags.size() == 1 ? "1 Fragment"
                                                       : (std::to_string(frags.size()) + " Fragments").c_str());
@@ -511,7 +683,7 @@ void GelWizard::fillSidebar()
 
 void GelWizard::selectLane(int lane)
 {
-    if (lane < 1 || lane > int(m_lanes.size()) || lane == m_selected)
+    if (lane < 0 || lane >= int(m_lanes.size()) || lane == m_selected)
         return;
     m_selected = lane;
     m_gel->setSelectedLane(lane);
@@ -519,25 +691,36 @@ void GelWizard::selectLane(int lane)
     fillSidebar();
 }
 
-// Selects fragment `index` of `lane` in its sequence's window.
+// Selects fragment `index` of `lane` in its sequence's tab.
 void GelWizard::pickFragment(int lane, int index)
 {
-    if (lane < 1 || lane > int(m_lanes.size()) || size_t(lane) >= m_fragments.size() || index < 0
+    if (lane < 0 || lane >= int(m_lanes.size()) || size_t(lane) >= m_fragments.size() || index < 0
         || size_t(index) >= m_fragments[size_t(lane)].size())
         return;
     const Fragment &f = m_fragments[size_t(lane)][size_t(index)];
-    if (Document *d = live(m_lanes[size_t(lane - 1)]))
+    if (Document *d = live(m_lanes[size_t(lane)]))
         d->setSelection({f.start, f.length});
 }
 
 void GelWizard::addLane()
 {
-    if (int(m_lanes.size()) >= kMaxLanes)
+    const int teeth = gelCombs()[size_t(std::clamp(g_comb, 0, int(gelCombs().size()) - 1))].teeth;
+    if (int(m_lanes.size()) >= teeth)
         return;
-    // Same sequence as the lane being edited, uncut, ready for an enzyme.
-    Lane copy = m_lanes[size_t(m_selected - 1)];
+    // After the lane being edited: the same sequence, uncut, ready for an
+    // enzyme (a ladder's neighbour takes the first sample's sequence).
+    Lane copy = m_lanes[size_t(m_selected)];
+    if (copy.isLadder()) {
+        const auto sample = std::find_if(m_lanes.begin(), m_lanes.end(), [](const Lane &l) { return !l.isLadder(); });
+        if (sample != m_lanes.end()) {
+            copy = *sample;
+        } else {
+            copy = {m_template, m_template->sequence().name, m_template->sequence(), {}};
+        }
+    }
     copy.enzymes.clear();
-    m_lanes.insert(m_lanes.begin() + m_selected, copy);
+    copy.ladder = -1;
+    m_lanes.insert(m_lanes.begin() + m_selected + 1, copy);
     ++m_selected;
     refresh();
     gtk_widget_grab_focus(m_enzymeEntry);
@@ -547,17 +730,31 @@ void GelWizard::removeLane()
 {
     if (m_lanes.size() <= 1)
         return;
-    m_lanes.erase(m_lanes.begin() + (m_selected - 1));
-    m_selected = std::max(1, m_selected - 1);
+    m_lanes.erase(m_lanes.begin() + m_selected);
+    m_selected = std::min(m_selected, int(m_lanes.size()) - 1);
     // Lanes after it moved over: they run again in their new places.
+    refresh();
+}
+
+// Swaps the lane with its neighbour; both run again where they now are.
+void GelWizard::moveLane(int step)
+{
+    const int to = m_selected + step;
+    if (to < 0 || to >= int(m_lanes.size()))
+        return;
+    std::swap(m_lanes[size_t(m_selected)], m_lanes[size_t(to)]);
+    m_selected = to;
     refresh();
 }
 
 void GelWizard::addEnzyme(const std::string &typed)
 {
+    Lane &lane = m_lanes[size_t(m_selected)];
+    if (lane.isLadder())
+        return;
     // Several at once, by commas or spaces; names are matched ignoring case.
+    // Only known enzymes are added; anything else is named in the note.
     std::vector<std::string> unknown;
-    Lane &lane = m_lanes[size_t(m_selected - 1)];
     bool changed = false;
     std::string word;
     auto take = [&] {
@@ -591,28 +788,34 @@ void GelWizard::addEnzyme(const std::string &typed)
 
 void GelWizard::removeEnzyme(const std::string &name)
 {
-    std::vector<std::string> &e = m_lanes[size_t(m_selected - 1)].enzymes;
+    std::vector<std::string> &e = m_lanes[size_t(m_selected)].enzymes;
     e.erase(std::remove(e.begin(), e.end(), name), e.end());
     refresh();
 }
 
+// The row picked a sequence, or a ladder, for the lane.
 void GelWizard::sequenceChosen()
 {
     const guint i = adw_combo_row_get_selected(ADW_COMBO_ROW(m_sequence));
-    Lane &lane = m_lanes[size_t(m_selected - 1)];
-    if (i >= m_listed.size() || m_listed[i].doc == lane.doc)
-        return;
-    const GelSource &s = m_listed[i];
-    // Another sequence may not have the enzymes' sites; keep those that cut it.
-    std::set<std::string> cutting;
-    for (const CutSite &site : findSites(s.doc->sequence(), named(lane.enzymes)))
-        if (site.enzyme)
-            cutting.insert(site.enzyme->name);
-    std::vector<std::string> kept;
-    for (const std::string &e : lane.enzymes)
-        if (cutting.count(e))
-            kept.push_back(e);
-    lane = {s.doc, s.name, s.doc->sequence(), kept};
+    Lane &lane = m_lanes[size_t(m_selected)];
+    if (i >= m_listed.size()) {
+        const int ladder = int(i - m_listed.size());
+        if (ladder >= int(commonLadders().size()) || lane.ladder == ladder)
+            return;
+        lane.ladder = g_ladder = ladder;
+        lane.name = ladderAt(ladder).name;
+        lane.enzymes.clear();
+    } else {
+        const GelSource &s = m_listed[i];
+        if (s.doc == lane.doc && !lane.isLadder())
+            return;
+        // The enzymes stay: the same digest of another sequence (one that
+        // doesn't cut it leaves it uncut).
+        lane.doc = s.doc;
+        lane.name = s.name;
+        lane.seq = s.doc->sequence();
+        lane.ladder = -1;
+    }
     // Choosing from the list mustn't refill it while it's still open.
     if (!m_refreshIdle)
         m_refreshIdle = g_idle_add_once([](gpointer p) {
@@ -622,9 +825,31 @@ void GelWizard::sequenceChosen()
         }, this);
 }
 
+void GelWizard::runChanged()
+{
+    const double level = gtk_range_get_value(GTK_RANGE(m_run));
+    m_gel->setRunLevel(level);
+    gtk_label_set_text(GTK_LABEL(m_runLabel),
+                       level >= 0.995 ? "Full run" : (std::to_string(int(std::round(level * 100))) + "% run").c_str());
+}
+
 void GelWizard::copyImage()
 {
-    GBytes *png = m_gel->snapshotPng();
+    // What each lane holds, and how the gel was run, under the picture.
+    std::vector<std::pair<std::string, std::string>> legend;
+    const std::vector<std::string> names = laneNames();
+    for (size_t i = 0; i < m_lanes.size(); ++i) {
+        const Lane &lane = m_lanes[i];
+        legend.push_back({names[i], lane.isLadder() ? ladderAt(lane.ladder).name
+                                                    : (lane.name.empty() ? std::string("Untitled") : lane.name) + " · "
+                                                          + (lane.enzymes.empty() ? "uncut" : joined(lane.enzymes, " + "))});
+    }
+    std::string run = gtk_label_get_text(GTK_LABEL(m_runLabel));
+    run = lower(run);
+    const std::string caption = percentTitle(percent()) + " · "
+                              + gelCombs()[size_t(std::clamp(g_comb, 0, int(gelCombs().size()) - 1))].name + " comb · "
+                              + gelStainTitle(m_gel->stain()) + " · " + run;
+    GBytes *png = m_gel->snapshotPng(legend, caption);
     GError *error = nullptr;
     GdkTexture *texture = gdk_texture_new_from_bytes(png, &error);
     g_bytes_unref(png);
@@ -636,17 +861,13 @@ void GelWizard::copyImage()
     gdk_clipboard_set_texture(gtk_widget_get_clipboard(m_dialog), texture);
     g_object_unref(texture);
     // A moment's tick on the button says it worked.
-    GtkWidget *content = gtk_button_get_child(GTK_BUTTON(m_copy));
-    adw_button_content_set_icon_name(ADW_BUTTON_CONTENT(content), "object-select-symbolic");
-    adw_button_content_set_label(ADW_BUTTON_CONTENT(content), "Copied");
+    gtk_button_set_icon_name(GTK_BUTTON(m_copy), "object-select-symbolic");
     if (m_copiedTimer)
         g_source_remove(m_copiedTimer);
     m_copiedTimer = g_timeout_add(1200, [](gpointer p) -> gboolean {
         auto *self = static_cast<GelWizard *>(p);
         self->m_copiedTimer = 0;
-        GtkWidget *c = gtk_button_get_child(GTK_BUTTON(self->m_copy));
-        adw_button_content_set_icon_name(ADW_BUTTON_CONTENT(c), "edit-copy-symbolic");
-        adw_button_content_set_label(ADW_BUTTON_CONTENT(c), "Copy Image");
+        gtk_button_set_icon_name(GTK_BUTTON(self->m_copy), "edit-copy-symbolic");
         return G_SOURCE_REMOVE;
     }, this);
 }

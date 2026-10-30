@@ -664,9 +664,9 @@ OCScene *oc_gel_render(const OCDocument *doc, const char *const *enzymes, int en
     const Ladder &l = commonLadders()[size_t(std::clamp(ladder, 0, oc_ladder_count() - 1))];
     const std::vector<Enzyme> use = enzymesNamed(enzymes, enzyme_count);
     std::vector<view::GelLane> lanes;
-    lanes.push_back({"Ladder", l.bands, l.bright, true, false});
-    lanes.push_back({"Uncut", {seq.length()}, {}, false, seq.circular});
-    view::GelLane cut{"Digest", {}, {}, false, false};
+    lanes.push_back({"Ladder", l.bands, l.bright, true, false, {}});
+    lanes.push_back({"Uncut", {seq.length()}, {}, false, seq.circular, {}});
+    view::GelLane cut{"Digest", {}, {}, false, false, {}};
     if (!use.empty()) {
         const DigestResult r = digest(seq, use);
         cut.uncutCircular = r.uncut && seq.circular;

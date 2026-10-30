@@ -10,19 +10,34 @@
 
 namespace oc::view {
 
+// What shape a band's DNA is in: an uncut plasmid runs as two bands, the
+// compact supercoiled form ahead and the nicked open circle behind.
+enum class GelForm { Linear, Supercoiled, OpenCircular };
+
 struct GelLane {
     std::string name;
     std::vector<int> bands;    // bp
     std::vector<int> bright;   // ladder reference bands, drawn brighter
     bool ladder = false;       // band sizes are labeled beside the lane
     bool uncutCircular = false;
+    std::vector<GelForm> forms;   // per band; when shorter, supercoiled if uncutCircular, else linear
 };
 
-// How far a band of `bp` runs, 0 at the wells to 1 at the bottom of the run;
-// a supercoiled (uncut circular) molecule runs ahead of its linear size.
-double gelRunFraction(double bp, bool supercoiled = false);
-// How bright band `bp` of `lane` looks, 0..1.
-double gelBandIntensity(const GelLane &lane, int bp);
+GelForm gelBandForm(const GelLane &lane, size_t band);
+
+// How far a band of `bp` runs on a `percent` agarose gel, 0 at the wells to 1
+// at the bottom of a full run (more: it ran off the gel); a supercoiled
+// (uncut circular) molecule runs ahead of its linear size.
+double gelRunFraction(double bp, GelForm form, double percent = 1.0);
+inline double gelRunFraction(double bp, bool supercoiled = false, double percent = 1.0)
+{
+    return gelRunFraction(bp, supercoiled ? GelForm::Supercoiled : GelForm::Linear, percent);
+}
+// The agarose percentages offered, lowest first.
+int gelPercentCount();
+double gelPercent(int index);
+// How bright band `band` of `lane` looks, 0..1.
+double gelBandIntensity(const GelLane &lane, size_t band);
 
 // Bands migrate by log(size), as on a roughly 1% gel; brightness follows the
 // mass in each band, so longer fragments of an equimolar digest look brighter.

@@ -5,13 +5,14 @@
 #include <functional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace oc::gtk {
 
 struct GelBandModel {
     int bp = 0;
-    double run = 0;         // 0 at the wells, 1 at the bottom of the run
+    double run = 0;         // 0 at the wells, 1 at the bottom of a full run (more: ran off the gel)
     double intensity = 0;   // 0..1
     bool reference = false;
     std::string caption;    // what the band is: "EcoRI – BamHI", "uncut, supercoiled"…
@@ -23,13 +24,30 @@ struct GelLaneModel {
     bool ladder = false;
 };
 
-enum class GelStain { UV, BlueLight };
+// How the gel was stained and photographed.
+enum class GelStain { EthidiumUV, SybrSafe, BlackAndWhite };
+const char *gelStainTitle(GelStain stain);
 
-// The gel as an imager shows it (as on the Mac, #34): a dark agarose slab
-// with its wells, and bands that glow in the stain's colour, brighter where
-// there's more DNA. When a lane changes, its bands run down from the well to
-// where they stop. The core says where each band runs and how bright it is
-// (view::gelRunFraction, gelBandIntensity); this view only draws, in cairo.
+// The comb that cast the wells: how many, how wide each is, and how thick a
+// plug of DNA it loads (a thin comb gives sharper, brighter bands).
+struct GelComb {
+    std::string name;
+    int teeth = 10;
+    double width = 5, thickness = 1;   // mm
+    // How much thinner (or thicker) than a 1 mm comb's a fresh band is.
+    double plug() const { return 0.6 + 0.4 * thickness; }
+};
+// Combs as sold for a 7 cm mini gel tray; the second is the usual one.
+const std::vector<GelComb> &gelCombs();
+
+// The gel as it looks on the imager (as on the Mac, #34 and #35): an agarose
+// slab on the light box, its wells cut by the comb, bands glowing in the
+// stain's colour (brighter where there's more DNA, wider and softer the
+// further they ran, smiling slightly as real bands do), and the loading
+// dyes' shadows marking how far the run went. When a lane changes, its bands
+// run down from the well; the run level stops the whole gel part way. The
+// core says where each band runs and how bright it is (view::gelRunFraction,
+// gelBandIntensity); this view only draws, in cairo.
 class GelView {
 public:
     GelView();
@@ -41,31 +59,42 @@ public:
     const std::vector<GelLaneModel> &lanes() const { return m_lanes; }
     void setStain(GelStain stain);
     GelStain stain() const { return m_stain; }
+    // Every well the comb cast is on the gel, loaded or not.
+    void setComb(const GelComb &comb);
+    // How long the gel ran, as a fraction of a full run.
+    void setRunLevel(double level);
+    // Where the loading dyes' fronts are after a full run, as band runs.
+    void setDyeRuns(std::vector<double> runs);
     // The lane being edited, lit a little.
     void setSelectedLane(int lane);
     // Room left at the bottom for the floating controls.
     void setBottomInset(int inset);
-    // The gel as a PNG, fully run and without the pointer's bubble.
-    GBytes *snapshotPng();
+    // The gel as a PNG for a notebook: cropped to the gel and its labels,
+    // fully run, without the pointer's bubble or the selected lane's light,
+    // with what each lane holds (lane name, contents) and `caption` below.
+    GBytes *snapshotPng(const std::vector<std::pair<std::string, std::string>> &legend, const std::string &caption);
 
     std::function<void(int)> onSelectLane;
     std::function<void(int, int)> onPickBand;   // lane, band
 
 private:
     struct Geometry {
-        double slabX, slabY, slabW, slabH, laneW, gap, runTop, runBottom;
+        double slabX, slabY, slabW, slabH, laneW, gap, scale, labelW, runTop, runBottom;
         double laneX(int i) const { return slabX + gap + i * (laneW + gap); }
-        double y(double run, double eased) const { return runTop + run * eased * (runBottom - runTop); }
+        // Where a band of `run` is when its lane has reached this far.
+        double y(double run, double reach) const { return runTop + run * reach * (runBottom - runTop); }
     };
     struct Hit {
         int lane = -1, band = -1;
     };
 
     Geometry geometry(double w, double h) const;
-    double eased(int lane) const;
-    void render(cairo_t *cr, double w, double h, bool withHover) const;
+    double reach(int lane) const;
+    double bandHeight(const GelBandModel &b, double position, double scale) const;
+    void render(cairo_t *cr, double w, double h, bool forPicture) const;
+    void drawSlab(cairo_t *cr, const Geometry &g) const;
     void drawBand(cairo_t *cr, double x, double y, double w, double h, double intensity, bool hovered) const;
-    void drawCallout(cairo_t *cr, const Geometry &g, double w) const;
+    void drawCallout(cairo_t *cr, const Geometry &g, double width) const;
     Hit hit(double x, double y) const;
     void startRunning();
 
@@ -78,7 +107,10 @@ private:
     GtkWidget *m_area;
     std::vector<GelLaneModel> m_lanes;
     std::vector<double> m_progress;   // how far each lane has run, 0..1, linear in time
-    GelStain m_stain = GelStain::UV;
+    GelStain m_stain = GelStain::EthidiumUV;
+    GelComb m_comb;
+    double m_runLevel = 1;
+    std::vector<double> m_dyeRuns;
     int m_selected = 1;
     int m_bottomInset = 64;
     Hit m_hover;
