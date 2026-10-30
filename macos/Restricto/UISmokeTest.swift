@@ -247,6 +247,10 @@ enum UISmokeTest {
                     FileHandle.standardError.write("ui-smoke: 3D gel: \(problem)\n".data(using: .utf8)!)
                     if problem.contains("compile") { exit(9) }
                 }
+                // The other scenes, then back: each starts the picture over.
+                GelWizard.setScene3D(2)
+                GelWizard.setScene3D(1)
+                GelWizard.setScene3D(0)
             }),
             ("9k-gel-imager", {
                 if let wizard = GelWizard.openWindows.first {

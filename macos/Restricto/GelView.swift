@@ -200,9 +200,11 @@ final class GelView: NSView {
         let laneW = min(120, max(26, unit))
         let scale = max(1, laneW / 64)
         let gap = min(28, max(10, laneW * 0.25))
-        let labelW = 60 * min(1.4, scale)
+        // The ladder's sizes sit left of the slab; the slab is centred in the
+        // pane, and only moves over when they wouldn't fit beside it.
+        let labelW = lanes.contains(where: { $0.isLadder }) ? 60 * min(1.4, scale) : 0
         let slabW = n * laneW + (n + 1) * gap
-        let slabX = area.minX + labelW + max(0, (area.width - labelW - slabW) / 2)
+        let slabX = area.minX + max(labelW, (area.width - slabW) / 2)
         let slab = NSRect(x: slabX, y: area.minY + 24 * scale, width: slabW, height: area.maxY - area.minY - 24 * scale)
         return Geometry(slab: slab, laneW: laneW, gap: gap, scale: scale, labelW: labelW,
                         runTop: slab.minY + 34 * scale, runBottom: slab.maxY - 22)
@@ -269,9 +271,10 @@ final class GelView: NSView {
             }
         }
 
-        // The ladder's sizes on the left, the reference bands bolder.
-        if let ladder = lanes.first, ladder.isLadder {
-            let far = reach(0)
+        // The first ladder's sizes on the left, the reference bands bolder.
+        if let li = lanes.firstIndex(where: { $0.isLadder }) {
+            let ladder = lanes[li]
+            let far = reach(li)
             var lastY = -CGFloat.infinity
             for band in ladder.bands.sorted(by: { $0.run < $1.run }) {
                 let p = CGFloat(band.run) * far

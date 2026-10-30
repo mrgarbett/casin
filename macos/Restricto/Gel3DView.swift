@@ -2,9 +2,9 @@
 // EXPERIMENTAL: the gel photographed on a blue-light box, by path tracing on
 // the GPU (Metal). Nothing here is painted to look like a gel: the scene is
 // a block of agarose (a refracting, faintly scattering, stain-filled medium)
-// lying on a glowing blue plate under a dark room with one lamp, and the
+// lying on a glowing plate under a dark room with one lamp, and the
 // picture is what a camera would see. Light enters the block from the plate,
-// the stain fluoresces pink everywhere and orange where the DNA is, rays
+// the stain fluoresces faintly everywhere and brightly where the DNA is, rays
 // that leave at a shallow angle bounce inside the slab until they escape at
 // a cut edge (which is why the edges shine), and the wet top catches the
 // lamp. Each frame adds a sample per pixel; the picture converges while the
@@ -39,6 +39,62 @@ private final class TracerView: MTKView {
     override func scrollWheel(with event: NSEvent) { onScroll?(event.scrollingDeltaY) }
 }
 
+/// How the gel is stained and lit: the plate's light, and the colours the
+/// stain gives off, free in the gel and bound to the DNA.
+enum Gel3DScene: Int, CaseIterable {
+    case pinkOnBlue = 0, greenOnBlue = 1, blackAndWhite = 2
+
+    var title: String {
+        switch self {
+        case .pinkOnBlue: return "Blue Light · Pink"
+        case .greenOnBlue: return "Blue Light · Green"
+        case .blackAndWhite: return "Black & White"
+        }
+    }
+
+    /// The plate's colour (rgb) and whether the picture is monochrome (w).
+    var plate: SIMD4<Float> {
+        switch self {
+        case .pinkOnBlue: return SIMD4<Float>(0.02, 0.0, 0.75, 0)
+        case .greenOnBlue: return SIMD4<Float>(0.0, 0.10, 0.70, 0)
+        case .blackAndWhite: return SIMD4<Float>(0.06, 0.06, 0.07, 1)
+        }
+    }
+    /// The free stain's glow throughout the gel (rgb) and how strong (w).
+    var stain: SIMD4<Float> {
+        switch self {
+        case .pinkOnBlue: return SIMD4<Float>(1.0, 0.10, 0.50, 1.0)
+        case .greenOnBlue: return SIMD4<Float>(0.30, 0.95, 0.40, 0.45)
+        case .blackAndWhite: return SIMD4<Float>(0.6, 0.6, 0.6, 0.7)
+        }
+    }
+    /// The DNA's glow (rgb) and how much brighter than the free stain (w).
+    var band: SIMD4<Float> {
+        switch self {
+        case .pinkOnBlue: return SIMD4<Float>(1.0, 0.22, 0.60, 12)
+        case .greenOnBlue: return SIMD4<Float>(0.50, 1.0, 0.35, 14)
+        case .blackAndWhite: return SIMD4<Float>(1.0, 1.0, 1.0, 16)
+        }
+    }
+    /// The cut edges' shine (rgb) and how strong (w).
+    var lip: SIMD4<Float> {
+        switch self {
+        case .pinkOnBlue: return SIMD4<Float>(0.55, 0.12, 0.9, 0.6)
+        case .greenOnBlue: return SIMD4<Float>(0.35, 0.9, 0.55, 0.5)
+        case .blackAndWhite: return SIMD4<Float>(0.8, 0.8, 0.8, 0.5)
+        }
+    }
+    /// What the stained gel drinks per metre (rgb: the stain takes the light
+    /// that excites it) and how much it scatters (w).
+    var sigma: SIMD4<Float> {
+        switch self {
+        case .pinkOnBlue: return SIMD4<Float>(8, 40, 6, 18)
+        case .greenOnBlue: return SIMD4<Float>(10, 8, 34, 18)
+        case .blackAndWhite: return SIMD4<Float>(12, 12, 12, 18)
+        }
+    }
+}
+
 /// What the kernels need; laid out as the Metal `Uniforms` struct.
 private struct GelUniforms {
     var camPos = SIMD4<Float>(repeating: 0)
@@ -55,6 +111,11 @@ private struct GelUniforms {
     var emitter = SIMD4<Float>(repeating: 0)
     /// Exposure, grain, fluorescence, scattering anisotropy.
     var look = SIMD4<Float>(repeating: 0)
+    /// The scene's colours: see Gel3DScene.
+    var plate = SIMD4<Float>(repeating: 0)
+    var stain = SIMD4<Float>(repeating: 0)
+    var band = SIMD4<Float>(repeating: 0)
+    var lip = SIMD4<Float>(repeating: 0)
     /// Frame, samples so far, width, height.
     var counts = SIMD4<UInt32>(repeating: 0)
 }
@@ -87,6 +148,10 @@ final class Gel3DView: NSView, MTKViewDelegate {
     private var lanes: [GelLaneModel] = []
     private var runLevel: Double = 1
     private var dyeRuns: [Double] = []
+    /// How the gel is stained and lit; changing it starts the picture over.
+    var scene: Gel3DScene = .pinkOnBlue {
+        didSet { if scene != oldValue { restart() } }
+    }
     private var width: Float = 0.1
     private let depth: Float = 0.10
     private let thick: Float = 0.006
@@ -276,13 +341,17 @@ final class Gel3DView: NSView, MTKViewDelegate {
         u.camF = SIMD4<Float>(f, 0)
         u.camR = SIMD4<Float>(r, 0)
         u.camU = SIMD4<Float>(up, 0)
-        // The stained gel drinks a little of the blue and less of the red;
+        // The stained gel drinks some of the light that excites the stain;
         // 1% agarose scatters gently, mostly forward.
-        u.sigma = SIMD4<Float>(8, 40, 6, 18)
+        u.sigma = scene.sigma
         u.lens = SIMD4<Float>(tan(17.5 * .pi / 180), Float(w) / Float(h), 0.0012, distance)
         u.slab = SIMD4<Float>(width, depth, thick, 0.7)
         u.emitter = SIMD4<Float>(width / 2 + 0.13, depth / 2 + 0.11, 0.025, 1.0)
         u.look = SIMD4<Float>(0.75, 0.02, 14, 0.75)
+        u.plate = scene.plate
+        u.stain = scene.stain
+        u.band = scene.band
+        u.lip = scene.lip
         u.counts = SIMD4<UInt32>(frameIndex, samples, UInt32(w), UInt32(h))
         return u
     }
@@ -479,7 +548,7 @@ final class Gel3DView: NSView, MTKViewDelegate {
     using namespace metal;
 
     struct Uniforms {
-        float4 camPos, camF, camR, camU, sigma, lens, slab, emitter, look;
+        float4 camPos, camF, camR, camU, sigma, lens, slab, emitter, look, plate, stain, band, lip;
         uint4 counts;
     };
 
@@ -557,14 +626,14 @@ final class Gel3DView: NSView, MTKViewDelegate {
         return mix(0.45, 1.0, smoothstep(r * 0.3, r, length(p - c)));
     }
 
-    // The blue plate: a diffuser lit from below, brightest under the gel,
+    // The plate: a diffuser lit from below, brightest under the gel,
     // mottled, dusty, dark beyond its edges.
     inline float3 plate(float2 q, constant Uniforms &u) {
         float halfX = u.emitter.x, front = u.emitter.y, back = u.emitter.z;
         float zmin = -u.slab.y * 0.5 - back;
         float edge = smoothstep(0.0, 0.012, halfX - abs(q.x))
                    * smoothstep(0.0, 0.012, q.y - zmin) * smoothstep(0.0, 0.012, front - q.y);
-        float3 dark = float3(0.001, 0.0, 0.012);
+        float3 dark = u.plate.xyz * 0.016 + 0.0004;
         if (edge <= 0.0) return dark;
         // Brightest a little behind the gel, near black at the corners.
         float2 rel = (q - float2(0.0, -0.3 * front)) / float2(halfX, front);
@@ -574,8 +643,8 @@ final class Gel3DView: NSView, MTKViewDelegate {
         float blot = 1.0 - 0.35 * smoothstep(0.55, 0.8, vnoise(q * 60.0 + 9.0));
         float speck = dust(q * 500.0, 0.06) * dust(q * 1500.0 + 5.0, 0.03);
         float grain = 0.95 + 0.10 * vnoise(q * 900.0);
-        float3 blue = float3(0.02, 0.0, 0.75) * u.emitter.w;
-        return mix(dark, blue * fall * mott * blot * speck * grain, edge);
+        float3 lit = u.plate.xyz * u.emitter.w;
+        return mix(dark, lit * fall * mott * blot * speck * grain, edge);
     }
 
     // The dim room above, with one small lamp high up behind the gel.
@@ -623,9 +692,9 @@ final class Gel3DView: NSView, MTKViewDelegate {
         float wall = (m.b > 0.2 && m.b <= 0.8 && yf > 1.0 - u.slab.w) ? 1.0 : 0.0;
         // The stain is never quite even.
         float uneven = 0.72 + 0.36 * vnoise(uv * float2(9.0, 5.0) + 1.0) + 0.12 * vnoise(uv * float2(60.0, 33.0));
-        float3 pink = float3(1.0, 0.10, 0.50), band = float3(1.0, 0.22, 0.60);
+        float3 stain = u.stain.xyz * u.stain.w, band = u.band.xyz * u.band.w;
         Medium md;
-        md.emit = (pink * uneven * (1.0 + 6.0 * wall) + band * m.r * 12.0 * prof) * u.look.z * (1.0 - inWell);
+        md.emit = (stain * uneven * (1.0 + 6.0 * wall) + band * m.r * prof) * u.look.z * (1.0 - inWell);
         md.absorb = u.sigma.xyz + float3(0.6, 0.9, 0.15) * 260.0 * m.g;
         return md;
     }
@@ -670,7 +739,7 @@ final class Gel3DView: NSView, MTKViewDelegate {
                 if (n0.y > 0.5) {
                     float ex = min(bmax.x - abs(x.x), bmax.z - abs(x.z));
                     float lip = smoothstep(0.0012, 0.0, ex);
-                    L += T * float3(0.55, 0.12, 0.9) * lip * 0.6 * u.emitter.w;
+                    L += T * u.lip.xyz * u.lip.w * lip * u.emitter.w;
                 }
                 float3 n = ripple(x, n0);
                 float cosi = max(0.01, -dot(d, n));
@@ -767,6 +836,8 @@ final class Gel3DView: NSView, MTKViewDelegate {
         // Shot noise: more where there's more light, none in the black.
         float g = (hashf(float2(gid) + float2(float(u.counts.x % 977u), 0.0)) - 0.5) * u.look.y;
         c += g * 2.5 * sqrt(max(c, float3(0.0)));
+        // A black and white camera sees only how much light.
+        if (u.plate.w > 0.5) c = float3(dot(c, float3(0.2126, 0.7152, 0.0722)));
         // A gentle curve that keeps the colours saturated, with a soft shoulder.
         float lum = dot(c, float3(0.2126, 0.7152, 0.0722));
         c *= 1.0 / (1.0 + 0.25 * lum);
