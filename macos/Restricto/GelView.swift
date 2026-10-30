@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The gel as an imager shows it: a dark agarose slab with its wells, and
-// bands that glow in the stain's colour, brighter where there's more DNA.
-// When a lane changes, its bands run down from the well to where they stop.
-// The core says where each band runs and how bright it is (oc_gel_*); this
-// view only draws.
+// The gel as it looks on the imager: an agarose slab lying on the light box,
+// its wells cut by the comb, bands glowing in the stain's colour (brighter
+// where there's more DNA, a little wider and softer the further they ran,
+// smiling slightly as real bands do), and the loading dyes' shadows marking
+// how far the run went. When a lane changes, its bands run down from the
+// well; the run slider stops the whole gel part way. The core says where each
+// band runs and how bright it is (oc_gel_*); this view only draws.
 import AppKit
 import QuartzCore
 
 struct GelBandModel {
     let bp: Int
-    /// 0 at the wells, 1 at the bottom of the run.
+    /// 0 at the wells, 1 at the bottom of a full run (more: ran off the gel).
     let run: Double
     let intensity: Double
     let reference: Bool
@@ -23,23 +25,67 @@ struct GelLaneModel {
     let isLadder: Bool
 }
 
-enum GelStain: Int {
-    case uv = 0, blueLight = 1
+/// How the gel was stained and photographed.
+enum GelStain: Int, CaseIterable {
+    case ethidiumUV = 0, sybrSafe = 1, blackAndWhite = 2
 
-    var gelTop: NSColor { self == .uv ? NSColor(srgbRed: 0.17, green: 0.12, blue: 0.21, alpha: 1)
-                                      : NSColor(srgbRed: 0.07, green: 0.13, blue: 0.13, alpha: 1) }
-    var gelBottom: NSColor { self == .uv ? NSColor(srgbRed: 0.10, green: 0.07, blue: 0.13, alpha: 1)
-                                         : NSColor(srgbRed: 0.04, green: 0.08, blue: 0.08, alpha: 1) }
-    var core: NSColor { self == .uv ? NSColor(srgbRed: 1.0, green: 0.94, blue: 0.97, alpha: 1)
-                                    : NSColor(srgbRed: 0.93, green: 1.0, blue: 0.86, alpha: 1) }
-    var glow: NSColor { self == .uv ? NSColor(srgbRed: 1.0, green: 0.36, blue: 0.64, alpha: 1)
-                                    : NSColor(srgbRed: 0.36, green: 1.0, blue: 0.55, alpha: 1) }
+    var title: String {
+        switch self {
+        case .ethidiumUV: return "EtBr · UV"
+        case .sybrSafe: return "SYBR Safe · Blue Light"
+        case .blackAndWhite: return "Black & White"
+        }
+    }
+
+    private static func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> NSColor {
+        NSColor(srgbRed: r, green: g, blue: b, alpha: 1)
+    }
+
+    /// The light box behind the gel, at the gel's top and bottom.
+    var gelTop: NSColor {
+        switch self {
+        case .ethidiumUV: return Self.rgb(0.20, 0.10, 0.22)
+        case .sybrSafe: return Self.rgb(0.06, 0.12, 0.16)
+        case .blackAndWhite: return Self.rgb(0.09, 0.09, 0.09)
+        }
+    }
+    var gelBottom: NSColor {
+        switch self {
+        case .ethidiumUV: return Self.rgb(0.11, 0.05, 0.13)
+        case .sybrSafe: return Self.rgb(0.03, 0.07, 0.09)
+        case .blackAndWhite: return Self.rgb(0.04, 0.04, 0.04)
+        }
+    }
+    /// The middle of a band, and the glow around it.
+    var core: NSColor {
+        switch self {
+        case .ethidiumUV: return Self.rgb(1.0, 0.90, 0.82)
+        case .sybrSafe: return Self.rgb(0.90, 1.0, 0.80)
+        case .blackAndWhite: return .white
+        }
+    }
+    var glow: NSColor {
+        switch self {
+        case .ethidiumUV: return Self.rgb(1.0, 0.42, 0.22)
+        case .sybrSafe: return Self.rgb(0.35, 1.0, 0.45)
+        case .blackAndWhite: return Self.rgb(0.85, 0.85, 0.85)
+        }
+    }
+    /// The light box's tubes show through the gel as faint stripes.
+    var hasTubes: Bool { self != .blackAndWhite }
+    /// A camera's grain: stronger on a black-and-white print.
+    var grain: CGFloat { self == .blackAndWhite ? 0.07 : 0.035 }
 }
 
 final class GelView: NSView {
     override var isFlipped: Bool { true }
 
-    var stain: GelStain = .uv { didSet { needsDisplay = true } }
+    var stain: GelStain = .ethidiumUV { didSet { needsDisplay = true } }
+    /// How long the gel ran, as a fraction of a full run.
+    var runLevel: Double = 1 { didSet { needsDisplay = true } }
+    /// Where the loading dyes' fronts are after a full run (bromophenol blue,
+    /// then xylene cyanol), as band runs.
+    var dyeRuns: [Double] = [] { didSet { needsDisplay = true } }
     /// The lane being edited, lit a little.
     var selectedLane = 1 { didSet { needsDisplay = true } }
     /// Room left at the bottom for the floating controls.
@@ -55,14 +101,14 @@ final class GelView: NSView {
     private var hover: (lane: Int, band: Int?)?
     private static let runSeconds = 0.9
 
-    /// Agarose isn't glass: a faint, fixed grain over the slab.
-    private static let grain: [CGPoint] = {
+    /// A fixed scatter of points, 0..1, for the grain.
+    private static let grainPoints: [CGPoint] = {
         var seed: UInt32 = 12345
         func next() -> CGFloat {
             seed = seed &* 1_664_525 &+ 1_013_904_223
             return CGFloat(seed >> 8) / CGFloat(1 << 24)
         }
-        return (0..<420).map { _ in CGPoint(x: next(), y: next()) }
+        return (0..<700).map { _ in CGPoint(x: next(), y: next()) }
     }()
 
     /// Shows `lanes`; the lanes in `running` run from their wells again.
@@ -121,9 +167,10 @@ final class GelView: NSView {
         needsDisplay = true
     }
 
-    private func eased(_ lane: Int) -> CGFloat {
+    /// How far lane `lane` has got, eased and scaled by the run slider.
+    private func reach(_ lane: Int) -> CGFloat {
         let t = lane < progress.count ? progress[lane] : 1
-        return CGFloat(1 - pow(1 - t, 3))
+        return CGFloat(1 - pow(1 - t, 3)) * CGFloat(runLevel)
     }
 
     // MARK: Geometry
@@ -135,7 +182,8 @@ final class GelView: NSView {
         var runTop: CGFloat
         var runBottom: CGFloat
         func laneX(_ i: Int) -> CGFloat { slab.minX + gap + CGFloat(i) * (laneW + gap) }
-        func y(_ run: Double, _ eased: CGFloat) -> CGFloat { runTop + CGFloat(run) * eased * (runBottom - runTop) }
+        /// Where a band of `run` is when its lane has `reach`ed this far.
+        func y(_ run: Double, _ reach: CGFloat) -> CGFloat { runTop + CGFloat(run) * reach * (runBottom - runTop) }
     }
 
     private var geometry: Geometry {
@@ -151,41 +199,30 @@ final class GelView: NSView {
         return Geometry(slab: slab, laneW: laneW, gap: gap, runTop: slab.minY + 34, runBottom: slab.maxY - 22)
     }
 
-    private func bandHeight(_ b: GelBandModel) -> CGFloat { 3.5 + 3 * CGFloat(b.intensity) }
+    /// Thicker for more DNA; wider and softer the further it ran, as bands diffuse.
+    private func bandHeight(_ b: GelBandModel, at position: CGFloat) -> CGFloat {
+        3 + 2.5 * CGFloat(b.intensity) + 2.5 * max(0, position)
+    }
+
+    /// A band past the bottom has run off the gel; one near the edge fades out.
+    private func onGel(_ position: CGFloat) -> CGFloat { max(0, min(1, (1.03 - position) / 0.05)) }
+
+    /// Lanes are never loaded quite evenly: a fixed, slight difference per lane.
+    private func loading(_ lane: Int) -> CGFloat {
+        let wobble: [CGFloat] = [1, 0.94, 1.03, 0.97, 1.05, 0.95, 1.01, 0.96, 1.04, 0.98, 1.02]
+        return wobble[lane % wobble.count]
+    }
 
     // MARK: Drawing
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         // The imager's dark box, a little lighter in the middle.
-        let backdrop = NSGradient(colors: [NSColor(white: 0.12, alpha: 1), NSColor(white: 0.04, alpha: 1)])
+        let backdrop = NSGradient(colors: [NSColor(white: 0.13, alpha: 1), NSColor(white: 0.03, alpha: 1)])
         backdrop?.draw(in: bounds, relativeCenterPosition: NSPoint(x: 0, y: 0.1))
 
         let g = geometry
-        // The slab, with a lit top edge and a faint grain.
-        let slabPath = NSBezierPath(roundedRect: g.slab, xRadius: 12, yRadius: 12)
-        NSGraphicsContext.saveGraphicsState()
-        let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.6)
-        shadow.shadowBlurRadius = 24
-        shadow.shadowOffset = NSSize(width: 0, height: -6)
-        shadow.set()
-        stain.gelBottom.setFill()
-        slabPath.fill()
-        NSGraphicsContext.restoreGraphicsState()
-        NSGradient(starting: stain.gelTop, ending: stain.gelBottom)?.draw(in: slabPath, angle: 90)
-        NSGraphicsContext.saveGraphicsState()
-        slabPath.addClip()
-        NSColor.white.withAlphaComponent(0.035).setFill()
-        for p in Self.grain {
-            NSRect(x: g.slab.minX + p.x * g.slab.width, y: g.slab.minY + p.y * g.slab.height,
-                   width: 1, height: 1).fill()
-        }
-        NSGraphicsContext.restoreGraphicsState()
-        NSColor.white.withAlphaComponent(0.10).setStroke()
-        let rim = NSBezierPath(roundedRect: g.slab.insetBy(dx: 0.5, dy: 0.5), xRadius: 12, yRadius: 12)
-        rim.lineWidth = 1
-        rim.stroke()
+        drawSlab(g)
 
         let nameFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
         for (i, lane) in lanes.enumerated() {
@@ -197,38 +234,44 @@ final class GelView: NSView {
                 NSBezierPath(roundedRect: NSRect(x: x - 4, y: g.slab.minY + 6, width: g.laneW + 8,
                                                  height: g.slab.height - 12), xRadius: 7, yRadius: 7).fill()
             }
-            // Its name over the slab.
             let nameColor = i == selectedLane ? NSColor.white : NSColor.white.withAlphaComponent(0.6)
-            drawText(lane.name, font: nameFont, color: nameColor, centeredAt: NSPoint(x: x + g.laneW / 2,
-                                                                                      y: g.slab.minY - 13))
-            // The well: a slot cut into the gel.
-            let well = NSRect(x: x + 2, y: g.slab.minY + 14, width: g.laneW - 4, height: 8)
-            NSColor.black.withAlphaComponent(0.7).setFill()
-            NSBezierPath(roundedRect: well, xRadius: 2, yRadius: 2).fill()
-            NSColor.white.withAlphaComponent(0.12).setFill()
-            NSRect(x: well.minX + 2, y: well.maxY - 1, width: well.width - 4, height: 1).fill()
+            drawText(lane.name, font: nameFont, color: nameColor,
+                     centeredAt: NSPoint(x: x + g.laneW / 2, y: g.slab.minY - 13))
+            drawWell(NSRect(x: x + 2, y: g.slab.minY + 14, width: g.laneW - 4, height: 8))
 
-            let e = eased(i)
+            let far = reach(i)
             let fadeIn = CGFloat(min(1, (i < progress.count ? progress[i] : 1) * 4))
+            // The loading dyes, as faint shadows in the gel.
+            for dye in dyeRuns {
+                let p = CGFloat(dye) * far
+                let y = g.y(dye, far)
+                drawDye(NSRect(x: x + 4, y: y - 3, width: g.laneW - 8, height: 6), alpha: 0.22 * onGel(p) * fadeIn)
+            }
             for (b, band) in lane.bands.enumerated() {
-                let h = bandHeight(band)
-                let y = g.y(band.run, e)
+                let p = CGFloat(band.run) * far
+                let visible = onGel(p)
+                guard visible > 0 else { continue }
+                let h = bandHeight(band, at: p)
+                let y = g.y(band.run, far)
                 let rect = NSRect(x: x + 3, y: y - h / 2, width: g.laneW - 6, height: h)
                 let hovered = hover?.lane == i && hover?.band == b
-                drawBand(rect, intensity: CGFloat(band.intensity) * fadeIn, hovered: hovered, in: ctx)
+                drawBand(rect, intensity: CGFloat(band.intensity) * fadeIn * visible * loading(i),
+                         hovered: hovered, in: ctx)
             }
         }
 
         // The ladder's sizes on the left, the reference bands bolder.
         if let ladder = lanes.first, ladder.isLadder {
-            let e = eased(0)
+            let far = reach(0)
             var lastY = -CGFloat.infinity
             for band in ladder.bands.sorted(by: { $0.run < $1.run }) {
-                let y = g.y(band.run, e)
-                guard y - lastY >= 11 else { continue }
+                let p = CGFloat(band.run) * far
+                let y = g.y(band.run, far)
+                guard onGel(p) > 0.5, y - lastY >= 11 else { continue }
                 lastY = y
                 let font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: band.reference ? .semibold : .regular)
-                let color = NSColor.white.withAlphaComponent((band.reference ? 0.8 : 0.5) * e)
+                let full = far / CGFloat(max(0.01, runLevel))
+                let color = NSColor.white.withAlphaComponent((band.reference ? 0.8 : 0.5) * full)
                 drawText(Self.sizeText(band.bp), font: font, color: color, rightAt: NSPoint(x: g.slab.minX - 10, y: y))
             }
         }
@@ -242,21 +285,112 @@ final class GelView: NSView {
         }
     }
 
-    /// A band: brightest along its middle, fading at the lane's edges, with a
-    /// glow in the stain's colour that grows with the amount of DNA.
+    /// The slab on the light box: a cut edge that catches the light, a slight
+    /// thickness below it, the tubes faintly through it, free stain hazing the
+    /// top, and the camera's grain.
+    private func drawSlab(_ g: Geometry) {
+        let slab = g.slab
+        let path = NSBezierPath(roundedRect: slab, xRadius: 10, yRadius: 10)
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.7)
+        shadow.shadowBlurRadius = 28
+        shadow.shadowOffset = NSSize(width: 0, height: -8)
+        shadow.set()
+        stain.gelBottom.setFill()
+        path.fill()
+        NSGraphicsContext.restoreGraphicsState()
+        // Its thickness: a darker lip along the bottom edge.
+        NSColor.black.withAlphaComponent(0.35).setFill()
+        NSBezierPath(roundedRect: NSRect(x: slab.minX + 2, y: slab.maxY - 4, width: slab.width - 4, height: 5),
+                     xRadius: 3, yRadius: 3).fill()
+        NSGradient(starting: stain.gelTop, ending: stain.gelBottom)?.draw(in: path, angle: 90)
+
+        NSGraphicsContext.saveGraphicsState()
+        path.addClip()
+        if stain.hasTubes {
+            // The light box's tubes, running across under the gel.
+            let tube = NSGradient(colors: [stain.glow.withAlphaComponent(0), stain.glow.withAlphaComponent(0.06),
+                                           stain.glow.withAlphaComponent(0)])
+            var y = slab.minY + 18
+            while y < slab.maxY {
+                tube?.draw(in: NSRect(x: slab.minX, y: y, width: slab.width, height: 26), angle: 90)
+                y += 56
+            }
+        }
+        // Stain that hasn't bound anything glows faintly near the wells.
+        NSGradient(starting: stain.glow.withAlphaComponent(0.08), ending: stain.glow.withAlphaComponent(0))?
+            .draw(in: NSRect(x: slab.minX, y: slab.minY, width: slab.width, height: slab.height * 0.35), angle: 90)
+        NSColor.white.withAlphaComponent(stain.grain).setFill()
+        for p in Self.grainPoints {
+            NSRect(x: slab.minX + p.x * slab.width, y: slab.minY + p.y * slab.height, width: 1, height: 1).fill()
+        }
+        NSGraphicsContext.restoreGraphicsState()
+
+        // The cut edge, catching the light along the top more than the sides.
+        let rim = NSBezierPath(roundedRect: slab.insetBy(dx: 0.5, dy: 0.5), xRadius: 10, yRadius: 10)
+        rim.lineWidth = 1
+        NSColor.white.withAlphaComponent(0.09).setStroke()
+        rim.stroke()
+        NSGraphicsContext.saveGraphicsState()
+        NSRect(x: slab.minX, y: slab.minY, width: slab.width, height: 12).clip()
+        NSColor.white.withAlphaComponent(0.12).setStroke()
+        rim.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    /// A well cut by the comb: dark inside, its far wall shaded, a lit lip below.
+    private func drawWell(_ well: NSRect) {
+        NSColor.black.withAlphaComponent(0.75).setFill()
+        NSBezierPath(roundedRect: well, xRadius: 1.5, yRadius: 1.5).fill()
+        NSGradient(starting: NSColor.black.withAlphaComponent(0.5), ending: NSColor.black.withAlphaComponent(0))?
+            .draw(in: NSRect(x: well.minX, y: well.minY, width: well.width, height: well.height / 2), angle: 90)
+        NSColor.white.withAlphaComponent(0.16).setFill()
+        NSRect(x: well.minX + 1, y: well.maxY, width: well.width - 2, height: 1).fill()
+        NSColor.white.withAlphaComponent(0.05).setFill()
+        NSRect(x: well.minX, y: well.minY - 1, width: well.width, height: 1).fill()
+    }
+
+    /// A loading dye's front: it quenches the light a little, so it reads as a soft shadow.
+    private func drawDye(_ rect: NSRect, alpha: CGFloat) {
+        guard alpha > 0.01 else { return }
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(alpha)
+        shadow.shadowBlurRadius = 6
+        shadow.shadowOffset = .zero
+        shadow.set()
+        NSColor.black.withAlphaComponent(alpha).setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3).fill()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    /// A band: brightest along its middle, fading at the lane's edges and
+    /// smiling slightly, with a glow in the stain's colour that grows with the
+    /// amount of DNA.
     private func drawBand(_ rect: NSRect, intensity: CGFloat, hovered: Bool, in ctx: CGContext) {
         guard intensity > 0.01 else { return }
         let a = min(1, intensity * (hovered ? 1.25 : 1))
+        let smile = min(1.5, rect.width * 0.03)
+        let path = CGMutablePath()
+        let r = rect.height / 2
+        path.move(to: CGPoint(x: rect.minX + r, y: rect.minY))
+        path.addQuadCurve(to: CGPoint(x: rect.maxX - r, y: rect.minY), control: CGPoint(x: rect.midX, y: rect.minY + 2 * smile))
+        path.addArc(center: CGPoint(x: rect.maxX - r, y: rect.midY), radius: r, startAngle: -.pi / 2, endAngle: .pi / 2,
+                    clockwise: false)
+        path.addQuadCurve(to: CGPoint(x: rect.minX + r, y: rect.maxY), control: CGPoint(x: rect.midX, y: rect.maxY + 2 * smile))
+        path.addArc(center: CGPoint(x: rect.minX + r, y: rect.midY), radius: r, startAngle: .pi / 2, endAngle: 3 * .pi / 2,
+                    clockwise: false)
+        path.closeSubpath()
+
         ctx.saveGState()
         ctx.setShadow(offset: .zero, blur: 4 + 12 * a, color: stain.glow.withAlphaComponent(0.9 * a).cgColor)
         ctx.beginTransparencyLayer(auxiliaryInfo: nil)
-        let path = CGPath(roundedRect: rect, cornerWidth: rect.height / 2, cornerHeight: rect.height / 2,
-                          transform: nil)
         ctx.addPath(path)
         ctx.clip()
         let c = stain.core
-        let colors = [c.withAlphaComponent(0.45 * a), c.withAlphaComponent(a), c.withAlphaComponent(a),
-                      c.withAlphaComponent(0.45 * a)].map { $0.cgColor } as CFArray
+        let colors = [c.withAlphaComponent(0.4 * a), c.withAlphaComponent(a), c.withAlphaComponent(a),
+                      c.withAlphaComponent(0.4 * a)].map { $0.cgColor } as CFArray
         if let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: colors,
                                      locations: [0, 0.3, 0.7, 1]) {
             ctx.drawLinearGradient(gradient, start: CGPoint(x: rect.minX, y: rect.midY),
@@ -282,7 +416,7 @@ final class GelView: NSView {
             .font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.white.withAlphaComponent(0.65)])
         let w = max(title.size().width, b.caption.isEmpty ? 0 : detail.size().width) + 20
         let h: CGFloat = b.caption.isEmpty ? 26 : 42
-        let y = g.y(b.run, eased(lane))
+        let y = g.y(b.run, reach(lane))
         var x = g.laneX(lane) + g.laneW + 10
         if x + w > bounds.maxX - 8 { x = g.laneX(lane) - 10 - w }
         let box = NSRect(x: x, y: y - h / 2, width: w, height: h)
@@ -322,10 +456,13 @@ final class GelView: NSView {
         guard g.slab.insetBy(dx: 0, dy: -24).contains(p) else { return nil }
         guard let lane = lanes.indices.first(where: {
             abs(p.x - (g.laneX($0) + g.laneW / 2)) <= (g.laneW + g.gap) / 2 }) else { return nil }
+        let far = reach(lane)
         var best: (Int, CGFloat)?
         for (b, band) in lanes[lane].bands.enumerated() {
-            let d = abs(p.y - g.y(band.run, eased(lane)))
-            if d <= max(5, bandHeight(band) / 2 + 3), d < (best?.1 ?? .infinity) { best = (b, d) }
+            let position = CGFloat(band.run) * far
+            guard onGel(position) > 0 else { continue }
+            let d = abs(p.y - g.y(band.run, far))
+            if d <= max(5, bandHeight(band, at: position) / 2 + 3), d < (best?.1 ?? .infinity) { best = (b, d) }
         }
         return (lane, best?.0)
     }

@@ -106,8 +106,11 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
     private let enzymeNote = NSTextField(wrappingLabelWithString: "")
     private let fragmentHeading = NSTextField(labelWithString: "FRAGMENTS")
     private let fragmentList = NSStackView()
-    private let stainControl = NSSegmentedControl(labels: ["UV", "Blue Light"], trackingMode: .selectOne,
-                                                  target: nil, action: nil)
+    private let agarosePopup = NSPopUpButton()
+    private let stainPopup = NSPopUpButton()
+    /// How long the gel ran: drag it back to see the gel part way through.
+    private let runSlider = NSSlider(value: 1, minValue: 0.1, maxValue: 1, target: nil, action: nil)
+    private let runLabel = NSTextField(labelWithString: "Full run")
     private let copyButton = NSButton()
     private var chrome: WizardChrome?
     /// Sequences listed in the sequence popup, in its order.
@@ -181,7 +184,7 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         done.bezelColor = .controlAccentColor
         done.keyEquivalent = "\r"
         let header = NSStackView(views: [title, NSView(), done])
-        let subtitle = NSTextField(wrappingLabelWithString: "Digests run side by side, as on a 1% agarose gel.")
+        let subtitle = NSTextField(wrappingLabelWithString: "Digests run side by side on an agarose gel.")
         subtitle.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         subtitle.textColor = .secondaryLabelColor
 
@@ -190,6 +193,17 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         ladderPopup.selectItem(at: savedLadder < ladderPopup.numberOfItems ? savedLadder : 0)
         ladderPopup.target = self
         ladderPopup.action = #selector(ladderChanged(_:))
+        // Percentages as a bench would cast them; 1% unless chosen before.
+        let savedPercent = UserDefaults.standard.object(forKey: "GelPercent") as? Double ?? 1
+        for i in 0..<Int(oc_gel_percent_count()) {
+            let percent = oc_gel_percent(Int32(i))
+            agarosePopup.addItem(withTitle: "\(percent.formatted(.number.precision(.fractionLength(0...1))))% agarose")
+            agarosePopup.lastItem?.representedObject = NSNumber(value: percent)
+            if abs(percent - savedPercent) < 0.01 { agarosePopup.select(agarosePopup.lastItem) }
+        }
+        agarosePopup.toolTip = "Denser gels separate small fragments; thinner ones, large ones"
+        agarosePopup.target = self
+        agarosePopup.action = #selector(agaroseChanged(_:))
 
         symbolButton(addLaneButton, "plus", "Add a lane", #selector(addLane(_:)))
         symbolButton(removeLaneButton, "minus", "Remove the selected lane", #selector(removeLane(_:)))
@@ -234,6 +248,7 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         let inputs = NSStackView(views: [
             header, subtitle,
             heading("LADDER"), ladderPopup,
+            heading("GEL"), agarosePopup,
             lanesRow, laneList,
             laneHeading, sequencePopup, enzymeRow, enzymeHint, enzymeNote,
             fragmentHeading, fragmentList,
@@ -242,12 +257,12 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         inputs.alignment = .leading
         inputs.spacing = 6
         inputs.edgeInsets = NSEdgeInsets(top: 38, left: 16, bottom: 16, right: 16)
-        for v in [header, subtitle, ladderPopup, lanesRow, laneList, sequencePopup, enzymeRow, enzymeNote, enzymeHint,
+        for v in [header, subtitle, ladderPopup, agarosePopup, lanesRow, laneList, sequencePopup, enzymeRow, enzymeNote, enzymeHint,
                   fragmentList] as [NSView] {
             v.widthAnchor.constraint(equalTo: inputs.widthAnchor, constant: -32).isActive = true
         }
         inputs.setCustomSpacing(16, after: subtitle)
-        inputs.setCustomSpacing(16, after: ladderPopup)
+        inputs.setCustomSpacing(16, after: agarosePopup)
         inputs.setCustomSpacing(16, after: laneList)
         inputs.setCustomSpacing(16, after: enzymeNote)
         inputs.setCustomSpacing(16, after: enzymeHint)
@@ -287,21 +302,36 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         gelView.onSelectLane = { [weak self] lane in self?.selectLane(lane) }
         gelView.onPickBand = { [weak self] lane, band in self?.pickFragment(lane: lane, index: band) }
         let saved = UserDefaults.standard.integer(forKey: "GelStain")
-        gelView.stain = GelStain(rawValue: saved) ?? .uv
-        stainControl.selectedSegment = gelView.stain.rawValue
-        stainControl.target = self
-        stainControl.action = #selector(stainChanged(_:))
-        stainControl.setToolTip("Ethidium bromide under UV", forSegment: 0)
-        stainControl.setToolTip("SYBR Safe under blue light", forSegment: 1)
-        stainControl.segmentStyle = .capsule
+        gelView.stain = GelStain(rawValue: saved) ?? .ethidiumUV
+        for stain in GelStain.allCases { stainPopup.addItem(withTitle: stain.title) }
+        stainPopup.selectItem(at: gelView.stain.rawValue)
+        stainPopup.isBordered = false
+        stainPopup.toolTip = "How the gel was stained and photographed"
+        stainPopup.target = self
+        stainPopup.action = #selector(stainChanged(_:))
+        runSlider.target = self
+        runSlider.action = #selector(runChanged(_:))
+        runSlider.isContinuous = true
+        runSlider.controlSize = .small
+        runSlider.toolTip = "How long the gel ran"
+        runSlider.widthAnchor.constraint(equalToConstant: 110).isActive = true
+        runLabel.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        runLabel.textColor = .secondaryLabelColor
+        runLabel.widthAnchor.constraint(equalToConstant: 54).isActive = true
+        let runIcon = NSImageView(image: NSImage(systemSymbolName: "bolt.fill", accessibilityDescription: "Run")!)
+        runIcon.contentTintColor = .secondaryLabelColor
+        runIcon.toolTip = "How long the gel ran"
         copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy Image")
         copyButton.title = "Copy Image"
-        copyButton.imagePosition = .imageLeading
+        // Icon only, so the pill fits over the gel at the window's smallest.
+        copyButton.imagePosition = .imageOnly
         copyButton.bezelStyle = .accessoryBarAction
         copyButton.target = self
         copyButton.action = #selector(copyImage(_:))
         copyButton.toolTip = "Copy the gel as a picture"
-        let pillContent = NSStackView(views: [stainControl, copyButton])
+        let pillContent = NSStackView(views: [stainPopup, runIcon, runSlider, runLabel, copyButton])
+        pillContent.setCustomSpacing(18, after: stainPopup)
+        pillContent.setCustomSpacing(18, after: runLabel)
         pillContent.spacing = 10
         pillContent.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 10)
         let pill = Glass.capsule(around: pillContent, height: 36)
@@ -339,6 +369,10 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         let ladder = Int32(max(0, ladderPopup.indexOfSelectedItem))
         guard let gel = oc_gel_new(ladder) else { return }
         defer { oc_gel_free(gel) }
+        let percent = (agarosePopup.selectedItem?.representedObject as? NSNumber)?.doubleValue ?? 1
+        oc_gel_set_percent(gel, percent)
+        // Bromophenol blue runs with ~300 bp fragments, xylene cyanol with ~4 kb.
+        gelView.dyeRuns = [oc_gel_run_fraction(300, percent), oc_gel_run_fraction(4000, percent)]
         fragments = [[]]
         for lane in lanes {
             withCStrings(lane.enzymes) { oc_gel_add_lane(gel, lane.doc.handle, $0, Int32(lane.enzymes.count)) }
@@ -360,7 +394,8 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
             }
             models.append(GelLaneModel(name: i == 0 ? "L" : "\(i)", bands: bands, isLadder: i == 0))
         }
-        let keys = ["ladder \(ladder)"] + lanes.map { $0.key }
+        // A new percentage runs every lane again.
+        let keys = ["ladder \(ladder) \(percent)"] + lanes.map { "\(percent) \($0.key)" }
         let running = Set(keys.indices.filter { $0 >= drawnKeys.count || drawnKeys[$0] != keys[$0] })
         drawnKeys = keys
         selected = min(max(1, selected), lanes.count)
@@ -532,9 +567,23 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
     }
 
     @objc private func stainChanged(_ sender: Any?) {
-        gelView.stain = GelStain(rawValue: stainControl.selectedSegment) ?? .uv
+        gelView.stain = GelStain(rawValue: stainPopup.indexOfSelectedItem) ?? .ethidiumUV
         UserDefaults.standard.set(gelView.stain.rawValue, forKey: "GelStain")
     }
+
+    @objc private func agaroseChanged(_ sender: Any?) {
+        if let percent = (agarosePopup.selectedItem?.representedObject as? NSNumber)?.doubleValue {
+            UserDefaults.standard.set(percent, forKey: "GelPercent")
+        }
+        refresh()
+    }
+
+    @objc private func runChanged(_ sender: Any?) {
+        gelView.runLevel = runSlider.doubleValue
+        runLabel.stringValue = runSlider.doubleValue >= 0.995 ? "Full run"
+            : "\(Int((runSlider.doubleValue * 100).rounded()))% run"
+    }
+
 
     @objc private func copyImage(_ sender: Any?) {
         guard let image = gelView.snapshot() else { return }
@@ -632,6 +681,24 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         w.addLane(nil)
         w.enzymeField.objectValue = enzymes
         w.enzymesEdited(nil)
+    }
+    /// Each lane's band runs in the first open gel.
+    static var runs: [[Double]] { visible.first?.gelView.lanes.map { $0.bands.map { $0.run } } ?? [] }
+    /// As picking `percent` in the GEL popup.
+    static func setAgarose(_ percent: Double) {
+        guard let w = visible.first,
+              let item = w.agarosePopup.itemArray.first(where: {
+                  abs(((($0.representedObject as? NSNumber)?.doubleValue) ?? 0) - percent) < 0.01 }) else { return }
+        w.agarosePopup.select(item)
+        w.agaroseChanged(nil)
+    }
+    /// As dragging the run slider to `level`, and choosing `stain`.
+    static func setRun(_ level: Double, stain: GelStain) {
+        guard let w = visible.first else { return }
+        w.runSlider.doubleValue = level
+        w.runChanged(nil)
+        w.stainPopup.selectItem(at: stain.rawValue)
+        w.stainChanged(nil)
     }
     static func closeAll() { visible.forEach { $0.window?.close() } }
 }

@@ -345,8 +345,16 @@ int main(int argc, char **argv)
     OCGelBand info[64];
     CHECK(oc_gel_lane_band_info(lanes, 0, info, 64) > 5);
     for (int i = 1; i < oc_gel_lane_band_info(lanes, 0, info, 64); ++i) CHECK(info[i - 1].run <= info[i].run);
-    CHECK(oc_gel_lane_band_info(lanes, 1, info, 64) == 1 && info[0].bp == 3188 && info[0].run > oc_gel_run_fraction(3188));
-    CHECK(oc_gel_run_fraction(500) > oc_gel_run_fraction(5000) && oc_gel_run_fraction(500) <= 1);
+    CHECK(oc_gel_lane_band_info(lanes, 1, info, 64) == 1 && info[0].bp == 3188 && info[0].run > oc_gel_run_fraction(3188, 1));
+    CHECK(oc_gel_run_fraction(500, 1) > oc_gel_run_fraction(5000, 1) && oc_gel_run_fraction(500, 1) <= 1);
+    /* A denser gel holds the same band back; small ones run off a thin one. */
+    CHECK(oc_gel_run_fraction(1000, 2) < oc_gel_run_fraction(1000, 0.7));
+    CHECK(oc_gel_run_fraction(50, 0.7) > 1 && oc_gel_run_fraction(50, 3) < 1);
+    CHECK(oc_gel_run_fraction(15000, 1.2) < oc_gel_run_fraction(10000, 1.2));
+    CHECK(oc_gel_run_fraction(40000, 1) > 0 && oc_gel_run_fraction(30000, 1) > oc_gel_run_fraction(40000, 1));
+    CHECK(oc_gel_percent_count() >= 4 && oc_gel_percent(0) < oc_gel_percent(1));
+    oc_gel_set_percent(lanes, 2);
+    CHECK(oc_gel_lane_band_info(lanes, 1, info, 64) == 1 && info[0].run > 0);
     OCScene *gs = oc_gel_scene(lanes, 400, 500, false, measure, NULL);
     CHECK(gs != NULL && oc_scene_item_count(gs) > 10);
     oc_scene_free(gs);

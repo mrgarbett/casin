@@ -681,6 +681,7 @@ OCScene *oc_gel_render(const OCDocument *doc, const char *const *enzymes, int en
 
 struct OCGel {
     std::vector<view::GelLane> lanes;
+    double percent = 1.0;
 };
 
 OCGel *oc_gel_new(int ladder)
@@ -732,7 +733,7 @@ int oc_gel_lane_band_info(const OCGel *gel, int lane, OCGelBand *out, int max)
     const view::GelLane &l = gel->lanes[size_t(lane)];
     for (int i = 0; out && i < max && i < int(l.bands.size()); ++i) {
         const int bp = l.bands[size_t(i)];
-        out[i] = {bp, view::gelRunFraction(bp, l.uncutCircular), view::gelBandIntensity(l, bp),
+        out[i] = {bp, view::gelRunFraction(bp, l.uncutCircular, gel->percent), view::gelBandIntensity(l, bp),
                   std::find(l.bright.begin(), l.bright.end(), bp) != l.bright.end()};
     }
     return int(l.bands.size());
@@ -743,7 +744,16 @@ bool oc_gel_lane_uncut_circular(const OCGel *gel, int lane)
     return gel && lane >= 0 && lane < int(gel->lanes.size()) && gel->lanes[size_t(lane)].uncutCircular;
 }
 
-double oc_gel_run_fraction(int bp) { return view::gelRunFraction(bp); }
+double oc_gel_run_fraction(int bp, double percent) { return view::gelRunFraction(bp, false, percent); }
+
+void oc_gel_set_percent(OCGel *gel, double percent)
+{
+    if (gel && percent > 0)
+        gel->percent = percent;
+}
+
+int oc_gel_percent_count(void) { return view::gelPercentCount(); }
+double oc_gel_percent(int index) { return view::gelPercent(index); }
 
 OCScene *oc_gel_scene(const OCGel *gel, double width, double height, bool dark, OCMeasureText measure, void *context)
 {

@@ -18,9 +18,13 @@ struct GelLane {
     bool uncutCircular = false;
 };
 
-// How far a band of `bp` runs, 0 at the wells to 1 at the bottom of the run;
-// a supercoiled (uncut circular) molecule runs ahead of its linear size.
-double gelRunFraction(double bp, bool supercoiled = false);
+// How far a band of `bp` runs on a `percent` agarose gel, 0 at the wells to 1
+// at the bottom of a full run (more: it ran off the gel); a supercoiled
+// (uncut circular) molecule runs ahead of its linear size.
+double gelRunFraction(double bp, bool supercoiled = false, double percent = 1.0);
+// The agarose percentages offered, lowest first.
+int gelPercentCount();
+double gelPercent(int index);
 // How bright band `bp` of `lane` looks, 0..1.
 double gelBandIntensity(const GelLane &lane, int bp);
 

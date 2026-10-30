@@ -325,8 +325,13 @@ void oc_gel_free(OCGel *gel);
 void oc_gel_add_lane(OCGel *gel, const OCDocument *doc, const char *const *enzymes, int enzyme_count);
 /* The lane's band sizes, largest first; returns how many (up to `max`). Lane 0 is the ladder. */
 int oc_gel_lane_bands(const OCGel *gel, int lane, int *out, int max);
+/* The agarose percentage the gel is cast at (1% by default); it sets how far
+   each size runs. The percentages offered, lowest first: */
+void oc_gel_set_percent(OCGel *gel, double percent);
+int oc_gel_percent_count(void);
+double oc_gel_percent(int index);
 /* A band as a front end draws it: `run` is how far it ran, 0 at the wells to 1
-   at the bottom of the run; `intensity` is 0..1; `reference` marks a ladder's
+   at the bottom of a full run (more than 1: it ran off the gel); `intensity` is 0..1; `reference` marks a ladder's
    brighter reference bands. */
 typedef struct {
     int bp;
@@ -338,8 +343,8 @@ int oc_gel_lane_count(const OCGel *gel);
 int oc_gel_lane_band_info(const OCGel *gel, int lane, OCGelBand *out, int max);
 /* True when the lane is an uncut circular molecule (it runs supercoiled). */
 bool oc_gel_lane_uncut_circular(const OCGel *gel, int lane);
-/* Where a linear band of `bp` runs, as OCGelBand.run (for a size scale). */
-double oc_gel_run_fraction(int bp);
+/* Where a linear band of `bp` runs on a `percent` gel, as OCGelBand.run. */
+double oc_gel_run_fraction(int bp, double percent);
 OCScene *oc_gel_scene(const OCGel *gel, double width, double height, bool dark, OCMeasureText measure,
                       void *context);
 

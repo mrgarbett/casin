@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 
 namespace oc::view {
 
@@ -21,10 +22,42 @@ std::string bandText(int bp)
 }
 } // namespace
 
-double gelRunFraction(double bp, bool supercoiled)
+// Agarose percentages and the sizes each resolves: a band of `top` bp barely
+// leaves the wells; one of `bottom` bp reaches the end of a full run. Rough
+// figures for TAE at the usual voltages; in between, sizes are interpolated.
+struct Agarose {
+    double percent, top, bottom;
+};
+const Agarose kAgarose[] = {{0.5, 40000, 400}, {0.7, 30000, 150}, {1.0, kMaxBp, kMinBp},
+                            {1.5, 8000, 40},   {2.0, 4000, 25},   {3.0, 1500, 10}};
+
+int gelPercentCount() { return int(std::size(kAgarose)); }
+double gelPercent(int index) { return kAgarose[std::clamp(index, 0, gelPercentCount() - 1)].percent; }
+
+double gelRunFraction(double bp, bool supercoiled, double percent)
 {
-    bp = std::clamp(supercoiled ? bp * kSupercoiled : bp, kMinBp, kMaxBp);
-    return (std::log10(kMaxBp) - std::log10(bp)) / (std::log10(kMaxBp) - std::log10(kMinBp));
+    // The gel's range, between the two percentages around it.
+    const int n = gelPercentCount();
+    double top = kAgarose[0].top, bottom = kAgarose[0].bottom;
+    if (percent >= kAgarose[n - 1].percent) {
+        top = kAgarose[n - 1].top;
+        bottom = kAgarose[n - 1].bottom;
+    } else {
+        for (int i = 0; i + 1 < n; ++i) {
+            const Agarose &a = kAgarose[i], &b = kAgarose[i + 1];
+            if (percent < a.percent || percent > b.percent)
+                continue;
+            const double f = (percent - a.percent) / (b.percent - a.percent);
+            top = std::pow(10, std::log10(a.top) + f * (std::log10(b.top) - std::log10(a.top)));
+            bottom = std::pow(10, std::log10(a.bottom) + f * (std::log10(b.bottom) - std::log10(a.bottom)));
+            break;
+        }
+    }
+    bp = std::max(1.0, supercoiled ? bp * kSupercoiled : bp);
+    const double t = (std::log10(top) - std::log10(bp)) / (std::log10(top) - std::log10(bottom));
+    // Bands too big to resolve crowd together just under the wells.
+    const double crowd = 0.08;
+    return t >= crowd ? t : crowd * std::exp((t - crowd) / crowd);
 }
 
 double gelBandIntensity(const GelLane &lane, int bp)
@@ -60,7 +93,7 @@ GelLayout::GelLayout(std::vector<GelLane> lanes, const Theme &theme, TextMeasure
 
 double GelLayout::yOfSize(double bp) const
 {
-    return m_runTop + gelRunFraction(bp) * (m_runBottom - m_runTop);
+    return m_runTop + std::min(1.0, gelRunFraction(bp)) * (m_runBottom - m_runTop);
 }
 
 Scene GelLayout::render() const
@@ -84,7 +117,8 @@ Scene GelLayout::render() const
         s.rect({x + 2, m_gelY + 8, m_laneW - 4, 6}, Color::rgb(0, 0, 0, 0.55));
 
         for (int bp : lane.bands) {
-            const double y = m_runTop + gelRunFraction(bp, lane.uncutCircular) * (m_runBottom - m_runTop);
+            const double run = std::min(1.0, gelRunFraction(bp, lane.uncutCircular));
+            const double y = m_runTop + run * (m_runBottom - m_runTop);
             const double alpha = gelBandIntensity(lane, bp);
             s.rect({x + 3, y - 2.5, m_laneW - 6, 5}, band.withAlpha(std::min(1.0, alpha * 0.35)));
             s.rect({x + 3, y - 1.5, m_laneW - 6, 3}, band.withAlpha(std::min(1.0, alpha)));

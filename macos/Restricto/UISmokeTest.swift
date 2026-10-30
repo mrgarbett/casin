@@ -208,6 +208,27 @@ enum UISmokeTest {
                     exit(8)
                 }
             }),
+            ("9k-gel-agarose", {
+                // A 2% gel holds the uncut plasmid back more than a 0.7% one;
+                // then half a run, in black and white.
+                GelWizard.setAgarose(0.7)
+                let thin = GelWizard.runs.dropFirst().first?.first ?? 0
+                GelWizard.setAgarose(2)
+                let dense = GelWizard.runs.dropFirst().first?.first ?? 0
+                guard thin > 0, dense > 0, dense < thin else {
+                    FileHandle.standardError.write("ui-smoke: the gel's agarose didn't change how far bands ran\n"
+                                                       .data(using: .utf8)!)
+                    exit(8)
+                }
+                GelWizard.setAgarose(1)
+                GelWizard.setRun(0.5, stain: .blackAndWhite)
+            }),
+            ("9k-gel-half-run", {
+                if let wizard = GelWizard.openWindows.first {
+                    capture(wizard, to: out.appendingPathComponent("9k-gel-half-run-window.png"))
+                }
+                GelWizard.setRun(1, stain: .ethidiumUV)
+            }),
             ("9k-gel-closed", {
                 if let wizard = GelWizard.openWindows.first {
                     capture(wizard, to: out.appendingPathComponent("9k-gel-wizard-window.png"))
