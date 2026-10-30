@@ -64,15 +64,15 @@ enum Gel3DScene: Int, CaseIterable {
     /// The free stain's glow throughout the gel (rgb) and how strong (w).
     var stain: SIMD4<Float> {
         switch self {
-        case .pinkOnBlue: return SIMD4<Float>(1.0, 0.10, 0.50, 1.0)
-        case .greenOnBlue: return SIMD4<Float>(0.30, 0.95, 0.40, 0.45)
+        case .pinkOnBlue: return SIMD4<Float>(1.0, 0.10, 0.50, 0.7)
+        case .greenOnBlue: return SIMD4<Float>(0.30, 0.95, 0.40, 0.38)
         case .blackAndWhite: return SIMD4<Float>(0.6, 0.6, 0.6, 0.7)
         }
     }
     /// The DNA's glow (rgb) and how much brighter than the free stain (w).
     var band: SIMD4<Float> {
         switch self {
-        case .pinkOnBlue: return SIMD4<Float>(1.0, 0.22, 0.60, 12)
+        case .pinkOnBlue: return SIMD4<Float>(1.0, 0.22, 0.60, 13)
         case .greenOnBlue: return SIMD4<Float>(0.50, 1.0, 0.35, 14)
         case .blackAndWhite: return SIMD4<Float>(1.0, 1.0, 1.0, 16)
         }
@@ -80,8 +80,8 @@ enum Gel3DScene: Int, CaseIterable {
     /// The cut edges' shine (rgb) and how strong (w).
     var lip: SIMD4<Float> {
         switch self {
-        case .pinkOnBlue: return SIMD4<Float>(0.55, 0.12, 0.9, 0.6)
-        case .greenOnBlue: return SIMD4<Float>(0.35, 0.9, 0.55, 0.5)
+        case .pinkOnBlue: return SIMD4<Float>(0.55, 0.12, 0.9, 0.5)
+        case .greenOnBlue: return SIMD4<Float>(0.35, 0.9, 0.55, 0.45)
         case .blackAndWhite: return SIMD4<Float>(0.8, 0.8, 0.8, 0.5)
         }
     }
@@ -352,7 +352,7 @@ final class Gel3DView: NSView, MTKViewDelegate {
         // The stained gel drinks some of the light that excites the stain;
         // 1% agarose scatters gently, mostly forward.
         u.sigma = scene.sigma
-        u.lens = SIMD4<Float>(tan(17.5 * .pi / 180), Float(w) / Float(h), 0.0012, distance)
+        u.lens = SIMD4<Float>(tan(17.5 * .pi / 180), Float(w) / Float(h), 0.0005, distance)
         u.slab = SIMD4<Float>(width, depth, thick, 0.7)
         u.emitter = SIMD4<Float>(width / 2 + 0.13, depth / 2 + 0.11, 0.025, 1.0)
         u.look = SIMD4<Float>(0.75, 0.02, 14, 0.75)
@@ -657,9 +657,10 @@ final class Gel3DView: NSView, MTKViewDelegate {
         if (d.y <= 0.0001) return dark;
         float t = (0.55 - p.y) / d.y;
         float3 h = p + d * t;
-        float lx = smoothstep(0.0, 0.02, 0.05 - abs(h.x - 0.03));
-        float lz = smoothstep(0.0, 0.02, 0.05 - abs(h.z + 0.30));
-        return dark + float3(14.0, 13.0, 12.0) * lx * lz;
+        // A small lamp with a soft edge, as a shaded bulb or a window looks in a glossy surface.
+        float lx = smoothstep(0.0, 0.035, 0.045 - abs(h.x - 0.03));
+        float lz = smoothstep(0.0, 0.035, 0.045 - abs(h.z + 0.30));
+        return dark + float3(7.0, 6.6, 6.0) * lx * lz;
     }
 
     // The wet top isn't quite smooth: a fine ripple tilts its reflections.
@@ -839,7 +840,13 @@ final class Gel3DView: NSView, MTKViewDelegate {
                 float sin2t = eta * eta * (1.0 - cosi * cosi);
                 float cost = sqrt(max(0.0, 1.0 - sin2t));
                 float F = fresnel(cosi, cost, eta);
-                if (rnd(seed) < F) { d = reflect(d, n); p = x + ng * EPS; continue; }
+                // What the wet surface mirrors (the lamp, the room, the plate)
+                // is taken outright rather than by chance: a lamp many times
+                // brighter than anything else, found by a few rays in a
+                // hundred, would leave white specks that take ages to average out.
+                float3 rd = reflect(d, n);
+                if (dot(rd, ng) > 0.0) L += T * F * outside(x + ng * EPS, rd, u);
+                T *= 1.0 - F;
                 d = normalize(eta * d + (eta * cosi - cost) * n);
                 p = x - ng * EPS;
                 inside = true;
@@ -897,13 +904,19 @@ final class Gel3DView: NSView, MTKViewDelegate {
             if (sin2t >= 1.0) { d = reflect(d, n); p = x - ng * EPS; continue; }
             float cost = sqrt(1.0 - sin2t);
             float F = fresnel(cosi, cost, eta);
-            if (rnd(seed) < F) { d = reflect(d, n); p = x - ng * EPS; continue; }
-            d = normalize(eta * d - (eta * cosi - cost) * n);
-            p = x + ng * EPS;
-            inside = false;
+            float3 away = normalize(eta * d - (eta * cosi - cost) * n);
             // The bottom face lies on the plate.
-            if (ng.y < -0.5) { L += T * plate(x.xz, u); break; }
+            if (ng.y < -0.5) { L += T * (1.0 - F) * plate(x.xz, u); T *= F; d = reflect(d, n); p = x - ng * EPS; continue; }
+            // Out through the top or a side: what's there is taken outright,
+            // and the ray goes on inside with what the face reflected (a small share).
+            L += T * (1.0 - F) * outside(x + ng * EPS, away, u);
+            T *= F;
+            if (max(T.x, max(T.y, T.z)) < 0.01) break;
+            d = reflect(d, n);
+            p = x - ng * EPS;
         }
+        // A stray NaN would stain the pixel for good.
+        if (any(isnan(L)) || any(isinf(L))) L = float3(0.0);
         L = min(L, float3(6.0));
         float4 acc = (u.counts.y == 0u) ? float4(0.0) : prev.read(gid);
         next.write(acc + float4(L, 1.0), gid);
