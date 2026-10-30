@@ -130,7 +130,7 @@ void MapView::draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer p)
     view::drawScene(cr, scene);
 }
 
-void MapView::dragBegin(GtkGestureDrag *, double x, double y, gpointer p)
+void MapView::dragBegin(GtkGestureDrag *drag, double x, double y, gpointer p)
 {
     auto *self = static_cast<MapView *>(p);
     if (!self->m_layout || self->m_doc->isEmpty())
@@ -146,7 +146,13 @@ void MapView::dragBegin(GtkGestureDrag *, double x, double y, gpointer p)
     case view::MapHit::Site:
         self->m_doc->activateSite(hit.index);
         break;
-    case view::MapHit::Primer:   // as before primers were hit-tested: start a selection
+    case view::MapHit::Primer:
+        if (self->onPickPrimer) {
+            const GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(drag));
+            self->onPickPrimer(hit.index, state & GDK_SHIFT_MASK);
+            break;
+        }
+        [[fallthrough]];   // elsewhere a primer starts a selection, as other bases do
     case view::MapHit::Sequence:
         self->m_selecting = true;
         self->m_anchor = hit.position;
@@ -200,9 +206,13 @@ void MapView::dragEnd(GtkGestureDrag *, double, double, gpointer p)
 void MapView::motion(GtkEventControllerMotion *, double x, double y, gpointer p)
 {
     auto *self = static_cast<MapView *>(p);
-    if (!self->onHoverBase || !self->m_layout || self->m_doc->isEmpty())
+    if (!self->m_layout || self->m_doc->isEmpty())
         return;
     const view::MapHit hit = self->m_layout->hitTest(view::Point{x, y});
+    if (self->onPickPrimer)   // primers can be clicked here
+        gtk_widget_set_cursor_from_name(self->m_area, hit.kind == view::MapHit::Primer ? "pointer" : nullptr);
+    if (!self->onHoverBase)
+        return;
     const int n = self->m_doc->sequence().length();
     self->onHoverBase(hit.kind == view::MapHit::Sequence && n > 0 ? std::min(hit.position, n - 1) : -1);
 }

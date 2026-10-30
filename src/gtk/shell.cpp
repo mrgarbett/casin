@@ -202,6 +202,19 @@ void Shell::loadStyles()
 .restricto-title { font-weight: bold; }
 .restricto-subtitle { font-size: smaller; opacity: 0.55; }
 .restricto-browser-header { font-size: smaller; font-weight: bold; opacity: 0.55; margin-top: 6px; }
+/* Wizards: the cue (green when ready), and the program table. */
+.restricto-cue {
+  border-radius: 12px;
+  padding: 10px 12px;
+  background-color: alpha(currentColor, 0.06);
+  transition: background-color 250ms ease-out, color 250ms ease-out;
+}
+.restricto-cue.ready { background-color: alpha(@success_color, 0.16); color: @success_color; font-weight: 600; }
+.restricto-cue.problem { background-color: alpha(@warning_color, 0.16); color: @warning_color; }
+.restricto-program { padding: 10px 14px; font-feature-settings: "tnum"; }
+.restricto-program .head { font-size: smaller; font-weight: bold; opacity: 0.5; }
+.restricto-program .once { opacity: 0.6; }
+.restricto-program .accent { color: @accent_color; font-weight: 600; }
 )";
     // Our own icons (compiled in from src/gtk/icons): Fedora's Adwaita no
     // longer ships some of the generic ones the map toggle used.

@@ -32,10 +32,13 @@ public:
     std::function<void(int)> onHoverBase;
     std::function<void(double, double)> onSelectDrag;
     std::function<void(int)> onEditFeature;
+    // When set, clicking a primer picks it (index, shift held) instead of
+    // starting a selection, as on the PCR wizard's vector map.
+    std::function<void(int, bool)> onPickPrimer;
 
 private:
     static void draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer self);
-    static void dragBegin(GtkGestureDrag *, double x, double y, gpointer self);
+    static void dragBegin(GtkGestureDrag *drag, double x, double y, gpointer self);
     static void dragUpdate(GtkGestureDrag *, double dx, double dy, gpointer self);
     static void dragEnd(GtkGestureDrag *, double dx, double dy, gpointer self);
     static gboolean queryTooltip(GtkWidget *, int x, int y, gboolean kb, GtkTooltip *tip, gpointer self);

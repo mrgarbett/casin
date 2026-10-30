@@ -1306,7 +1306,7 @@ void Window::openPcrWizard()
         m_pcr->present();
         return;
     }
-    m_pcr = new PcrWizard(&m_doc, gtkWindow(), displayName());
+    m_pcr = new PcrWizard(&m_doc, m_window, displayName());
     m_pcr->onClosed = [this] { m_pcr = nullptr; };
     m_pcr->onAddPrimer = [this] {
         present();
