@@ -41,6 +41,16 @@ final class SequenceDocument: NSDocument {
 
     override class var autosavesInPlace: Bool { false }
 
+    /// An unsaved product goes by its sequence's name ("pOC-demo PCR 1530 bp")
+    /// rather than "Untitled 2"; the save panel starts from it too.
+    override var displayName: String! {
+        get {
+            let name = core.name
+            return fileURL == nil && !name.isEmpty ? name : super.displayName
+        }
+        set { super.displayName = newValue }
+    }
+
     // The sidebar's Not Saved section and red dots follow these.
     private var wasEdited = false
 

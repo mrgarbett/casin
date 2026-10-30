@@ -18,6 +18,8 @@ final class PcrWizard: NSWindowController, NSWindowDelegate {
     private let polymerasePopup = NSPopUpButton()
     private let info = NSTextField(wrappingLabelWithString: "")
     private let program = NSTextField(wrappingLabelWithString: "")
+    /// The line above the program when it's copied: polymerase, primers, size.
+    private var programHeader = ""
     private let warnings = NSTextField(wrappingLabelWithString: "")
     private let openButton = NSButton(title: "Open Product", target: nil, action: nil)
     private let addPrimerButton = NSButton(title: "Add Primer", target: nil, action: nil)
@@ -47,7 +49,7 @@ final class PcrWizard: NSWindowController, NSWindowDelegate {
         if let parent = parent, let window = wizard.window {
             // Over the template's window, a little down and right, named as it is.
             window.setFrameTopLeftPoint(NSPoint(x: parent.frame.minX + 40, y: parent.frame.maxY - 40))
-            window.title = "PCR · \(parent.title)"
+            window.title = "PCR · \(Self.withoutExtension(parent.title))"
         }
         wizard.showWindow(nil)
         // The map takes a little over half the height, the sequence the rest.
@@ -310,6 +312,7 @@ final class PcrWizard: NSWindowController, NSWindowDelegate {
                                 + "fit \(hotter) closer in the Primers pane.")
                 }
                 program.stringValue = polymerase.program(tmLow: min(a, b), length: length)
+                programHeader = "\(polymerase.name) · \(fp.name) + \(rp.name) · \(length.formatted()) bp"
             } else {
                 program.stringValue = ""
             }
@@ -332,7 +335,6 @@ final class PcrWizard: NSWindowController, NSWindowDelegate {
         }
         emptyLabel.isHidden = hasProduct
         productSplit.isHidden = !hasProduct
-        addPrimerButton.isHidden = canPick && hasProduct
         info.stringValue = lines.joined(separator: "\n")
         info.isHidden = lines.isEmpty
         warnings.stringValue = warn.joined(separator: "\n")
@@ -367,10 +369,24 @@ final class PcrWizard: NSWindowController, NSWindowDelegate {
     @objc private func copyProgram(_ sender: Any?) {
         guard !program.stringValue.isEmpty else { NSSound.beep(); return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(program.stringValue, forType: .string)
+        NSPasteboard.general.setString(programHeader + "\n" + program.stringValue, forType: .string)
     }
 
     @objc private func addPrimer(_ sender: Any?) { onAddPrimer() }
+
+    /// File > New from Bases works from the template's window; pass it on
+    /// rather than greying it out while the wizard is in front.
+    @objc func newFromBases(_ sender: Any?) {
+        (parentWindow?.windowController as? DocumentWindowController)?.newFromBases(sender)
+    }
+
+    /// "pOC-demo.dna" as "pOC-demo"; only sequence-file extensions go, so a
+    /// name like "pUC19 v2.1" stays whole.
+    private static func withoutExtension(_ title: String) -> String {
+        let ext = (title as NSString).pathExtension.lowercased()
+        let known: Set<String> = ["dna", "gb", "gbk", "genbank", "embl", "emb", "fasta", "fa", "fna", "ape", "seq"]
+        return known.contains(ext) ? (title as NSString).deletingPathExtension : title
+    }
 
     func windowWillClose(_ notification: Notification) {
         // Let go after the close finishes: dropping the last reference here
