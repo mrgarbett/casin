@@ -145,7 +145,8 @@ enum UISmokeTest {
             ("9i-pcr-wizard", {
                 // Sequence > PCR… with the sample's two primers.
                 controller?.pcrProduct(nil)
-                guard PcrWizard.isAnyOpen, let length = PcrWizard.productLengths.first, length > 0 else {
+                guard PcrWizard.isAnyOpen, let length = PcrWizard.productLengths.first, length > 0,
+                      PcrWizard.programSteps.first == 6 else {
                     FileHandle.standardError.write("ui-smoke: the PCR wizard showed no product\n".data(using: .utf8)!)
                     exit(6)
                 }

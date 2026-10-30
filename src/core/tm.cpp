@@ -2,6 +2,7 @@
 #include "tm.h"
 #include "sequence.h"
 
+#include <climits>
 #include <cmath>
 #include <limits>
 
@@ -71,6 +72,44 @@ double meltingTemperature(const std::string &raw, const TmConditions &c)
 
     const double x = selfComplementary ? 1.0 : 4.0;
     return dH * 1000.0 / (dS + kR * std::log(c.oligoMolar / x)) - 273.15;
+}
+
+int polymeraseTm(const std::string &raw, Polymerase p)
+{
+    const std::string s = toUpper(raw);
+    const int n = int(s.size());
+    if (n < 2)
+        return INT_MIN;
+    double dH = 0, dS = 0;
+    int gc = 0;
+    for (int i = 0; i < n; ++i) {
+        if (idx(s[size_t(i)]) < 0)
+            return INT_MIN;
+        gc += s[size_t(i)] == 'G' || s[size_t(i)] == 'C';
+        if (i + 1 < n) {
+            const NN &nn = kTable[idx(s[size_t(i)])][idx(s[size_t(i) + 1])];
+            dH += nn.dH;
+            dS += nn.dS;
+        }
+    }
+    for (char end : {s.front(), s.back()}) {
+        const NN &init = (end == 'G' || end == 'C') ? kInitGC : kInitAT;
+        dH += init.dH;
+        dS += init.dS;
+    }
+    // The primers are in excess, so their own concentration sets the Tm
+    // (NEB divides it by 4 for Phusion only).
+    const double primerMolar = p == Polymerase::Taq ? 200e-9 : p == Polymerase::Phusion ? 500e-9 / 4 : 500e-9;
+    const double tm1M = dH * 1000.0 / (dS + kR * std::log(primerMolar)) - 273.15;
+    double tm;
+    if (p == Polymerase::Phusion) {
+        tm = tm1M + 16.6 * std::log10(0.222);
+    } else {
+        const double ln = std::log(p == Polymerase::Q5 ? 0.150 : 0.051);
+        const double fgc = double(gc) / n;
+        tm = 1.0 / (1.0 / (tm1M + 273.15) + (4.29e-5 * fgc - 3.95e-5) * ln + 9.40e-6 * ln * ln) - 273.15;
+    }
+    return int(std::lround(tm));
 }
 
 } // namespace oc

@@ -7,6 +7,7 @@
 #include "core/digest.h"
 #include "core/edit.h"
 #include "core/orf.h"
+#include "core/pcrprogram.h"
 #include "core/protein.h"
 #include "core/primercheck.h"
 #include "core/search.h"
@@ -687,6 +688,51 @@ char *oc_primer_check(const char *bases, OCPrimerCheck *out)
         *out = {c.length, c.gc, c.tm, c.clampGC, c.longestRun, c.selfDimer, c.selfDimer3, c.hairpinStem};
     return dupString(joinLines(c.warnings));
 }
+
+namespace {
+Polymerase polymeraseOf(int p)
+{
+    return p == OC_POLYMERASE_PHUSION ? Polymerase::Phusion : p == OC_POLYMERASE_TAQ ? Polymerase::Taq
+                                                                                      : Polymerase::Q5;
+}
+} // namespace
+
+void oc_pcr_program(const char *anneal1, const char *anneal2, int length, int polymerase, int cycles,
+                    OCPcrProgram *out)
+{
+    if (!out)
+        return;
+    const PcrProgram p = pcrProgram(anneal1 ? anneal1 : "", anneal2 ? anneal2 : "", length,
+                                    polymeraseOf(polymerase), cycles);
+    *out = {};
+    out->tm1 = p.tm1;
+    out->tm2 = p.tm2;
+    out->annealing = p.annealing;
+    out->capped = p.capped;
+    out->two_step = p.twoStep;
+    out->cycles = p.cycles;
+    for (const PcrStep &st : p.steps) {
+        if (out->step_count >= int(std::size(out->steps)))
+            break;
+        OCPcrStep &o = out->steps[out->step_count++];
+        std::snprintf(o.name, sizeof o.name, "%s", st.name.c_str());
+        o.celsius = st.celsius;
+        o.seconds = st.seconds;
+        o.cycled = st.cycled;
+    }
+}
+
+char *oc_pcr_program_markdown(const char *anneal1, const char *anneal2, int length, int polymerase, int cycles,
+                              const char *title)
+{
+    const PcrProgram p = pcrProgram(anneal1 ? anneal1 : "", anneal2 ? anneal2 : "", length,
+                                    polymeraseOf(polymerase), cycles);
+    return dupString(pcrProgramMarkdown(p, title ? title : ""));
+}
+
+char *oc_polymerase_name(int polymerase) { return dupString(polymeraseName(polymeraseOf(polymerase))); }
+int oc_polymerase_max_length(int polymerase) { return polymeraseMaxLength(polymeraseOf(polymerase)); }
+char *oc_format_seconds(int seconds) { return dupString(formatSeconds(seconds)); }
 
 char *oc_primer_pair_check(const char *a, const char *b)
 {

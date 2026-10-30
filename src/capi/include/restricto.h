@@ -335,6 +335,35 @@ typedef struct {
 
 /* Returns the warnings, one per line ("" when the primer looks fine). */
 char *oc_primer_check(const char *bases, OCPrimerCheck *out);
+
+/* PCR cycling as NEB suggests it, with Tm and annealing temperature as NEB's
+   Tm calculator works them out for each polymerase's buffer. */
+enum { OC_POLYMERASE_Q5 = 0, OC_POLYMERASE_PHUSION = 1, OC_POLYMERASE_TAQ = 2, OC_POLYMERASE_COUNT = 3 };
+typedef struct {
+    char name[32];
+    int celsius;
+    int seconds;         /* 0 for a hold */
+    bool cycled;         /* repeated `cycles` times */
+} OCPcrStep;
+typedef struct {
+    int tm1, tm2;        /* the primers' annealing parts, whole degrees C */
+    int annealing;       /* Ta */
+    bool capped;         /* Ta held at the polymerase's highest */
+    bool two_step;       /* annealing and extension in one step */
+    int cycles;
+    int step_count;      /* 0 when a primer isn't plain DNA */
+    OCPcrStep steps[8];
+} OCPcrProgram;
+/* anneal1 and anneal2 are the primers' annealing parts (no tails). */
+void oc_pcr_program(const char *anneal1, const char *anneal2, int length, int polymerase, int cycles,
+                    OCPcrProgram *out);
+/* The same program as a Markdown table after `title`. Free with oc_string_free. */
+char *oc_pcr_program_markdown(const char *anneal1, const char *anneal2, int length, int polymerase, int cycles,
+                              const char *title);
+char *oc_polymerase_name(int polymerase);
+int oc_polymerase_max_length(int polymerase);
+/* "1 min 35 s", "30 s", "hold". */
+char *oc_format_seconds(int seconds);
 char *oc_primer_pair_check(const char *a, const char *b);
 /* Designs a pair that amplifies the selection and adds it as one undo step. */
 bool oc_document_design_primers(OCDocument *doc, double target_tm, char **error);

@@ -22,9 +22,14 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
     private let typedField = NSTextField()
     private let typedError = NSTextField(wrappingLabelWithString: "")
     private let info = NSTextField(wrappingLabelWithString: "")
-    private let program = NSTextField(wrappingLabelWithString: "")
-    /// The line above the program when it's copied: polymerase, primers, size.
-    private var programHeader = ""
+    /// The suggested cycling, step by step, as NEB suggests it.
+    private let programGrid = NSGridView(numberOfColumns: 4, rows: 0)
+    private let programNote = NSTextField(wrappingLabelWithString: "")
+    private let cyclesField = NSTextField(labelWithString: "30 cycles")
+    private let cyclesStepper = NSStepper()
+    /// What Copy puts on the clipboard: a Markdown table under a title line.
+    private var programMarkdown = ""
+    private var stepCount = 0
     private let warnings = NSTextField(wrappingLabelWithString: "")
     private let openButton = NSButton(title: "Open Product", target: nil, action: nil)
     private let addPrimerButton = NSButton(title: "Add Primer…", target: nil, action: nil)
@@ -140,8 +145,8 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
             popup.target = self
             popup.action = #selector(inputsChanged(_:))
         }
-        for p in Polymerase.all { polymerasePopup.addItem(withTitle: p.name) }
-        polymerasePopup.selectItem(at: Polymerase.all.firstIndex { $0.name == Polymerase.defaultName } ?? 0)
+        for p in 0..<Int32(OC_POLYMERASE_COUNT) { polymerasePopup.addItem(withTitle: takeString(oc_polymerase_name(p))) }
+        polymerasePopup.selectItem(at: Int(OC_POLYMERASE_Q5))
 
         // A primer typed here is added to the template and picked.
         typedField.placeholderString = "Type a primer 5′→3′, then Return"
@@ -157,8 +162,17 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
         hint.textColor = .secondaryLabelColor
 
         info.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        program.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
-        program.textColor = .secondaryLabelColor
+        programGrid.rowSpacing = 3
+        programGrid.columnSpacing = 10
+        programNote.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        programNote.textColor = .secondaryLabelColor
+        cyclesField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        cyclesStepper.minValue = 15
+        cyclesStepper.maxValue = 45
+        cyclesStepper.integerValue = 30
+        cyclesStepper.controlSize = .small
+        cyclesStepper.target = self
+        cyclesStepper.action = #selector(inputsChanged(_:))
         warnings.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         warnings.textColor = .systemOrange
         addPrimerButton.target = self
@@ -173,8 +187,8 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
         // The program's heading, with a button to copy it for the cycler's notes.
         let copy = NSButton(title: "Copy", target: self, action: #selector(copyProgram(_:)))
         copy.controlSize = .small
-        copy.toolTip = "Copy the program as text"
-        programRow.setViews([heading("SUGGESTED PROGRAM"), NSView(), copy], in: .leading)
+        copy.toolTip = "Copy the program as a Markdown table"
+        programRow.setViews([heading("SUGGESTED PROGRAM"), NSView(), cyclesField, cyclesStepper, copy], in: .leading)
         let inputs = NSStackView(views: [
             header, status,
             heading("FORWARD PRIMER"), forwardPopup,
@@ -182,14 +196,14 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
             typedField, typedError, hint, addPrimerButton,
             heading("POLYMERASE"), polymerasePopup,
             productHeading, info, warnings,
-            programRow, program,
+            programRow, programGrid, programNote,
         ])
         inputs.orientation = .vertical
         inputs.alignment = .leading
         inputs.spacing = 6
         inputs.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 16, right: 16)
         for v in [header, status, forwardPopup, reversePopup, typedField, typedError, hint, polymerasePopup, info,
-                  warnings, programRow, program] as [NSView] {
+                  warnings, programRow, programNote] as [NSView] {
             v.widthAnchor.constraint(equalTo: inputs.widthAnchor, constant: -32).isActive = true
         }
         inputs.setCustomSpacing(10, after: header)
@@ -409,7 +423,11 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
         }
         let fp = forward.flatMap { f in primers.first { $0.index == f.index } }
         let rp = reverse.flatMap { r in primers.first { $0.index == r.index } }
-        let polymerase = Polymerase.all[max(0, polymerasePopup.indexOfSelectedItem)]
+        let polymerase = Int32(max(0, polymerasePopup.indexOfSelectedItem))
+        let polymeraseName = polymerasePopup.titleOfSelectedItem ?? ""
+        let cycles = cyclesStepper.integerValue
+        cyclesField.stringValue = "\(cycles) cycles"
+        var prog = OCPcrProgram()
         if hasProduct, let f = forward, let r = reverse, let fp = fp, let rp = rp {
             let length = preview.length
             var end = r.start + r.length
@@ -421,29 +439,30 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
             let tails = length - copied
             if tails > 0 { copiedLine += ", plus \(tails) bp of primer tails" }
             lines.append(copiedLine)
-            // Annealing Tms: the parts that bind; tails join in from cycle 2.
-            let tmF = annealingTm(fp), tmR = annealingTm(rp)
-            if let a = tmF, let b = tmR {
-                lines.append("Tm \(String(format: "%.1f", a)) °C (\(fp.name)) · \(String(format: "%.1f", b)) °C (\(rp.name))")
+            // Annealing Tms in the polymerase's buffer: the parts that bind;
+            // tails join in from cycle 2.
+            let annealF = String(fp.bases.suffix(fp.length)), annealR = String(rp.bases.suffix(rp.length))
+            oc_pcr_program(annealF, annealR, Int32(length), polymerase, Int32(cycles), &prog)
+            if prog.step_count > 0 {
+                let a = Int(prog.tm1), b = Int(prog.tm2)
+                lines.append("Tm \(a) °C (\(fp.name)) · \(b) °C (\(rp.name)), in \(polymeraseName) buffer")
                 if abs(a - b) > 5 {
                     let hotter = a > b ? fp.name : rp.name
-                    warn.append("The annealing Tms differ by \(String(format: "%.1f", abs(a - b))) °C; "
-                                + "fit \(hotter) closer in the Primers pane.")
+                    warn.append("The annealing Tms differ by \(abs(a - b)) °C; fit \(hotter) closer in the Primers pane.")
                 }
-                program.stringValue = polymerase.program(tmLow: min(a, b), length: length)
-                programHeader = "\(polymerase.name) · \(fp.name) + \(rp.name) · \(length.formatted()) bp"
-            } else {
-                program.stringValue = ""
+                let title = "\(polymeraseName) · \(fp.name) + \(rp.name) · \(length.formatted()) bp"
+                programMarkdown = takeString(oc_pcr_program_markdown(annealF, annealR, Int32(length), polymerase,
+                                                                     Int32(cycles), title))
             }
             let pair = takeString(oc_primer_pair_check(fp.bases, rp.bases))
             warn.append(contentsOf: pair.split(separator: "\n").filter { !$0.hasPrefix("Tm differs") }.map { String($0) })
-            if length > polymerase.maxLength {
-                warn.append("\(polymerase.name) is sold for products up to \((polymerase.maxLength / 1000).formatted()) kb.")
+            let maxLength = Int(oc_polymerase_max_length(polymerase))
+            if length > maxLength {
+                warn.append("\(polymeraseName) is sold for products up to \((maxLength / 1000).formatted()) kb.")
             }
             // The template's window shows what gets copied.
             template.select(start: f.start, length: copied)
         } else {
-            program.stringValue = ""
             // One primer picked: show where it binds.
             if let one = forward ?? reverse { template.select(start: one.start, length: one.length) }
         }
@@ -472,16 +491,57 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
         info.isHidden = lines.isEmpty
         warnings.stringValue = warn.joined(separator: "\n")
         warnings.isHidden = warn.isEmpty
-        program.isHidden = program.stringValue.isEmpty
-        programRow.isHidden = program.isHidden
+        fillProgram(prog, show: hasProduct)
+        programRow.isHidden = programGrid.isHidden
         productHeading.isHidden = info.isHidden && warnings.isHidden
         openButton.isEnabled = hasProduct
     }
 
-    private func annealingTm(_ p: PrimerInfo) -> Double? {
-        var check = OCPrimerCheck()
-        oc_string_free(oc_primer_check(String(p.bases.suffix(p.length)), &check))
-        return check.tm.isNaN ? nil : check.tm
+    /// The program as a table: step, temperature, time, and the cycle count
+    /// beside the first repeated step; a note when Ta was held or merged.
+    private func fillProgram(_ prog: OCPcrProgram, show: Bool) {
+        while programGrid.numberOfRows > 0 { programGrid.removeRow(at: 0) }
+        stepCount = show ? Int(prog.step_count) : 0
+        programGrid.isHidden = stepCount == 0
+        guard stepCount > 0 else { programNote.isHidden = true; return }
+        func cell(_ text: String, header: Bool = false, align: NSTextAlignment = .left) -> NSTextField {
+            let label = NSTextField(labelWithString: text)
+            label.font = header ? .systemFont(ofSize: NSFont.smallSystemFontSize - 1, weight: .semibold)
+                                : .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+            label.textColor = header ? .tertiaryLabelColor : .labelColor
+            label.alignment = align
+            return label
+        }
+        programGrid.addRow(with: [cell("STEP", header: true), cell("°C", header: true, align: .right),
+                                  cell("TIME", header: true, align: .right), cell("", header: true)])
+        var steps = prog.steps
+        var cyclesShown = false
+        withUnsafeBytes(of: &steps) { raw in
+            let all = raw.bindMemory(to: OCPcrStep.self)
+            for i in 0..<stepCount {
+                var step = all[i]
+                let name = withUnsafeBytes(of: &step.name) { String(decoding: $0.prefix(while: { $0 != 0 }), as: UTF8.self) }
+                var repeats = ""
+                if step.cycled && !cyclesShown {
+                    repeats = "× \(prog.cycles)"
+                    cyclesShown = true
+                }
+                let row = programGrid.addRow(with: [cell(name), cell("\(step.celsius)", align: .right),
+                                                    cell(takeString(oc_format_seconds(step.seconds)), align: .right),
+                                                    cell(repeats)])
+                // The repeated steps stand out from the ones done once.
+                if !step.cycled {
+                    for c in 0..<row.numberOfCells {
+                        (row.cell(at: c).contentView as? NSTextField)?.textColor = .secondaryLabelColor
+                    }
+                }
+            }
+        }
+        var notes: [String] = []
+        if prog.capped { notes.append("Annealing held at its highest for this polymerase.") }
+        if prog.two_step { notes.append("Primers this hot anneal at the extension temperature, so the cycle has two steps.") }
+        programNote.stringValue = notes.joined(separator: " ")
+        programNote.isHidden = notes.isEmpty
     }
 
     // MARK: Actions
@@ -500,9 +560,9 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
     @objc private func cancel(_ sender: Any?) { close() }
 
     @objc private func copyProgram(_ sender: Any?) {
-        guard !program.stringValue.isEmpty else { NSSound.beep(); return }
+        guard stepCount > 0 else { NSSound.beep(); return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(programHeader + "\n" + program.stringValue, forType: .string)
+        NSPasteboard.general.setString(programMarkdown, forType: .string)
     }
 
     @objc private func addPrimer(_ sender: Any?) { onAddPrimer() }
@@ -593,47 +653,7 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
     static func cancelAll() { visible.forEach { $0.cancel(nil) } }
     /// As clicking primer `index` on the vector map (shift-clicking when `adding`).
     static func pickOnMap(_ index: Int, adding: Bool) { visible.forEach { $0.pick(primer: index, adding: adding) } }
+    /// Steps in the program each open wizard suggests (0 for none).
+    static var programSteps: [Int] { visible.map { $0.stepCount } }
     static var productTabEnabled: Bool { visible.first?.tabs.isEnabled(forSegment: 1) ?? false }
-}
-
-/// A polymerase's cycling: the temperatures and times its maker suggests,
-/// and the longest product it's sold for.
-private struct Polymerase {
-    let name: String
-    let denature: Int            // °C
-    let initialSeconds: Int
-    let denatureSeconds: Int
-    let annealOffset: Double     // from the lower annealing Tm
-    let annealSeconds: Int
-    let extend: Int              // °C
-    let secondsPerKb: Int
-    let minExtendSeconds: Int
-    let maxLength: Int
-    let finalMinutes: Int
-
-    static let defaultName = "Q5 / Phusion (high fidelity)"
-    static let all: [Polymerase] = [
-        Polymerase(name: "Q5 / Phusion (high fidelity)", denature: 98, initialSeconds: 30, denatureSeconds: 10,
-                   annealOffset: 3, annealSeconds: 20, extend: 72, secondsPerKb: 30, minExtendSeconds: 15,
-                   maxLength: 20_000, finalMinutes: 2),
-        Polymerase(name: "Taq", denature: 95, initialSeconds: 120, denatureSeconds: 30, annealOffset: -5,
-                   annealSeconds: 30, extend: 68, secondsPerKb: 60, minExtendSeconds: 30, maxLength: 5_000,
-                   finalMinutes: 5),
-    ]
-
-    /// The cycling for a product of `length` bp whose primers' lower annealing Tm is `tmLow`.
-    func program(tmLow: Double, length: Int) -> String {
-        let anneal = Int(min(72, max(45, (tmLow + annealOffset).rounded())))
-        let perKb = (length * secondsPerKb + 999) / 1000
-        let extendSeconds = max(minExtendSeconds, (perKb + 4) / 5 * 5)
-        func time(_ s: Int) -> String { s >= 60 && s % 60 == 0 ? "\(s / 60) min" : (s > 60 ? "\(s / 60) min \(s % 60) s" : "\(s) s") }
-        return """
-        \(denature) °C  \(time(initialSeconds))
-        30 cycles:
-          \(denature) °C  \(time(denatureSeconds))
-          \(anneal) °C  \(time(annealSeconds))
-          \(extend) °C  \(time(extendSeconds))
-        \(extend) °C  \(finalMinutes) min
-        """
-    }
 }

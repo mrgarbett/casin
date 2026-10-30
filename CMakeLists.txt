@@ -40,6 +40,7 @@ add_library(restricto_core STATIC
     src/core/enzymes.cpp
     src/core/suppliers.cpp
     src/core/tm.cpp
+    src/core/pcrprogram.cpp
     src/core/search.cpp
     src/core/seqio.cpp)
 target_include_directories(restricto_core PUBLIC src)
