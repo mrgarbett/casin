@@ -158,8 +158,8 @@ final class Gel3DView: NSView, MTKViewDelegate {
         didSet { if comb != oldValue { rebuild() } }
     }
     /// Where the wells sit across the tray.
-    private var pitch: Float { max(0.062 / Float(comb.teeth), Float(comb.width) / 1000 + 0.0008) }
-    private var margin: Float { (0.070 - pitch * Float(comb.teeth)) / 2 }
+    private var wellPitch: Float { max(0.062 / Float(comb.teeth), Float(comb.width) / 1000 + 0.0008) }
+    private var margin: Float { (0.070 - wellPitch * Float(comb.teeth)) / 2 }
     private var width: Float = 0.1
     private let depth: Float = 0.10
     private let thick: Float = 0.006
@@ -277,7 +277,7 @@ final class Gel3DView: NSView, MTKViewDelegate {
     private func rebuild() {
         lastBuild = Date()
         // The tray's width; more lanes than the comb has teeth spill over it.
-        width = 2 * margin + pitch * Float(max(comb.teeth, lanes.count))
+        width = 2 * margin + wellPitch * Float(max(comb.teeth, lanes.count))
         fit = max(width * 1.15, depth * 1.6)
         bandMap = makeBandMap()
         restart()
@@ -446,7 +446,7 @@ final class Gel3DView: NSView, MTKViewDelegate {
         let w = 1024, h = max(128, min(2048, Int(Float(w) * depth / width)))
         let ppm = Float(w) / width
         let mm = ppm / 1000
-        let laneW = Float(comb.width) / 1000, pitch = self.pitch, margin = self.margin
+        let laneW = Float(comb.width) / 1000, pitch = wellPitch, margin = self.margin
         let thickness = Float(comb.thickness)
         let laneX = { (i: Int) -> Float in -self.width / 2 + margin + (Float(i) + 0.5) * pitch }
         let px = { (x: Float) -> Float in (x + self.width / 2) * ppm }
