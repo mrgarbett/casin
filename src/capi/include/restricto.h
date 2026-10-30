@@ -316,6 +316,33 @@ typedef struct {
 int oc_digest(const OCDocument *doc, const char *const *enzymes, int enzyme_count, OCFragmentInfo *out, int max);
 int oc_ladder_count(void);
 const char *oc_ladder_name(int index);
+/* A gel built lane by lane: a ladder, then any number of lanes, each a
+   sequence cut with some enzymes (none: the uncut molecule). Lanes are
+   named by their number; the ladder lane is "L". */
+typedef struct OCGel OCGel;
+OCGel *oc_gel_new(int ladder);
+void oc_gel_free(OCGel *gel);
+void oc_gel_add_lane(OCGel *gel, const OCDocument *doc, const char *const *enzymes, int enzyme_count);
+/* The lane's band sizes, largest first; returns how many (up to `max`). Lane 0 is the ladder. */
+int oc_gel_lane_bands(const OCGel *gel, int lane, int *out, int max);
+/* A band as a front end draws it: `run` is how far it ran, 0 at the wells to 1
+   at the bottom of the run; `intensity` is 0..1; `reference` marks a ladder's
+   brighter reference bands. */
+typedef struct {
+    int bp;
+    double run;
+    double intensity;
+    bool reference;
+} OCGelBand;
+int oc_gel_lane_count(const OCGel *gel);
+int oc_gel_lane_band_info(const OCGel *gel, int lane, OCGelBand *out, int max);
+/* True when the lane is an uncut circular molecule (it runs supercoiled). */
+bool oc_gel_lane_uncut_circular(const OCGel *gel, int lane);
+/* Where a linear band of `bp` runs, as OCGelBand.run (for a size scale). */
+double oc_gel_run_fraction(int bp);
+OCScene *oc_gel_scene(const OCGel *gel, double width, double height, bool dark, OCMeasureText measure,
+                      void *context);
+
 /* A virtual gel with three lanes: ladder, uncut, and the digest. */
 OCScene *oc_gel_render(const OCDocument *doc, const char *const *enzymes, int enzyme_count, int ladder, double width,
                        double height, bool dark, OCMeasureText measure, void *context);

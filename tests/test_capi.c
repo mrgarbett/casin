@@ -328,6 +328,30 @@ int main(int argc, char **argv)
     oc_document_free(product);
     oc_document_free(pcr);
 
+    /* A gel lane by lane: ladder, uncut, and a digest whose bands add up. */
+    OCGel *lanes = oc_gel_new(0);
+    oc_gel_add_lane(lanes, doc, NULL, 0);
+    const char *ecori[] = {"EcoRI"};
+    oc_gel_add_lane(lanes, doc, ecori, 1);
+    int bands[64];
+    CHECK(oc_gel_lane_bands(lanes, 0, bands, 64) > 5);
+    CHECK(oc_gel_lane_bands(lanes, 1, bands, 64) == 1 && bands[0] == 3188);
+    int nb = oc_gel_lane_bands(lanes, 2, bands, 64), sum = 0;
+    for (int i = 0; i < nb; ++i) sum += bands[i];
+    CHECK(nb >= 1 && sum == 3188);
+    for (int i = 1; i < nb; ++i) CHECK(bands[i - 1] >= bands[i]);
+    CHECK(oc_gel_lane_bands(lanes, 3, bands, 64) == 0);
+    CHECK(oc_gel_lane_count(lanes) == 3 && oc_gel_lane_uncut_circular(lanes, 1) && !oc_gel_lane_uncut_circular(lanes, 2));
+    OCGelBand info[64];
+    CHECK(oc_gel_lane_band_info(lanes, 0, info, 64) > 5);
+    for (int i = 1; i < oc_gel_lane_band_info(lanes, 0, info, 64); ++i) CHECK(info[i - 1].run <= info[i].run);
+    CHECK(oc_gel_lane_band_info(lanes, 1, info, 64) == 1 && info[0].bp == 3188 && info[0].run > oc_gel_run_fraction(3188));
+    CHECK(oc_gel_run_fraction(500) > oc_gel_run_fraction(5000) && oc_gel_run_fraction(500) <= 1);
+    OCScene *gs = oc_gel_scene(lanes, 400, 500, false, measure, NULL);
+    CHECK(gs != NULL && oc_scene_item_count(gs) > 10);
+    oc_scene_free(gs);
+    oc_gel_free(lanes);
+
     /* PCR cycling for pOC-demo's seq-fwd and mcs-rev, in Q5 buffer. */
     OCPcrProgram prog;
     oc_pcr_program("ACGTACAATGTGTTCGAAACAGGT", "CGGCTCTCTTTACACGGCTC", 1530, OC_POLYMERASE_Q5, 30, &prog);

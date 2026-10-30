@@ -18,6 +18,12 @@ struct GelLane {
     bool uncutCircular = false;
 };
 
+// How far a band of `bp` runs, 0 at the wells to 1 at the bottom of the run;
+// a supercoiled (uncut circular) molecule runs ahead of its linear size.
+double gelRunFraction(double bp, bool supercoiled = false);
+// How bright band `bp` of `lane` looks, 0..1.
+double gelBandIntensity(const GelLane &lane, int bp);
+
 // Bands migrate by log(size), as on a roughly 1% gel; brightness follows the
 // mass in each band, so longer fragments of an equimolar digest look brighter.
 class GelLayout {
