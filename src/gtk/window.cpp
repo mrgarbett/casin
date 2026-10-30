@@ -2121,6 +2121,13 @@ void Window::actSelectAll(GSimpleAction *, GVariant *, gpointer p)
         gtk_editable_select_region(GTK_EDITABLE(focus), 0, -1);
         return;
     }
+    if (focus && GTK_IS_TEXT_VIEW(focus)) {   // the primer's sequence box
+        GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(focus));
+        GtkTextIter start, end;
+        gtk_text_buffer_get_bounds(buffer, &start, &end);
+        gtk_text_buffer_select_range(buffer, &start, &end);
+        return;
+    }
     self->m_doc.setSelection({0, self->m_doc.sequence().length()});
 }
 
