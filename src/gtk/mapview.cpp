@@ -81,17 +81,34 @@ void MapView::setZoom(double zoom)
     }
 }
 
+namespace {
+const double kMinRadius = 0.85;   // of the circle at 100 %, when zoomed in
+} // namespace
+
 void MapView::ensureLayout(int w, int h)
 {
-    w = std::max(160, int((w - m_trailing) / m_zoom));
-    h = std::max(160, int((h - m_bottom) / m_zoom));
+    w = std::max(160, w - m_trailing);
+    h = std::max(160, h - m_bottom);
     if (m_layout && w == m_w && h == m_h)
         return;
     m_w = w;
     m_h = h;
-    m_layout = std::make_unique<view::MapLayout>(m_doc->displaySequence(), m_doc->visibleSites(),
+    // Zoom makes the text bigger, as far as the circle keeps most of its
+    // size: the bigger labels need more room beside it, so in a narrow view
+    // the text grows less.
+    view::MapOptions options = m_options;
+    auto layout = [&](double scale) {
+        options.textScale = scale;
+        return std::make_unique<view::MapLayout>(m_doc->displaySequence(), m_doc->visibleSites(),
                                                  m_dark ? view::Theme::darkTheme() : view::Theme::light(),
-                                                 m_measure, w, h, m_options);
+                                                 m_measure, w, h, options);
+    };
+    m_layout = layout(m_zoom);
+    if (m_zoom > 1 && m_layout->isCircular()) {
+        const double radius = layout(1)->radius() * kMinRadius;
+        for (double scale = m_zoom - 0.1; m_layout->radius() < radius - 1; scale -= 0.1)
+            m_layout = layout(std::max(1.0, scale));
+    }
 }
 
 void MapView::draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer p)
@@ -110,7 +127,6 @@ void MapView::draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer p)
         cairo_set_source_rgba(cr, c.r, c.g, c.b, c.a);
         cairo_paint(cr);
     }
-    cairo_scale(cr, self->m_zoom, self->m_zoom);
     view::drawScene(cr, scene);
 }
 
@@ -122,7 +138,7 @@ void MapView::dragBegin(GtkGestureDrag *, double x, double y, gpointer p)
     self->m_x0 = x;
     self->m_y0 = y;
     self->m_selecting = false;
-    const view::MapHit hit = self->m_layout->hitTest(self->toLayout(x, y));
+    const view::MapHit hit = self->m_layout->hitTest(view::Point{x, y});
     switch (hit.kind) {
     case view::MapHit::Feature:
         self->m_doc->activateFeature(hit.index);
@@ -133,7 +149,7 @@ void MapView::dragBegin(GtkGestureDrag *, double x, double y, gpointer p)
     case view::MapHit::Sequence:
         self->m_selecting = true;
         self->m_anchor = hit.position;
-        self->m_lastAngle = self->m_layout->angleAt(self->toLayout(x, y));
+        self->m_lastAngle = self->m_layout->angleAt(view::Point{x, y});
         self->m_accum = 0;
         self->m_doc->setSelection({hit.position, 0});
         break;
@@ -147,7 +163,7 @@ void MapView::dragUpdate(GtkGestureDrag *, double dx, double dy, gpointer p)
     auto *self = static_cast<MapView *>(p);
     if (!self->m_selecting || !self->m_layout)
         return;
-    const view::Point pt = self->toLayout(self->m_x0 + dx, self->m_y0 + dy);
+    const view::Point pt = view::Point{self->m_x0 + dx, self->m_y0 + dy};
     const int n = self->m_doc->sequence().length();
     if (self->m_layout->isCircular()) {
         // Accumulate the swept angle so a drag can pass the origin either way.
@@ -185,7 +201,7 @@ void MapView::motion(GtkEventControllerMotion *, double x, double y, gpointer p)
     auto *self = static_cast<MapView *>(p);
     if (!self->onHoverBase || !self->m_layout || self->m_doc->isEmpty())
         return;
-    const view::MapHit hit = self->m_layout->hitTest(self->toLayout(x, y));
+    const view::MapHit hit = self->m_layout->hitTest(view::Point{x, y});
     const int n = self->m_doc->sequence().length();
     self->onHoverBase(hit.kind == view::MapHit::Sequence && n > 0 ? std::min(hit.position, n - 1) : -1);
 }
@@ -202,7 +218,7 @@ void MapView::pressed(GtkGestureClick *, int n, double x, double y, gpointer p)
     auto *self = static_cast<MapView *>(p);
     if (n != 2 || !self->m_layout || !self->onEditFeature)
         return;
-    const view::MapHit hit = self->m_layout->hitTest(self->toLayout(x, y));
+    const view::MapHit hit = self->m_layout->hitTest(view::Point{x, y});
     if (hit.kind == view::MapHit::Feature)
         self->onEditFeature(hit.index);
 }
@@ -212,7 +228,7 @@ gboolean MapView::queryTooltip(GtkWidget *, int x, int y, gboolean, GtkTooltip *
     auto *self = static_cast<MapView *>(p);
     if (!self->m_layout)
         return FALSE;
-    const std::string text = self->m_layout->tooltipAt(self->toLayout(x, y));
+    const std::string text = self->m_layout->tooltipAt(view::Point{double(x), double(y)});
     if (text.empty())
         return FALSE;
     gtk_tooltip_set_text(tip, text.c_str());

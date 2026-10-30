@@ -24,6 +24,9 @@ struct MapOptions {
     std::set<std::string> hiddenTypes;
     int frames = 0;           // 3: forward ORFs as arrows, 6: both strands (as the sequence's translation)
     int minOrfCodons = 75;    // as SeqOptions::minOrfCodons
+    // Scales the map's text (labels, ticks, names) but not its geometry, so
+    // zooming in makes the text easier to read without shrinking the circle.
+    double textScale = 1;
 };
 
 struct MapHit {
@@ -46,6 +49,8 @@ public:
     // Circular only: angle of p around the center, radians clockwise from 12 o'clock.
     double angleAt(Point p) const;
     bool isCircular() const { return m_circular; }
+    // Circular only: the backbone's radius, which the labels' room decides.
+    double radius() const { return m_r; }
     std::string tooltipAt(Point p) const;
 
 private:
@@ -124,6 +129,7 @@ private:
     double m_innerR = 0;
     // linear geometry
     double m_xl = 0, m_xr = 0, m_yb = 0, m_linearBottom = 0;
+    double m_ts = 1;   // MapOptions::textScale, kept sane
     Font m_labelFont{11, false, false};
 };
 
