@@ -117,6 +117,8 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
     private var openDocs: [CoreDocument] = []
 
     private static var showing: [GelWizard] = []
+    /// Each sequence's lanes as its gel was last closed, so reopening it keeps them.
+    private static var remembered: [(template: CoreDocument, lanes: [Lane], selected: Int)] = []
 
     /// Brings up the gel for `template`, opening one if there is none: the
     /// sequence uncut, and cut with the first enzyme shown on its map.
@@ -150,9 +152,14 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         window.tabbingMode = .disallowed
         super.init(window: window)
         window.delegate = self
-        lanes = [Lane(doc: template, enzymes: [])]
-        if let first = template.visibleSiteEnzymes.first { lanes.append(Lane(doc: template, enzymes: [first])) }
-        selected = lanes.count
+        if let saved = Self.remembered.first(where: { $0.template === template }) {
+            lanes = saved.lanes
+            selected = saved.selected
+        } else {
+            lanes = [Lane(doc: template, enzymes: [])]
+            if let first = template.visibleSiteEnzymes.first { lanes.append(Lane(doc: template, enzymes: [first])) }
+            selected = lanes.count
+        }
         window.contentView = buildView()
         refresh()
     }
@@ -217,6 +224,8 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         laneHeading.textColor = .secondaryLabelColor
         sequencePopup.target = self
         sequencePopup.action = #selector(sequenceChanged(_:))
+        NotificationCenter.default.addObserver(forName: NSPopUpButton.willPopUpNotification, object: sequencePopup,
+                                               queue: .main) { [weak self] _ in self?.fillSequencePopup() }
         enzymeField.delegate = self
         enzymeField.placeholderString = "Uncut. Type an enzyme…"
         enzymeField.tokenStyle = .rounded
@@ -407,9 +416,12 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
     /// The lane's fragments, largest first as its bands are, with their ends.
     private func fragmentsOf(_ lane: Lane) -> [Fragment] {
         let doc = lane.doc
+        // An uncut plasmid runs twice: the nicked open circle, then the
+        // supercoiled form, as the core draws it.
+        let uncutCircle = [Fragment(start: 0, length: doc.length, caption: "uncut, nicked (open circle)"),
+                           Fragment(start: 0, length: doc.length, caption: "uncut, supercoiled")]
         if lane.enzymes.isEmpty {
-            return [Fragment(start: 0, length: doc.length,
-                             caption: doc.isCircular ? "uncut, supercoiled" : "uncut, linear")]
+            return doc.isCircular ? uncutCircle : [Fragment(start: 0, length: doc.length, caption: "uncut, linear")]
         }
         var out = [OCFragmentInfo](repeating: OCFragmentInfo(), count: 400)
         let n = withCStrings(lane.enzymes) {
@@ -423,7 +435,8 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         }
         // Nothing cut a circle: it runs supercoiled, as the gel draws it.
         if frags.count == 1 && doc.isCircular && frags[0].caption == "uncut" {
-            return [Fragment(start: 0, length: doc.length, caption: "not cut, supercoiled")]
+            return uncutCircle.map { Fragment(start: $0.start, length: $0.length,
+                                              caption: $0.caption.replacingOccurrences(of: "uncut", with: "not cut")) }
         }
         return frags.sorted { $0.length > $1.length }
     }
@@ -457,14 +470,7 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         // The selected lane's sequence and enzymes.
         let lane = lanes[selected - 1]
         laneHeading.stringValue = "LANE \(selected)"
-        openDocs = NSDocumentController.shared.documents.compactMap { ($0 as? SequenceDocument)?.core }
-            .filter { !$0.isEmpty }
-        if !openDocs.contains(where: { $0 === lane.doc }) { openDocs.insert(lane.doc, at: 0) }
-        sequencePopup.removeAllItems()
-        for d in openDocs {
-            sequencePopup.addItem(withTitle: "\(d.name.isEmpty ? "Untitled" : d.name)  ·  \(d.length.formatted()) bp")
-        }
-        if let i = openDocs.firstIndex(where: { $0 === lane.doc }) { sequencePopup.selectItem(at: i) }
+        fillSequencePopup()
         enzymeField.objectValue = lane.enzymes
         fillEnzymeMenu(for: lane.doc)
 
@@ -491,6 +497,34 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
             fragmentList.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: fragmentList.widthAnchor).isActive = true
         }
+    }
+
+    /// Every open sequence, whether in a window or a tab, with the lane's own
+    /// first if it has since been closed. Refilled each time the popup opens,
+    /// so a sequence opened after the wizard is there too.
+    private func fillSequencePopup() {
+        let laneDoc = lanes[selected - 1].doc
+        var docs: [CoreDocument] = []
+        func add(_ d: CoreDocument?) {
+            guard let d = d, !d.isEmpty, !docs.contains(where: { $0 === d }) else { return }
+            docs.append(d)
+        }
+        NSDocumentController.shared.documents.forEach { add(($0 as? SequenceDocument)?.core) }
+        for window in NSApp.windows {
+            for tab in window.tabbedWindows ?? [window] {
+                add((tab.windowController?.document as? SequenceDocument)?.core)
+            }
+        }
+        if !docs.contains(where: { $0 === laneDoc }) { docs.insert(laneDoc, at: 0) }
+        openDocs = docs
+        sequencePopup.removeAllItems()
+        for d in docs {
+            // A menu item per sequence, even when two share a name.
+            let item = NSMenuItem(title: "\(d.name.isEmpty ? "Untitled" : d.name)  ·  \(d.length.formatted()) bp",
+                                  action: nil, keyEquivalent: "")
+            sequencePopup.menu?.addItem(item)
+        }
+        if let i = docs.firstIndex(where: { $0 === laneDoc }) { sequencePopup.selectItem(at: i) }
     }
 
     /// Enzymes that cut `doc`, the fewest cuts first, for the Add menu.
@@ -554,9 +588,9 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
     @objc private func sequenceChanged(_ sender: Any?) {
         let i = sequencePopup.indexOfSelectedItem
         guard i >= 0 && i < openDocs.count, openDocs[i] !== lanes[selected - 1].doc else { return }
-        // Another sequence's enzymes may not cut this one; keep those that do.
-        let cutting = Set(openDocs[i].enzymes.filter { $0.cuts > 0 }.map { $0.name })
-        lanes[selected - 1] = Lane(doc: openDocs[i], enzymes: lanes[selected - 1].enzymes.filter { cutting.contains($0) })
+        // The enzymes stay: the same digest of another sequence (one that
+        // doesn't cut it leaves it uncut).
+        lanes[selected - 1].doc = openDocs[i]
         refresh()
     }
 
@@ -586,7 +620,15 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
 
 
     @objc private func copyImage(_ sender: Any?) {
-        guard let image = gelView.snapshot() else { return }
+        // What each lane holds, and how the gel was run, under the picture.
+        var legend = [(lane: "L", what: ladderPopup.titleOfSelectedItem ?? "Ladder")]
+        for (i, lane) in lanes.enumerated() {
+            let name = lane.doc.name.isEmpty ? "Untitled" : lane.doc.name
+            legend.append((lane: "\(i + 1)", what: "\(name) · \(lane.enzymes.isEmpty ? "uncut" : lane.enzymes.joined(separator: " + "))"))
+        }
+        let caption = [agarosePopup.titleOfSelectedItem ?? "", gelView.stain.title, runLabel.stringValue.lowercased()]
+            .filter { !$0.isEmpty }.joined(separator: " · ")
+        guard let image = gelView.snapshot(legend: legend, caption: caption) else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.writeObjects([image])
         // A moment's tick on the button says it worked.
@@ -599,7 +641,14 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
     }
 
     @objc private func done(_ sender: Any?) { window?.close() }
-    override func cancelOperation(_ sender: Any?) { window?.close() }
+    /// Esc while typing an enzyme only leaves the box; otherwise it closes the gel.
+    override func cancelOperation(_ sender: Any?) {
+        if enzymeField.currentEditor() != nil {
+            window?.makeFirstResponder(nil)
+            return
+        }
+        window?.close()
+    }
 
     // MARK: Enzymes typed as tokens
 
@@ -620,9 +669,19 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         return Array((Set(cutting).sorted() + Set(others).sorted()).prefix(30))
     }
 
+    /// Only known enzymes become tokens; anything else is named in the orange note.
     func tokenField(_ tokenField: NSTokenField, shouldAdd tokens: [Any], at index: Int) -> [Any] {
-        DispatchQueue.main.async { [weak self] in self?.enzymesEdited(nil) }
-        return tokens
+        let typed = tokens.compactMap { $0 as? String }
+        let known = typed.compactMap { enzymeNames[$0.trimmingCharacters(in: .whitespaces).lowercased()] }
+        let unknown = typed.filter { enzymeNames[$0.trimmingCharacters(in: .whitespaces).lowercased()] == nil }
+        DispatchQueue.main.async { [weak self] in
+            self?.enzymesEdited(nil)
+            if !unknown.isEmpty {
+                self?.enzymeNote.stringValue = "Not a known enzyme: \(unknown.joined(separator: ", "))"
+                self?.enzymeNote.isHidden = false
+            }
+        }
+        return known
     }
 
     func controlTextDidEndEditing(_ obj: Notification) { enzymesEdited(nil) }
@@ -664,6 +723,8 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
 
     func windowWillClose(_ notification: Notification) {
         chrome?.detach()
+        Self.remembered.removeAll { $0.template === template }
+        Self.remembered.append((template: template, lanes: lanes, selected: selected))
         // Let go after the close finishes.
         DispatchQueue.main.async { Self.showing.removeAll { $0 === self } }
     }

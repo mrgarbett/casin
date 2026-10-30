@@ -193,14 +193,15 @@ enum UISmokeTest {
                 window.makeKeyAndOrderFront(nil)
             }),
             ("9k-gel-wizard", {
-                // Cloning > Digest and Gel…: the ladder, the sequence uncut, and
-                // cut with the first enzyme shown; then a lane cut with EcoRI.
+                // Cloning > Digest and Gel…: the ladder, the plasmid uncut (two
+                // bands, nicked and supercoiled), and cut with the first enzyme
+                // shown; then a lane cut with EcoRI.
                 controller?.digestAndGel(nil)
                 let length = (controller?.document as? SequenceDocument)?.core.length ?? 0
                 let first = GelWizard.bands
                 GelWizard.addLane(enzymes: ["ecori"])
                 let after = GelWizard.bands
-                guard GelWizard.isAnyOpen, first.count >= 2, first[0].count > 5, first[1] == [length],
+                guard GelWizard.isAnyOpen, first.count >= 2, first[0].count > 5, first[1] == [length, length],
                       after.count == first.count + 1, let cut = after.last, cut.count >= 1,
                       cut.reduce(0, +) == length else {
                     FileHandle.standardError.write("ui-smoke: the gel wizard showed the wrong bands \(after)\n"

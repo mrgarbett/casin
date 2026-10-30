@@ -179,6 +179,9 @@ final class GelView: NSView {
         var slab: NSRect
         var laneW: CGFloat
         var gap: CGFloat
+        /// How much bigger than the smallest lanes these are, for text and bands.
+        var scale: CGFloat
+        var labelW: CGFloat
         var runTop: CGFloat
         var runBottom: CGFloat
         func laneX(_ i: Int) -> CGFloat { slab.minX + gap + CGFloat(i) * (laneW + gap) }
@@ -189,19 +192,24 @@ final class GelView: NSView {
     private var geometry: Geometry {
         let area = NSRect(x: 24, y: 36, width: max(100, bounds.width - 48),
                           height: max(120, bounds.height - 36 - bottomInset))
-        let labelW: CGFloat = 60
+        // Lanes grow to fill the pane (a few lanes make a wide gel, not a
+        // narrow strip), with the gaps and the size labels growing with them.
         let n = CGFloat(max(1, lanes.count))
-        let gap: CGFloat = 14
-        let laneW = min(64, max(26, (area.width - labelW - gap * (n + 1)) / n))
+        let unit = (area.width - 60) / (n * 1.25 + 0.25)
+        let laneW = min(120, max(26, unit))
+        let scale = max(1, laneW / 64)
+        let gap = min(28, max(10, laneW * 0.25))
+        let labelW = 60 * min(1.4, scale)
         let slabW = n * laneW + (n + 1) * gap
         let slabX = area.minX + labelW + max(0, (area.width - labelW - slabW) / 2)
-        let slab = NSRect(x: slabX, y: area.minY + 24, width: slabW, height: area.maxY - area.minY - 24)
-        return Geometry(slab: slab, laneW: laneW, gap: gap, runTop: slab.minY + 34, runBottom: slab.maxY - 22)
+        let slab = NSRect(x: slabX, y: area.minY + 24 * scale, width: slabW, height: area.maxY - area.minY - 24 * scale)
+        return Geometry(slab: slab, laneW: laneW, gap: gap, scale: scale, labelW: labelW,
+                        runTop: slab.minY + 34 * scale, runBottom: slab.maxY - 22)
     }
 
     /// Thicker for more DNA; wider and softer the further it ran, as bands diffuse.
-    private func bandHeight(_ b: GelBandModel, at position: CGFloat) -> CGFloat {
-        3 + 2.5 * CGFloat(b.intensity) + 2.5 * max(0, position)
+    private func bandHeight(_ b: GelBandModel, at position: CGFloat, scale: CGFloat = 1) -> CGFloat {
+        (2.5 + 4.5 * CGFloat(b.intensity) + 2.5 * max(0, position)) * min(1.5, scale)
     }
 
     /// A band past the bottom has run off the gel; one near the edge fades out.
@@ -224,7 +232,7 @@ final class GelView: NSView {
         let g = geometry
         drawSlab(g)
 
-        let nameFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        let nameFont = NSFont.systemFont(ofSize: min(16, 11 * g.scale), weight: .semibold)
         for (i, lane) in lanes.enumerated() {
             let x = g.laneX(i)
             // The lane being edited, and the one under the pointer.
@@ -236,8 +244,8 @@ final class GelView: NSView {
             }
             let nameColor = i == selectedLane ? NSColor.white : NSColor.white.withAlphaComponent(0.6)
             drawText(lane.name, font: nameFont, color: nameColor,
-                     centeredAt: NSPoint(x: x + g.laneW / 2, y: g.slab.minY - 13))
-            drawWell(NSRect(x: x + 2, y: g.slab.minY + 14, width: g.laneW - 4, height: 8))
+                     centeredAt: NSPoint(x: x + g.laneW / 2, y: g.slab.minY - 13 * g.scale))
+            drawWell(NSRect(x: x + 2, y: g.slab.minY + 14 * g.scale, width: g.laneW - 4, height: 8 * min(1.5, g.scale)))
 
             let far = reach(i)
             let fadeIn = CGFloat(min(1, (i < progress.count ? progress[i] : 1) * 4))
@@ -251,7 +259,7 @@ final class GelView: NSView {
                 let p = CGFloat(band.run) * far
                 let visible = onGel(p)
                 guard visible > 0 else { continue }
-                let h = bandHeight(band, at: p)
+                let h = bandHeight(band, at: p, scale: g.scale)
                 let y = g.y(band.run, far)
                 let rect = NSRect(x: x + 3, y: y - h / 2, width: g.laneW - 6, height: h)
                 let hovered = hover?.lane == i && hover?.band == b
@@ -267,9 +275,10 @@ final class GelView: NSView {
             for band in ladder.bands.sorted(by: { $0.run < $1.run }) {
                 let p = CGFloat(band.run) * far
                 let y = g.y(band.run, far)
-                guard onGel(p) > 0.5, y - lastY >= 11 else { continue }
+                guard onGel(p) > 0.5, y - lastY >= 11 * min(1.4, g.scale) else { continue }
                 lastY = y
-                let font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: band.reference ? .semibold : .regular)
+                let font = NSFont.monospacedDigitSystemFont(ofSize: min(14, 10 * g.scale),
+                                                            weight: band.reference ? .semibold : .regular)
                 let full = far / CGFloat(max(0.01, runLevel))
                 let color = NSColor.white.withAlphaComponent((band.reference ? 0.8 : 0.5) * full)
                 drawText(Self.sizeText(band.bp), font: font, color: color, rightAt: NSPoint(x: g.slab.minX - 10, y: y))
@@ -462,7 +471,9 @@ final class GelView: NSView {
             let position = CGFloat(band.run) * far
             guard onGel(position) > 0 else { continue }
             let d = abs(p.y - g.y(band.run, far))
-            if d <= max(5, bandHeight(band, at: position) / 2 + 3), d < (best?.1 ?? .infinity) { best = (b, d) }
+            if d <= max(5, bandHeight(band, at: position, scale: g.scale) / 2 + 3), d < (best?.1 ?? .infinity) {
+                best = (b, d)
+            }
         }
         return (lane, best?.0)
     }
@@ -496,16 +507,46 @@ final class GelView: NSView {
         if let b = h.band { onPickBand?(h.lane, b) }
     }
 
-    /// The gel as a picture, without the pointer's bubble.
-    func snapshot() -> NSImage? {
-        let keep = hover
+    /// The gel as a picture for a notebook: cropped to the gel and its
+    /// labels, without the pointer's bubble or the selected lane's light,
+    /// with what each lane holds listed underneath.
+    func snapshot(legend: [(lane: String, what: String)], caption: String) -> NSImage? {
+        let keepHover = hover, keepSelected = selectedLane
         hover = nil
+        selectedLane = -1
         finishRunning()
-        defer { hover = keep; needsDisplay = true }
-        guard let rep = bitmapImageRepForCachingDisplay(in: bounds) else { return nil }
-        cacheDisplay(in: bounds, to: rep)
-        let image = NSImage(size: bounds.size)
-        image.addRepresentation(rep)
-        return image
+        defer { hover = keepHover; selectedLane = keepSelected; needsDisplay = true }
+        let g = geometry
+        let crop = NSRect(x: g.slab.minX - g.labelW - 8, y: g.slab.minY - 30 * g.scale,
+                          width: g.slab.width + g.labelW + 24, height: g.slab.height + 30 * g.scale + 16)
+            .intersection(bounds)
+        guard !crop.isEmpty, let rep = bitmapImageRepForCachingDisplay(in: crop) else { return nil }
+        cacheDisplay(in: crop, to: rep)
+
+        let laneFont = NSFont.systemFont(ofSize: 12, weight: .bold)
+        let whatFont = NSFont.systemFont(ofSize: 12)
+        let captionFont = NSFont.systemFont(ofSize: 11)
+        let lineH: CGFloat = 18
+        let legendH = 14 + CGFloat(legend.count) * lineH + 6 + lineH + 10
+        let size = NSSize(width: crop.width, height: crop.height + legendH)
+        return NSImage(size: size, flipped: true) { _ in
+            NSColor(white: 0.05, alpha: 1).setFill()
+            NSRect(origin: .zero, size: size).fill()
+            rep.draw(in: NSRect(origin: .zero, size: crop.size), from: .zero, operation: .copy, fraction: 1,
+                     respectFlipped: true, hints: nil)
+            var y = crop.height + 14
+            for row in legend {
+                NSAttributedString(string: row.lane, attributes: [
+                    .font: laneFont, .foregroundColor: NSColor.white]).draw(at: NSPoint(x: 16, y: y))
+                NSAttributedString(string: row.what, attributes: [
+                    .font: whatFont, .foregroundColor: NSColor.white.withAlphaComponent(0.8)])
+                    .draw(at: NSPoint(x: 40, y: y))
+                y += lineH
+            }
+            NSAttributedString(string: caption, attributes: [
+                .font: captionFont, .foregroundColor: NSColor.white.withAlphaComponent(0.55)])
+                .draw(at: NSPoint(x: 16, y: y + 6))
+            return true
+        }
     }
 }

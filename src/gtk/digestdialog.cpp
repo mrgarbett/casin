@@ -84,9 +84,9 @@ void drawGel(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer data)
     auto *st = static_cast<DigestState *>(data);
     const Ladder &ladder = commonLadders()[size_t(st->ladder)];
     std::vector<view::GelLane> lanes;
-    lanes.push_back({"Ladder", ladder.bands, ladder.bright, true, false});
-    lanes.push_back({"Uncut", {st->seq.length()}, {}, false, st->seq.circular});
-    view::GelLane cut{"Digest", {}, {}, false, false};
+    lanes.push_back({"Ladder", ladder.bands, ladder.bright, true, false, {}});
+    lanes.push_back({"Uncut", {st->seq.length()}, {}, false, st->seq.circular, {}});
+    view::GelLane cut{"Digest", {}, {}, false, false, {}};
     if (!st->chosen.empty()) {
         if (st->result.uncut)
             cut.uncutCircular = st->seq.circular;

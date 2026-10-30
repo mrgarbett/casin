@@ -664,9 +664,9 @@ OCScene *oc_gel_render(const OCDocument *doc, const char *const *enzymes, int en
     const Ladder &l = commonLadders()[size_t(std::clamp(ladder, 0, oc_ladder_count() - 1))];
     const std::vector<Enzyme> use = enzymesNamed(enzymes, enzyme_count);
     std::vector<view::GelLane> lanes;
-    lanes.push_back({"Ladder", l.bands, l.bright, true, false});
-    lanes.push_back({"Uncut", {seq.length()}, {}, false, seq.circular});
-    view::GelLane cut{"Digest", {}, {}, false, false};
+    lanes.push_back({"Ladder", l.bands, l.bright, true, false, {}});
+    lanes.push_back({"Uncut", {seq.length()}, {}, false, seq.circular, {}});
+    view::GelLane cut{"Digest", {}, {}, false, false, {}};
     if (!use.empty()) {
         const DigestResult r = digest(seq, use);
         cut.uncutCircular = r.uncut && seq.circular;
@@ -688,7 +688,7 @@ OCGel *oc_gel_new(int ladder)
 {
     auto *g = new OCGel;
     const Ladder &l = commonLadders()[size_t(std::clamp(ladder, 0, oc_ladder_count() - 1))];
-    g->lanes.push_back({"L", l.bands, l.bright, true, false});
+    g->lanes.push_back({"L", l.bands, l.bright, true, false, {}});
     return g;
 }
 
@@ -699,15 +699,19 @@ void oc_gel_add_lane(OCGel *gel, const OCDocument *doc, const char *const *enzym
     if (!gel || !doc)
         return;
     const Sequence &seq = doc->doc.sequence();
-    view::GelLane lane{std::to_string(gel->lanes.size()), {}, {}, false, false};
+    view::GelLane lane{std::to_string(gel->lanes.size()), {}, {}, false, false, {}};
     const std::vector<Enzyme> use = enzymesNamed(enzymes, enzyme_count);
-    if (use.empty()) {
+    const bool uncut = use.empty() || digest(seq, use).uncut;
+    if (uncut) {
         lane.bands = {seq.length()};
-        lane.uncutCircular = seq.circular;
+        if (seq.circular) {
+            // The nicked open circle trails the supercoiled plasmid.
+            lane.uncutCircular = true;
+            lane.bands = {seq.length(), seq.length()};
+            lane.forms = {view::GelForm::OpenCircular, view::GelForm::Supercoiled};
+        }
     } else {
-        const DigestResult r = digest(seq, use);
-        lane.uncutCircular = r.uncut && seq.circular;
-        for (const DigestFragment &f : r.fragments)
+        for (const DigestFragment &f : digest(seq, use).fragments)
             lane.bands.push_back(f.length);
         std::sort(lane.bands.rbegin(), lane.bands.rend());
     }
@@ -733,8 +737,9 @@ int oc_gel_lane_band_info(const OCGel *gel, int lane, OCGelBand *out, int max)
     const view::GelLane &l = gel->lanes[size_t(lane)];
     for (int i = 0; out && i < max && i < int(l.bands.size()); ++i) {
         const int bp = l.bands[size_t(i)];
-        out[i] = {bp, view::gelRunFraction(bp, l.uncutCircular, gel->percent), view::gelBandIntensity(l, bp),
-                  std::find(l.bright.begin(), l.bright.end(), bp) != l.bright.end()};
+        const view::GelForm form = view::gelBandForm(l, size_t(i));
+        out[i] = {bp, view::gelRunFraction(bp, form, gel->percent), view::gelBandIntensity(l, size_t(i)),
+                  std::find(l.bright.begin(), l.bright.end(), bp) != l.bright.end(), int(form)};
     }
     return int(l.bands.size());
 }

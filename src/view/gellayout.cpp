@@ -11,6 +11,8 @@ namespace {
 const double kMaxBp = 20000, kMinBp = 70;
 // A supercoiled plasmid runs ahead of its linear form; this is a rough factor.
 const double kSupercoiled = 0.7;
+// The open circle drags behind its linear form.
+const double kOpenCircular = 1.6;
 
 std::string bandText(int bp)
 {
@@ -34,7 +36,14 @@ const Agarose kAgarose[] = {{0.5, 40000, 400}, {0.7, 30000, 150}, {1.0, kMaxBp, 
 int gelPercentCount() { return int(std::size(kAgarose)); }
 double gelPercent(int index) { return kAgarose[std::clamp(index, 0, gelPercentCount() - 1)].percent; }
 
-double gelRunFraction(double bp, bool supercoiled, double percent)
+GelForm gelBandForm(const GelLane &lane, size_t band)
+{
+    if (band < lane.forms.size())
+        return lane.forms[band];
+    return lane.uncutCircular ? GelForm::Supercoiled : GelForm::Linear;
+}
+
+double gelRunFraction(double bp, GelForm form, double percent)
 {
     // The gel's range, between the two percentages around it.
     const int n = gelPercentCount();
@@ -53,21 +62,30 @@ double gelRunFraction(double bp, bool supercoiled, double percent)
             break;
         }
     }
-    bp = std::max(1.0, supercoiled ? bp * kSupercoiled : bp);
+    bp *= form == GelForm::Supercoiled ? kSupercoiled : form == GelForm::OpenCircular ? kOpenCircular : 1.0;
+    bp = std::max(1.0, bp);
     const double t = (std::log10(top) - std::log10(bp)) / (std::log10(top) - std::log10(bottom));
     // Bands too big to resolve crowd together just under the wells.
     const double crowd = 0.08;
     return t >= crowd ? t : crowd * std::exp((t - crowd) / crowd);
 }
 
-double gelBandIntensity(const GelLane &lane, int bp)
+double gelBandIntensity(const GelLane &lane, size_t band)
 {
-    // Mass per band, relative to the heaviest band in the lane.
+    if (band >= lane.bands.size())
+        return 0;
+    const int bp = lane.bands[band];
+    // Mass per band, relative to the heaviest band in the lane: an equimolar
+    // digest's big fragments carry more stain than its small ones.
     double heaviest = 1;
     for (int b : lane.bands)
         heaviest = std::max(heaviest, double(b));
     const bool bright = std::find(lane.bright.begin(), lane.bright.end(), bp) != lane.bright.end();
-    double alpha = lane.ladder ? (bright ? 0.95 : 0.6) : 0.35 + 0.6 * std::sqrt(bp / heaviest);
+    double alpha = lane.ladder ? (bright ? 0.95 : 0.6) : 0.18 + 0.82 * std::pow(bp / heaviest, 0.7);
+    // Most of a plasmid prep is supercoiled; a little is nicked.
+    const GelForm form = gelBandForm(lane, band);
+    if (form == GelForm::OpenCircular)
+        alpha *= 0.4;
     if (bp > kMaxBp || bp < kMinBp)
         alpha *= 0.5;   // off the gel's useful range
     return std::min(1.0, alpha);
@@ -116,10 +134,11 @@ Scene GelLayout::render() const
         // Well.
         s.rect({x + 2, m_gelY + 8, m_laneW - 4, 6}, Color::rgb(0, 0, 0, 0.55));
 
-        for (int bp : lane.bands) {
-            const double run = std::min(1.0, gelRunFraction(bp, lane.uncutCircular));
+        for (size_t i = 0; i < lane.bands.size(); ++i) {
+            const int bp = lane.bands[i];
+            const double run = std::min(1.0, gelRunFraction(bp, gelBandForm(lane, i)));
             const double y = m_runTop + run * (m_runBottom - m_runTop);
-            const double alpha = gelBandIntensity(lane, bp);
+            const double alpha = gelBandIntensity(lane, i);
             s.rect({x + 3, y - 2.5, m_laneW - 6, 5}, band.withAlpha(std::min(1.0, alpha * 0.35)));
             s.rect({x + 3, y - 1.5, m_laneW - 6, 3}, band.withAlpha(std::min(1.0, alpha)));
             if (lane.ladder && first)

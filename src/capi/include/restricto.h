@@ -338,7 +338,11 @@ typedef struct {
     double run;
     double intensity;
     bool reference;
+    int form;               /* OC_GEL_LINEAR, OC_GEL_SUPERCOILED or OC_GEL_OPEN_CIRCULAR */
 } OCGelBand;
+/* An uncut plasmid runs as two bands: open circular (nicked, fainter) first,
+   then supercoiled. */
+enum { OC_GEL_LINEAR = 0, OC_GEL_SUPERCOILED = 1, OC_GEL_OPEN_CIRCULAR = 2 };
 int oc_gel_lane_count(const OCGel *gel);
 int oc_gel_lane_band_info(const OCGel *gel, int lane, OCGelBand *out, int max);
 /* True when the lane is an uncut circular molecule (it runs supercoiled). */

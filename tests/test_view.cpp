@@ -290,7 +290,7 @@ int main(int argc, char **argv)
     }
     testUndo(seq);
     {
-        GelLayout gel({{"Ladder", {10000, 1000, 100}, {1000}, true, false}, {"Cut", {3000, 500}, {}, false, false}},
+        GelLayout gel({{"Ladder", {10000, 1000, 100}, {1000}, true, false, {}}, {"Cut", {3000, 500}, {}, false, false, {}}},
                       theme, tm, 500, 400);
         CHECK(gel.yOfSize(10000) < gel.yOfSize(1000) && gel.yOfSize(1000) < gel.yOfSize(100));
         CHECK(!gel.render().items.empty());
