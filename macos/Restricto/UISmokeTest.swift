@@ -232,7 +232,7 @@ enum UISmokeTest {
                 GelWizard.setRun(1, stain: .ethidiumUV)
             }),
             ("9k-gel-3d", {
-                // The 3D tab builds its RealityKit scene on first use.
+                // The 3D tab sets up Metal and compiles its shaders on first use.
                 if let wizard = GelWizard.openWindows.first {
                     capture(wizard, to: out.appendingPathComponent("9k-gel-imager-window.png"))
                 }
