@@ -1008,12 +1008,21 @@ OCMapLayout *oc_map_layout_new_frames(const OCDocument *doc, double width, doubl
                                       bool show_enzymes, bool show_primers, const char *hidden_types, int frames,
                                       OCMeasureText measure, void *context)
 {
+    return oc_map_layout_new_scaled(doc, width, height, dark, show_enzymes, show_primers, hidden_types, frames, 1,
+                                    measure, context);
+}
+
+OCMapLayout *oc_map_layout_new_scaled(const OCDocument *doc, double width, double height, bool dark,
+                                      bool show_enzymes, bool show_primers, const char *hidden_types, int frames,
+                                      double text_scale, OCMeasureText measure, void *context)
+{
     CallbackMeasurer tm(measure, context);
     view::MapOptions opt;
     opt.enzymes = show_enzymes;
     opt.primers = show_primers;
     opt.hiddenTypes = typeSet(hidden_types);
     opt.frames = frames;
+    opt.textScale = text_scale;
     auto *l = new OCMapLayout;
     l->layout = std::make_unique<view::MapLayout>(doc->doc.displaySequence(), doc->doc.visibleSites(),
                                                   dark ? view::Theme::darkTheme() : view::Theme::light(), tm, width,
@@ -1049,6 +1058,11 @@ void oc_map_layout_hit(const OCMapLayout *layout, double x, double y, int *kind,
 }
 
 bool oc_map_layout_is_circular(const OCMapLayout *layout) { return layout->layout->isCircular(); }
+
+double oc_map_layout_radius(const OCMapLayout *layout)
+{
+    return layout->layout->isCircular() ? layout->layout->radius() : 0;
+}
 double oc_map_layout_angle_at(const OCMapLayout *layout, double x, double y) { return layout->layout->angleAt({x, y}); }
 int oc_map_layout_position_at(const OCMapLayout *layout, double x, double y) { return layout->layout->positionAt({x, y}); }
 char *oc_map_layout_tooltip(const OCMapLayout *layout, double x, double y) { return dupString(layout->layout->tooltipAt({x, y})); }

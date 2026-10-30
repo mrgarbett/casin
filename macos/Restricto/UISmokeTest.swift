@@ -191,6 +191,24 @@ enum UISmokeTest {
                 note("closed")
                 window.makeKeyAndOrderFront(nil)
             }),
+            ("9j-zoomed-125", {
+                // ⌘0 then ⌘+ twice: 100% → 110% → 125%, map and sequence together.
+                Zoom.shared.actualSize(nil)
+                Zoom.shared.zoomIn(nil)
+                Zoom.shared.zoomIn(nil)
+                guard abs(Zoom.level - 1.25) < 0.001 else {
+                    FileHandle.standardError.write("ui-smoke: zooming in went wrong\n".data(using: .utf8)!)
+                    exit(7)
+                }
+            }),
+            ("9j-zoomed-80", { for _ in 0..<8 { Zoom.shared.zoomOut(nil) } }),
+            ("9j-actual-size", {
+                Zoom.shared.actualSize(nil)
+                guard Zoom.level == 1 else {
+                    FileHandle.standardError.write("ui-smoke: Actual Size didn't go back to 100%\n".data(using: .utf8)!)
+                    exit(7)
+                }
+            }),
             ("9e-edited", { (controller?.document as? NSDocument)?.updateChangeCount(.changeDone) }),
             ("9f-saved", { (controller?.document as? NSDocument)?.updateChangeCount(.changeCleared) }),
             ("10-below-minimum", { resize(NSSize(width: 600, height: 400)) }),

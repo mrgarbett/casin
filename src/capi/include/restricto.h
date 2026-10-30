@@ -245,6 +245,13 @@ OCMapLayout *oc_map_layout_new_options(const OCDocument *doc, double width, doub
 OCMapLayout *oc_map_layout_new_frames(const OCDocument *doc, double width, double height, bool dark,
                                       bool show_enzymes, bool show_primers, const char *hidden_types, int frames,
                                       OCMeasureText measure, void *context);
+/* Like oc_map_layout_new_frames, with the map's text (labels, ticks, names)
+   scaled by text_scale and its geometry left to fit: zoom without shrinking text. */
+OCMapLayout *oc_map_layout_new_scaled(const OCDocument *doc, double width, double height, bool dark,
+                                      bool show_enzymes, bool show_primers, const char *hidden_types, int frames,
+                                      double text_scale, OCMeasureText measure, void *context);
+/* Circular maps: the backbone's radius; 0 for linear ones. */
+double oc_map_layout_radius(const OCMapLayout *layout);
 void oc_map_layout_free(OCMapLayout *layout);
 OCScene *oc_map_layout_render(const OCMapLayout *layout, const OCDocument *doc);
 /* kind = OC_HIT_*; index = feature, visible-site or primer index; position = base boundary. */
