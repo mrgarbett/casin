@@ -325,118 +325,148 @@ final class Gel3DView: NSView, MTKViewDelegate {
     // MARK: The stain map
 
     /// Lanes are never loaded quite evenly: a fixed, slight difference per lane.
-    private static func loading(_ lane: Int) -> CGFloat {
-        let wobble: [CGFloat] = [1, 0.92, 1.04, 0.96, 1.06, 0.94, 1.01, 0.95, 1.05, 0.98, 1.02]
+    private static func loading(_ lane: Int) -> Float {
+        let wobble: [Float] = [1, 0.92, 1.04, 0.96, 1.06, 0.94, 1.01, 0.95, 1.05, 0.98, 1.02]
         return wobble[lane % wobble.count]
     }
 
     /// A small, repeatable random sequence, so the gel looks the same each time.
     private struct Noise {
         var seed: UInt32
-        mutating func next() -> CGFloat {
+        mutating func next() -> Float {
             seed = seed &* 1_664_525 &+ 1_013_904_223
-            return CGFloat(seed >> 8) / CGFloat(1 << 24)
+            return Float(seed >> 8) / Float(1 << 24)
+        }
+        /// Smooth noise over a plane, 0 to 1, repeatable.
+        static func value(_ x: Float, _ y: Float) -> Float {
+            func hash(_ i: Int32, _ j: Int32) -> Float {
+                var h = UInt32(bitPattern: i) &* 1973 &+ UInt32(bitPattern: j) &* 9277 &+ 7
+                h ^= h >> 16; h &*= 0x7feb352d; h ^= h >> 15; h &*= 0x846ca68b; h ^= h >> 16
+                return Float(h >> 8) / Float(1 << 24)
+            }
+            let fx = x.rounded(.down), fy = y.rounded(.down)
+            let i = Int32(fx), j = Int32(fy)
+            var u = x - fx, v = y - fy
+            u = u * u * (3 - 2 * u); v = v * v * (3 - 2 * v)
+            let top = hash(i, j) + (hash(i + 1, j) - hash(i, j)) * u
+            let bottom = hash(i, j + 1) + (hash(i + 1, j + 1) - hash(i, j + 1)) * u
+            return top + (bottom - top) * v
         }
     }
 
-    /// Fills `path` blurred by `blur`: only the shadow of a copy far off to
-    /// the side lands in the picture.
-    private static func softFill(_ ctx: CGContext, _ path: CGPath, color: CGColor, blur: CGFloat) {
-        let away: CGFloat = 100_000
-        ctx.saveGState()
-        ctx.setShadow(offset: CGSize(width: away, height: 0), blur: blur, color: color)
-        ctx.translateBy(x: -away, y: 0)
-        ctx.addPath(path)
-        ctx.setFillColor(CGColor(gray: 0, alpha: 1))
-        ctx.fillPath()
-        ctx.restoreGState()
-    }
-
-    private static func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat = 1) -> CGColor {
-        CGColor(srgbRed: r, green: g, blue: b, alpha: a)
-    }
-
     /// Where the DNA is, seen from above, as a picture the shaders sample:
-    /// red = DNA (band and smear), green = loading dye, blue = well. Row 0
+    /// red = DNA, green = loading dye, blue = well (half: its walls). Row 0
     /// is the wells' side (−z).
+    ///
+    /// A band is a cloud of DNA, not a shape: along the run its brightness is
+    /// a bell curve that widens the farther it ran (diffusion), with a faint
+    /// wider haze and, when heavily loaded, a tail back toward the well;
+    /// across the lane it's a little brighter in the middle and fades at the
+    /// walls; its ends curl toward the well; it leans a touch; the stain in
+    /// it is speckled; and no two are alike.
     private func makeBandMap() -> MTLTexture? {
         guard let device = metalView.device else { return nil }
-        let w = 1024, h = max(128, min(2048, Int(CGFloat(w) * CGFloat(depth / width))))
-        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
-        ctx.translateBy(x: 0, y: CGFloat(h))
-        ctx.scaleBy(x: 1, y: -1)
-        ctx.setFillColor(CGColor(gray: 0, alpha: 1))
-        ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
-        let ppm = CGFloat(w) / CGFloat(width)
+        let w = 1024, h = max(128, min(2048, Int(Float(w) * depth / width)))
+        let ppm = Float(w) / width
         let mm = ppm / 1000
         let laneW: Float = 0.010, gap: Float = 0.004
         let laneX = { (i: Int) -> Float in -self.width / 2 + 0.006 + gap + Float(i) * (laneW + gap) + laneW / 2 }
-        let px = { (x: Float) -> CGFloat in CGFloat(x + self.width / 2) * ppm }
-        let pz = { (z: Float) -> CGFloat in CGFloat(z + self.depth / 2) * ppm }
+        let px = { (x: Float) -> Float in (x + self.width / 2) * ppm }
+        let pz = { (z: Float) -> Float in (z + self.depth / 2) * ppm }
         let wellZ = -depth / 2 + 0.010
         let runTop = wellZ + 0.004, runBottom = depth / 2 - 0.008
         let runZ = { (p: Double) -> Float in runTop + Float(p) * (runBottom - runTop) }
         var random = Noise(seed: 11)
-        let half = CGFloat(laneW) * ppm * 0.46
+        let half = laneW * ppm * 0.46
+        var r = [Float](repeating: 0, count: w * h)
+        var g = [Float](repeating: 0, count: w * h)
+        var b = [Float](repeating: 0, count: w * h)
+        // The rows or columns a thing covers, clipped to the picture (empty if it's off it).
+        let span = { (a: Float, b: Float, n: Int) -> Range<Int> in
+            let lo = min(n, max(0, Int(a.rounded(.down))))
+            return lo ..< max(lo, min(n, Int(b.rounded(.up)) + 1))
+        }
+        let rows = { (y0: Float, y1: Float) -> Range<Int> in span(y0, y1, h) }
+        let cols = { (x0: Float, x1: Float) -> Range<Int> in span(x0, x1, w) }
 
         // The loading dyes' fronts: broad, soft, dark bands across every lane,
-        // the first (bromophenol blue) the darker.
+        // the first (bromophenol blue) the darker, a little uneven lane to lane.
         for (d, dye) in dyeRuns.enumerated() {
             let p = dye * runLevel
             guard p <= 1.02 else { continue }
-            let y = pz(runZ(p)), hh = (1.4 + 0.3 * CGFloat(d)) * mm
-            let front = CGRect(x: px(-width / 2) + 2 * mm, y: y - hh, width: px(width / 2) - px(-width / 2) - 4 * mm, height: 2 * hh)
-            Self.softFill(ctx, CGPath(rect: front, transform: nil), color: Self.rgb(0, 1, 0, d == 0 ? 0.5 : 0.3), blur: 1.6 * mm)
+            let y = pz(runZ(p)), sigma = (1.3 + 0.3 * Float(d)) * mm, strength: Float = d == 0 ? 0.55 : 0.32
+            let left = px(-width / 2) + 2 * mm, right = px(width / 2) - 2 * mm
+            for j in rows(y - 4 * sigma, y + 4 * sigma) {
+                let dz = (Float(j) + 0.5 - y) / sigma
+                let along = exp(-0.5 * dz * dz)
+                for i in cols(left, right) {
+                    let x = Float(i) + 0.5
+                    let side = min(1, min(x - left, right - x) / (2 * mm))
+                    let uneven = 0.85 + 0.3 * Noise.value(x / (laneW * ppm) + 3, y / (8 * mm))
+                    g[j * w + i] += strength * along * side * uneven
+                }
+            }
         }
 
         for (i, lane) in lanes.enumerated() {
             let cx = px(laneX(i)), load = Self.loading(i)
-            var lowest = -1.0
             for band in lane.bands {
                 let p = band.run * runLevel
                 guard p <= 1.03 else { continue }
-                lowest = max(lowest, p)
-                let k = min(1, CGFloat(band.intensity) * load)
-                let y = pz(runZ(p))
-                let th = (0.35 + 0.55 * k) * mm * (1 + 0.3 * CGFloat(p))
-                let smile = 0.2 * mm * (1 + CGFloat(p))
-                // No two bands quite the same: ends and thickness waver.
-                let left = cx - half + (random.next() - 0.5) * 0.4 * mm
-                let right = cx + half + (random.next() - 0.5) * 0.4 * mm
-                let lean = (random.next() - 0.5) * 0.2 * th
-                let top = y - th / 2, bottom = y + th / 2 * (0.9 + 0.2 * random.next())
-                let path = CGMutablePath()
-                path.move(to: CGPoint(x: left, y: top + lean))
-                path.addQuadCurve(to: CGPoint(x: right, y: top - lean), control: CGPoint(x: cx, y: top + 2 * smile))
-                path.addLine(to: CGPoint(x: right, y: bottom - lean))
-                path.addQuadCurve(to: CGPoint(x: left, y: bottom + lean), control: CGPoint(x: cx, y: bottom + 2 * smile))
-                path.closeSubpath()
-                // DNA diffuses a little: a soft edge, and a faint wider fringe lower down.
-                Self.softFill(ctx, path, color: Self.rgb(1, 0, 0, 0.25 * k), blur: (0.3 + 0.6 * CGFloat(p)) * mm)
-                Self.softFill(ctx, path, color: Self.rgb(1, 0, 0, k), blur: 0.15 * mm)
-            }
-            if !lane.isLadder, lowest > 0 {
-                let top = pz(wellZ) + 1.5 * mm, bottom = pz(runZ(lowest))
-                let smear = CGRect(x: cx - half * 0.85, y: top, width: half * 1.7, height: max(0, bottom - top))
-                Self.softFill(ctx, CGPath(rect: smear, transform: nil), color: Self.rgb(1, 0, 0, 0.012 * load),
-                              blur: 0.9 * mm)
+                let k = min(1, Float(band.intensity) * load)
+                let y0 = pz(runZ(p))
+                // How far the DNA has spread: more for a longer run, a touch more when there's more of it.
+                let sigma = (0.20 + 0.22 * k) * mm * (1 + 0.7 * Float(p))
+                let smile = (0.12 + 0.12 * random.next()) * mm * (1 + Float(p))
+                let lean = (random.next() - 0.5) * 0.3 * mm
+                let reach = half * (0.97 + 0.05 * random.next())
+                let tail = max(0, k - 0.45) * 0.5
+                let tailLength = (0.6 + 1.6 * k) * mm
+                let speckle = random.next() * 100
+                let above = y0 - 4 * sigma - (tail > 0 ? 4 * tailLength : 0), below = y0 + 4 * sigma
+                for row in rows(above, below) {
+                    let yy = Float(row) + 0.5
+                    for col in cols(cx - reach - 0.4 * mm, cx + reach + 0.4 * mm) {
+                        let xx = Float(col) + 0.5
+                        let u = (xx - cx) / reach
+                        // The ends lag behind the middle, and the band leans a little.
+                        let centre = y0 - smile * u * u + lean * u
+                        let dz = yy - centre
+                        var along = exp(-0.5 * (dz / sigma) * (dz / sigma))
+                        along += 0.15 * exp(-0.5 * (dz / (3 * sigma)) * (dz / (3 * sigma)))
+                        if tail > 0, dz < 0 { along += tail * exp(dz / tailLength) }
+                        let across = min(1, max(0, (reach - abs(xx - cx)) / (0.3 * mm))) * (0.86 + 0.14 * (1 - u * u))
+                        let grain = 0.88 + 0.24 * Noise.value(xx / (0.35 * mm) + speckle, yy / (0.35 * mm))
+                        r[row * w + col] += k * along * across * grain
+                    }
+                }
             }
             // The well: its cavity, and its walls (half blue) which catch the light.
-            let well = CGRect(x: cx - half * 0.95, y: pz(wellZ) - 0.9 * mm, width: 1.9 * half, height: 1.8 * mm)
-            ctx.setFillColor(Self.rgb(0, 0, 1))
-            ctx.fill(well)
-            ctx.setStrokeColor(Self.rgb(0, 0, 0.5))
-            ctx.setLineWidth(0.3 * mm)
-            ctx.stroke(well)
+            let wx0 = cx - half * 0.95, wx1 = cx + half * 0.95
+            let wy0 = pz(wellZ) - 0.9 * mm, wy1 = pz(wellZ) + 0.9 * mm
+            let wall = 0.3 * mm
+            for row in rows(wy0 - wall, wy1 + wall) {
+                let yy = Float(row) + 0.5
+                for col in cols(wx0 - wall, wx1 + wall) {
+                    let xx = Float(col) + 0.5
+                    let inside = xx > wx0 && xx < wx1 && yy > wy0 && yy < wy1
+                    b[row * w + col] = inside ? 1 : 0.5
+                }
+            }
         }
 
-        guard let data = ctx.data else { return nil }
+        var bytes = [UInt8](repeating: 255, count: w * h * 4)
+        for i in 0..<(w * h) {
+            bytes[i * 4] = UInt8(min(255, max(0, r[i] * 255)))
+            bytes[i * 4 + 1] = UInt8(min(255, max(0, g[i] * 255)))
+            bytes[i * 4 + 2] = UInt8(min(255, max(0, b[i] * 255)))
+        }
         let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: w, height: h, mipmapped: false)
         desc.usage = [.shaderRead]
         guard let texture = device.makeTexture(descriptor: desc) else { return nil }
-        texture.replace(region: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0, withBytes: data, bytesPerRow: ctx.bytesPerRow)
+        bytes.withUnsafeBytes { raw in
+            texture.replace(region: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0, withBytes: raw.baseAddress!, bytesPerRow: w * 4)
+        }
         return texture
     }
 
