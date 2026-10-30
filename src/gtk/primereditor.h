@@ -114,6 +114,7 @@ private:
     bool m_restoring = false;
     bool m_filtering = false;
     gint64 m_lastTyping = 0;
+    bool m_fitRun = false;   // the last change was Fit, so the next one joins it
 };
 
 } // namespace oc::gtk

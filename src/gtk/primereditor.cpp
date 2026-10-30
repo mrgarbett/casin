@@ -783,15 +783,35 @@ void PrimerEditor::fitToTm()
         return;
     }
     const std::string t = typed();
+    // Only the bases after the last insert anneal here, even where an
+    // insert's own bases happen to match the template: Fit never cuts into it.
+    PrimerSite site = *m_site;
+    int insertsEnd = 0;
+    for (const Mark &m : marks())
+        insertsEnd = std::max(insertsEnd, m.start + m.length);
+    const int over = site.binding.length() - (int(t.size()) - insertsEnd);
+    if (over > 0) {
+        if (site.strand == Strand::Reverse)
+            site.binding.end -= over;
+        else
+            site.binding.start += over;
+    }
+    if (site.binding.length() <= 0) {
+        gtk_widget_error_bell(m_root);
+        return;
+    }
     PrimerSite fitted;
-    const std::string result = fitAnnealingToTm(m_doc->sequence(), t, *m_site,
+    const std::string result = fitAnnealingToTm(m_doc->sequence(), t, site,
                                                 gtk_spin_button_get_value(GTK_SPIN_BUTTON(m_tm)), &fitted);
     const int len = fitted.binding.length();
     if (len <= 0 || int(result.size()) < len)
         return;
-    const int old = m_site->binding.length();
-    noteUndo(false);
+    const int old = site.binding.length();
+    // Stepping the Tm fits again each step: one undo step for the run.
+    if (!m_fitRun)
+        noteUndo(false);
     replaceBases(int(t.size()) - old, old, result.substr(result.size() - size_t(len)));
+    m_fitRun = true;
 }
 
 // ---- editing the box ---------------------------------------------------------------
@@ -948,6 +968,7 @@ void PrimerEditor::noteUndo(bool typing)
     const gint64 now = g_get_monotonic_time();
     const bool joins = typing && m_lastTyping > 0 && now - m_lastTyping < 1000000;
     m_lastTyping = typing ? now : 0;
+    m_fitRun = false;
     if (joins)
         return;
     m_undo.push_back(snapshot());
@@ -964,6 +985,7 @@ void PrimerEditor::undo()
     restore(m_undo.back());
     m_undo.pop_back();
     m_lastTyping = 0;
+    m_fitRun = false;
 }
 
 void PrimerEditor::redo()
@@ -976,6 +998,7 @@ void PrimerEditor::redo()
     restore(m_redo.back());
     m_redo.pop_back();
     m_lastTyping = 0;
+    m_fitRun = false;
 }
 
 void PrimerEditor::tintThreePrime(bool good)
