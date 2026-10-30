@@ -63,7 +63,7 @@ final class Gel3DView: NSView, MTKViewDelegate {
     private var accum: [MTLTexture] = []
     private var bandMap: MTLTexture?
     private var samples: UInt32 = 0
-    private var frame: UInt32 = 0
+    private var frameIndex: UInt32 = 0
     /// Enough for a clean picture; then the GPU rests until something changes.
     private let maxSamples: UInt32 = 256
 
@@ -268,7 +268,7 @@ final class Gel3DView: NSView, MTKViewDelegate {
         u.slab = SIMD4<Float>(width, depth, thick, 0.6)
         u.emitter = SIMD4<Float>(width / 2 + 0.13, depth / 2 + 0.11, 0.025, 1.0)
         u.look = SIMD4<Float>(1.15, 0.045, 46, 0.75)
-        u.counts = SIMD4<UInt32>(frame, samples, UInt32(w), UInt32(h))
+        u.counts = SIMD4<UInt32>(frameIndex, samples, UInt32(w), UInt32(h))
         return u
     }
 
@@ -290,10 +290,10 @@ final class Gel3DView: NSView, MTKViewDelegate {
             encoder.endEncoding()
             accum.swapAt(0, 1)
             samples += 1
-            frame &+= 1
+            frameIndex &+= 1
         }
         if let encoder = buffer.makeComputeCommandEncoder() {
-            u.counts = SIMD4<UInt32>(frame, samples, UInt32(w), UInt32(h))
+            u.counts = SIMD4<UInt32>(frameIndex, samples, UInt32(w), UInt32(h))
             encoder.setComputePipelineState(resolve)
             encoder.setTexture(accum[0], index: 0)
             encoder.setTexture(drawable.texture, index: 1)
