@@ -231,13 +231,12 @@ enum UISmokeTest {
                 }
                 GelWizard.setRun(1, stain: .ethidiumUV)
             }),
-            ("9k-gel-uv-box", { GelWizard.showLook(1) }),
             ("9k-gel-3d", {
                 // The 3D tab builds its RealityKit scene on first use.
                 if let wizard = GelWizard.openWindows.first {
-                    capture(wizard, to: out.appendingPathComponent("9k-gel-uv-box-window.png"))
+                    capture(wizard, to: out.appendingPathComponent("9k-gel-imager-window.png"))
                 }
-                GelWizard.showLook(2)
+                GelWizard.showLook(1)
                 guard GelWizard.showing3D else {
                     FileHandle.standardError.write("ui-smoke: the gel's 3D tab didn't open\n".data(using: .utf8)!)
                     exit(8)

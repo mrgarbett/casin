@@ -7,8 +7,6 @@
 // well; the run slider stops the whole gel part way. The core says where each
 // band runs and how bright it is (oc_gel_*); this view only draws.
 import AppKit
-import CoreImage
-import CoreImage.CIFilterBuiltins
 import QuartzCore
 
 struct GelBandModel {
@@ -30,18 +28,12 @@ struct GelLaneModel {
 /// How the gel was stained and photographed.
 enum GelStain: Int, CaseIterable {
     case ethidiumUV = 0, sybrSafe = 1, blackAndWhite = 2
-    /// A phone photo of the gel on the UV box: violet light everywhere, the
-    /// box's bars through a clear slab, smeared lanes, blooming bands.
-    case transilluminator = 3
-
-    var isPhoto: Bool { self == .transilluminator }
 
     var title: String {
         switch self {
         case .ethidiumUV: return "EtBr · UV"
         case .sybrSafe: return "SYBR Safe · Blue Light"
         case .blackAndWhite: return "Black & White"
-        case .transilluminator: return "On the UV Box (photo)"
         }
     }
 
@@ -55,7 +47,6 @@ enum GelStain: Int, CaseIterable {
         case .ethidiumUV: return Self.rgb(0.20, 0.10, 0.22)
         case .sybrSafe: return Self.rgb(0.06, 0.12, 0.16)
         case .blackAndWhite: return Self.rgb(0.09, 0.09, 0.09)
-        case .transilluminator: return Self.rgb(0.42, 0.38, 0.92)
         }
     }
     var gelBottom: NSColor {
@@ -63,7 +54,6 @@ enum GelStain: Int, CaseIterable {
         case .ethidiumUV: return Self.rgb(0.11, 0.05, 0.13)
         case .sybrSafe: return Self.rgb(0.03, 0.07, 0.09)
         case .blackAndWhite: return Self.rgb(0.04, 0.04, 0.04)
-        case .transilluminator: return Self.rgb(0.30, 0.24, 0.80)
         }
     }
     /// The middle of a band, and the glow around it.
@@ -72,7 +62,6 @@ enum GelStain: Int, CaseIterable {
         case .ethidiumUV: return Self.rgb(1.0, 0.90, 0.82)
         case .sybrSafe: return Self.rgb(0.90, 1.0, 0.80)
         case .blackAndWhite: return .white
-        case .transilluminator: return Self.rgb(1.0, 0.82, 0.62)
         }
     }
     var glow: NSColor {
@@ -80,13 +69,12 @@ enum GelStain: Int, CaseIterable {
         case .ethidiumUV: return Self.rgb(1.0, 0.42, 0.22)
         case .sybrSafe: return Self.rgb(0.35, 1.0, 0.45)
         case .blackAndWhite: return Self.rgb(0.85, 0.85, 0.85)
-        case .transilluminator: return Self.rgb(1.0, 0.32, 0.52)
         }
     }
     /// The light box's tubes show through the gel as faint stripes.
     var hasTubes: Bool { self != .blackAndWhite }
     /// A camera's grain: stronger on a black-and-white print.
-    var grain: CGFloat { self == .blackAndWhite || self == .transilluminator ? 0.07 : 0.035 }
+    var grain: CGFloat { self == .blackAndWhite ? 0.07 : 0.035 }
 }
 
 final class GelView: NSView {
@@ -237,67 +225,13 @@ final class GelView: NSView {
     // MARK: Drawing
 
     override func draw(_ dirtyRect: NSRect) {
-        // The photo look goes through the GPU for its bloom; the bubble stays crisp on top.
-        if stain.isPhoto, let photo = photograph() {
-            photo.draw(in: bounds, from: .zero, operation: .copy, fraction: 1, respectFlipped: true, hints: nil)
-        } else {
-            drawScene()
-        }
-        if let h = hover, let b = h.band, h.lane < lanes.count, b < lanes[h.lane].bands.count {
-            drawCallout(lane: h.lane, band: b, geometry)
-        }
-    }
-
-    /// Core Image renders on the GPU (Metal); one context, reused.
-    private static let imageContext = CIContext(options: [.cacheIntermediates: false])
-
-    /// The scene drawn offscreen, then given the light a camera sees on the UV
-    /// box: the bands and the box's bars bloom, and the corners fall off.
-    private func photograph() -> NSImage? {
-        let scale = window?.backingScaleFactor ?? 2
-        let w = Int(bounds.width * scale), h = Int(bounds.height * scale)
-        guard w > 0, h > 0,
-              let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: w, pixelsHigh: h, bitsPerSample: 8,
-                                         samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-                                         colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
-              let bitmap = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
-        rep.size = bounds.size
-        // Draw as this flipped view does: y down from the top.
-        let cg = bitmap.cgContext
-        cg.translateBy(x: 0, y: CGFloat(h))
-        cg.scaleBy(x: scale, y: -scale)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(cgContext: cg, flipped: true)
-        drawScene()
-        NSGraphicsContext.restoreGraphicsState()
-
-        guard let input = CIImage(bitmapImageRep: rep) else { return nil }
-        let bloom = CIFilter.bloom()
-        bloom.inputImage = input
-        bloom.radius = Float(14 * scale)
-        bloom.intensity = 0.9
-        let vignette = CIFilter.vignette()
-        vignette.inputImage = bloom.outputImage?.cropped(to: input.extent)
-        vignette.radius = Float(max(bounds.width, bounds.height) * scale)
-        vignette.intensity = 0.6
-        guard let output = vignette.outputImage?.cropped(to: input.extent),
-              let image = Self.imageContext.createCGImage(output, from: input.extent) else { return nil }
-        return NSImage(cgImage: image, size: bounds.size)
-    }
-
-    /// Everything but the pointer's bubble.
-    private func drawScene() {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        // The imager's dark box, a little lighter in the middle.
+        let backdrop = NSGradient(colors: [NSColor(white: 0.13, alpha: 1), NSColor(white: 0.03, alpha: 1)])
+        backdrop?.draw(in: bounds, relativeCenterPosition: NSPoint(x: 0, y: 0.1))
+
         let g = geometry
-        if stain.isPhoto {
-            drawLightBox()
-            drawClearSlab(g)
-        } else {
-            // The imager's dark box, a little lighter in the middle.
-            let backdrop = NSGradient(colors: [NSColor(white: 0.13, alpha: 1), NSColor(white: 0.03, alpha: 1)])
-            backdrop?.draw(in: bounds, relativeCenterPosition: NSPoint(x: 0, y: 0.1))
-            drawSlab(g)
-        }
+        drawSlab(g)
 
         let nameFont = NSFont.systemFont(ofSize: min(16, 11 * g.scale), weight: .semibold)
         for (i, lane) in lanes.enumerated() {
@@ -312,20 +246,12 @@ final class GelView: NSView {
             let nameColor = i == selectedLane ? NSColor.white : NSColor.white.withAlphaComponent(0.6)
             drawText(lane.name, font: nameFont, color: nameColor,
                      centeredAt: NSPoint(x: x + g.laneW / 2, y: g.slab.minY - 13 * g.scale))
-            let well = NSRect(x: x + 2, y: g.slab.minY + 14 * g.scale, width: g.laneW - 4, height: 8 * min(1.5, g.scale))
-            if stain.isPhoto { drawEmbossedWell(well) } else { drawWell(well) }
+            drawWell(NSRect(x: x + 2, y: g.slab.minY + 14 * g.scale, width: g.laneW - 4, height: 8 * min(1.5, g.scale)))
 
             let far = reach(i)
             let fadeIn = CGFloat(min(1, (i < progress.count ? progress[i] : 1) * 4))
-            // On the UV box, a loaded lane glows faintly from its well down to its bands.
-            if stain.isPhoto, !lane.isLadder, let lowest = lane.bands.map({ $0.run }).max() {
-                let bottom = g.y(min(lowest, 1.03 / Double(max(0.01, far))), far)
-                let smear = NSRect(x: x + 4, y: well.maxY, width: g.laneW - 8, height: max(0, bottom - well.maxY))
-                NSGradient(starting: stain.glow.withAlphaComponent(0.05), ending: stain.glow.withAlphaComponent(0.22 * fadeIn))?
-                    .draw(in: NSBezierPath(roundedRect: smear, xRadius: 3, yRadius: 3), angle: 90)
-            }
-            // The loading dyes, as faint shadows in the gel (lost in the UV box's glare).
-            for dye in stain.isPhoto ? [] : dyeRuns {
+            // The loading dyes, as faint shadows in the gel.
+            for dye in dyeRuns {
                 let p = CGFloat(dye) * far
                 let y = g.y(dye, far)
                 drawDye(NSRect(x: x + 4, y: y - 3, width: g.laneW - 8, height: 6), alpha: 0.22 * onGel(p) * fadeIn)
@@ -364,69 +290,9 @@ final class GelView: NSView {
             drawText("Add a lane to run a sample", font: .systemFont(ofSize: 13),
                      color: NSColor.white.withAlphaComponent(0.5), centeredAt: NSPoint(x: g.slab.midX, y: g.slab.midY))
         }
-    }
-
-    /// The UV box: deep violet, with the tubes' bright bars running across it.
-    private func drawLightBox() {
-        Self.violet(0.16, 0.06, 0.55).setFill()
-        bounds.fill()
-        drawBars(in: bounds, offset: 0, strength: 1)
-    }
-
-    private static func violet(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat = 1) -> NSColor {
-        NSColor(srgbRed: r, green: g, blue: b, alpha: a)
-    }
-
-    /// The tubes' bars, soft-edged; `offset` shifts them (as the slab bends the light).
-    private func drawBars(in rect: NSRect, offset: CGFloat, strength: CGFloat) {
-        let bar = NSGradient(colors: [Self.violet(0.55, 0.35, 1.0, 0), Self.violet(0.62, 0.42, 1.0, 0.75 * strength),
-                                      Self.violet(0.70, 0.50, 1.0, 0.85 * strength), Self.violet(0.62, 0.42, 1.0, 0.75 * strength),
-                                      Self.violet(0.55, 0.35, 1.0, 0)])
-        let period: CGFloat = 150
-        var y = bounds.minY - period + 40 + offset
-        while y < rect.maxY {
-            let band = NSRect(x: rect.minX, y: y, width: rect.width, height: 90).intersection(rect)
-            if !band.isEmpty { bar?.draw(in: NSRect(x: rect.minX, y: y, width: rect.width, height: 90), angle: 90) }
-            y += period
+        if let h = hover, let b = h.band, h.lane < lanes.count, b < lanes[h.lane].bands.count {
+            drawCallout(lane: h.lane, band: b, g)
         }
-    }
-
-    /// The clear slab on the box: lighter and bluer than the box, the bars
-    /// shifted where it bends the light, thick bright edges, a little grain.
-    private func drawClearSlab(_ g: Geometry) {
-        let slab = g.slab.insetBy(dx: -10, dy: -14)
-        let path = NSBezierPath(roundedRect: slab, xRadius: 6, yRadius: 6)
-        NSGraphicsContext.saveGraphicsState()
-        path.addClip()
-        Self.violet(0.36, 0.30, 0.90, 0.55).setFill()
-        slab.fill()
-        drawBars(in: slab, offset: 10, strength: 0.6)
-        // Agarose scatters a little light: a pale haze, thicker toward the bottom.
-        NSGradient(starting: NSColor.white.withAlphaComponent(0.05), ending: NSColor.white.withAlphaComponent(0.12))?
-            .draw(in: slab, angle: 90)
-        NSColor.white.withAlphaComponent(stain.grain).setFill()
-        for p in Self.grainPoints {
-            NSRect(x: slab.minX + p.x * slab.width, y: slab.minY + p.y * slab.height, width: 1, height: 1).fill()
-        }
-        NSGraphicsContext.restoreGraphicsState()
-        // Its cut edges catch the light: a bright rim, a thicker lit lip along the bottom.
-        let rim = NSBezierPath(roundedRect: slab.insetBy(dx: 1.5, dy: 1.5), xRadius: 5, yRadius: 5)
-        rim.lineWidth = 3
-        Self.violet(0.80, 0.75, 1.0, 0.55).setStroke()
-        rim.stroke()
-        Self.violet(0.85, 0.80, 1.0, 0.45).setFill()
-        NSBezierPath(roundedRect: NSRect(x: slab.minX + 4, y: slab.maxY - 9, width: slab.width - 8, height: 6),
-                     xRadius: 3, yRadius: 3).fill()
-    }
-
-    /// A well on the UV box: an outlined slot, its walls catching the light.
-    private func drawEmbossedWell(_ well: NSRect) {
-        let path = NSBezierPath(roundedRect: well, xRadius: well.height / 2, yRadius: well.height / 2)
-        Self.violet(0.20, 0.12, 0.60, 0.55).setFill()
-        path.fill()
-        path.lineWidth = 1.5
-        Self.violet(0.85, 0.80, 1.0, 0.7).setStroke()
-        path.stroke()
     }
 
     /// The slab on the light box: a cut edge that catches the light, a slight

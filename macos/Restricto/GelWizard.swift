@@ -109,7 +109,7 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
     private let agarosePopup = NSPopUpButton()
     private let stainPopup = NSPopUpButton()
     /// EXPERIMENTAL: three ways to look at the same gel.
-    private let lookTabs = NSSegmentedControl(labels: ["Imager", "UV Box", "3D"], trackingMode: .selectOne,
+    private let lookTabs = NSSegmentedControl(labels: ["Imager", "3D"], trackingMode: .selectOne,
                                               target: nil, action: nil)
     /// The stains the Imager tab offers, in the popup's order.
     private static let imagerStains: [GelStain] = [.ethidiumUV, .sybrSafe, .blackAndWhite]
@@ -361,8 +361,7 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         lookTabs.action = #selector(lookChanged(_:))
         lookTabs.selectedSegment = 0
         lookTabs.setToolTip("The gel as an imager prints it", forSegment: 0)
-        lookTabs.setToolTip("The gel as a photo on the UV box, through the GPU", forSegment: 1)
-        lookTabs.setToolTip("The gel in 3D: drag to turn it, scroll to come closer", forSegment: 2)
+        lookTabs.setToolTip("The gel in 3D: drag to turn it, scroll to come closer", forSegment: 1)
         let tabsPill = Glass.capsule(around: lookTabs, height: 30)
         for v in [gelView, pill, tabsPill] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
@@ -430,7 +429,7 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         gelView.selectedLane = selected
         gelView.setLanes(models, running: running)
         self.models = models
-        gel3D?.show(models, runLevel: runSlider.doubleValue)
+        gel3D?.show(models, runLevel: runSlider.doubleValue, dyeRuns: gelView.dyeRuns)
         fillSidebar()
     }
 
@@ -628,15 +627,14 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         if lookTabs.selectedSegment == 0 { gelView.stain = imagerStain }
     }
 
-    /// Imager: the flat imager print, in the chosen stain. UV Box: the same
-    /// gel as a photo on the UV box. 3D: a lit scene to turn around.
+    /// Imager: the flat imager print, in the chosen stain. 3D: the gel on the
+    /// UV box, to turn around.
     @objc private func lookChanged(_ sender: Any?) {
         let look = lookTabs.selectedSegment
-        gelView.stain = look == 1 ? .transilluminator : imagerStain
         stainPopup.isEnabled = look == 0
         // Copy Image takes the 2D gel; the 3D scene isn't copied yet.
-        copyButton.isEnabled = look != 2
-        if look == 2 && gel3D == nil {
+        copyButton.isEnabled = look != 1
+        if look == 1 && gel3D == nil {
             let view = Gel3DView(frame: stage.bounds)
             view.translatesAutoresizingMaskIntoConstraints = false
             stage.addSubview(view, positioned: .above, relativeTo: gelView)
@@ -647,10 +645,10 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
                 view.trailingAnchor.constraint(equalTo: stage.trailingAnchor),
             ])
             gel3D = view
-            view.show(models, runLevel: runSlider.doubleValue)
+            view.show(models, runLevel: runSlider.doubleValue, dyeRuns: gelView.dyeRuns)
         }
-        gel3D?.isHidden = look != 2
-        gelView.isHidden = look == 2
+        gel3D?.isHidden = look != 1
+        gelView.isHidden = look == 1
     }
 
     @objc private func agaroseChanged(_ sender: Any?) {
@@ -662,7 +660,7 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
 
     @objc private func runChanged(_ sender: Any?) {
         gelView.runLevel = runSlider.doubleValue
-        if gel3D?.isHidden == false { gel3D?.show(models, runLevel: runSlider.doubleValue) }
+        if gel3D?.isHidden == false { gel3D?.show(models, runLevel: runSlider.doubleValue, dyeRuns: gelView.dyeRuns) }
         runLabel.stringValue = runSlider.doubleValue >= 0.995 ? "Full run"
             : "\(Int((runSlider.doubleValue * 100).rounded()))% run"
     }
@@ -681,11 +679,11 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         NSPasteboard.general.clearContents()
         NSPasteboard.general.writeObjects([image])
         // A moment's tick on the button says it worked.
+        // Only the image changes: setting an image-only button's title draws
+        // the title too, and the pill grows.
         copyButton.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Copied")
-        copyButton.title = "Copied"
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             self?.copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy Image")
-            self?.copyButton.title = "Copy Image"
         }
     }
 
@@ -810,7 +808,7 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         w.stainPopup.selectItem(at: imagerStains.firstIndex(of: stain) ?? 0)
         w.stainChanged(nil)
     }
-    /// As clicking tab `look` (0 Imager, 1 UV Box, 2 3D) over the gel.
+    /// As clicking tab `look` (0 Imager, 1 3D) over the gel.
     static func showLook(_ look: Int) {
         guard let w = visible.first else { return }
         w.lookTabs.selectedSegment = look
