@@ -46,7 +46,9 @@ public:
         Sequence seq;       // as last seen
         std::vector<std::string> enzymes;
         int ladder = -1;    // which of the common ladders, or -1 for a sample
+        bool empty = false; // nothing loaded: a well left free
         bool isLadder() const { return ladder >= 0; }
+        bool isSample() const { return !isLadder() && !empty; }
         // What decides the bands: when it changes, the lane runs again.
         std::string key() const;
     };

@@ -83,6 +83,8 @@ GtkStringList *stringList(const std::vector<std::string> &items)
 
 std::string GelWizard::Lane::key() const
 {
+    if (empty)
+        return "empty";
     if (isLadder())
         return "ladder " + std::to_string(ladder);
     return std::to_string(reinterpret_cast<uintptr_t>(doc)) + "|" + std::to_string(seq.length()) + "|"
@@ -481,7 +483,7 @@ std::vector<std::string> GelWizard::laneNames() const
     std::vector<std::string> out;
     int n = 0;
     for (const Lane &lane : m_lanes)
-        out.push_back(lane.isLadder() ? "L" : std::to_string(++n));
+        out.push_back(lane.isLadder() ? "L" : lane.empty ? "–" : std::to_string(++n));
     return out;
 }
 
@@ -490,7 +492,7 @@ void GelWizard::refresh()
 {
     // Lanes follow their sequences while those are open.
     for (Lane &lane : m_lanes)
-        if (Document *d = !lane.isLadder() ? live(lane) : nullptr)
+        if (Document *d = lane.isSample() ? live(lane) : nullptr)
             lane.seq = d->sequence();
     const double pc = percent();
     // Bromophenol blue runs with ~300 bp fragments, xylene cyanol with ~4 kb.
@@ -501,7 +503,9 @@ void GelWizard::refresh()
     for (size_t i = 0; i < m_lanes.size(); ++i) {
         const Lane &lane = m_lanes[i];
         view::GelLane l{names[i], {}, {}, lane.isLadder(), false, {}};
-        if (lane.isLadder()) {
+        if (lane.empty) {
+            // A free well: nothing runs.
+        } else if (lane.isLadder()) {
             l.bands = ladderAt(lane.ladder).bands;
             l.bright = ladderAt(lane.ladder).bright;
         } else {
@@ -521,8 +525,8 @@ void GelWizard::refresh()
                 std::sort(l.bands.rbegin(), l.bands.rend());
             }
         }
-        m_fragments.push_back(lane.isLadder() ? std::vector<Fragment>{} : fragmentsOf(lane));
-        GelLaneModel m{names[i], {}, lane.isLadder()};
+        m_fragments.push_back(lane.isSample() ? fragmentsOf(lane) : std::vector<Fragment>{});
+        GelLaneModel m{lane.empty ? std::string() : names[i], {}, lane.isLadder()};
         for (size_t j = 0; j < l.bands.size(); ++j) {
             const int bp = l.bands[j];
             const bool reference = std::find(l.bright.begin(), l.bright.end(), bp) != l.bright.end();
@@ -583,22 +587,26 @@ void GelWizard::fillSequences()
     m_listed.erase(std::remove_if(m_listed.begin(), m_listed.end(),
                                   [](const GelSource &s) { return s.doc->isEmpty(); }),
                    m_listed.end());
-    if (!lane.isLadder() && !live(lane))
+    if (lane.isSample() && !live(lane))
         m_listed.insert(m_listed.begin(), {lane.doc, lane.name});
     std::vector<std::string> titles;
     guint pick = 0;
     for (size_t i = 0; i < m_listed.size(); ++i) {
         const GelSource &s = m_listed[i];
-        const int length = s.doc == lane.doc && !lane.isLadder() ? lane.seq.length() : s.doc->sequence().length();
+        const int length = s.doc == lane.doc && lane.isSample() ? lane.seq.length() : s.doc->sequence().length();
         titles.push_back((s.name.empty() ? std::string("Untitled") : s.name) + "  ·  " + view::withThousands(length)
                          + " bp");
-        if (s.doc == lane.doc && !lane.isLadder())
+        if (s.doc == lane.doc && lane.isSample())
             pick = guint(i);
     }
     for (size_t i = 0; i < commonLadders().size(); ++i)
         titles.push_back("Ladder  ·  " + commonLadders()[i].name);
+    // Last, a well left free (a gap between samples, as gels are often loaded).
+    titles.push_back("Nothing  ·  an empty well");
     if (lane.isLadder())
         pick = guint(m_listed.size() + size_t(lane.ladder));
+    if (lane.empty)
+        pick = guint(titles.size() - 1);
     const bool filling = m_filling;
     m_filling = true;
     GtkStringList *model = stringList(titles);
@@ -617,10 +625,12 @@ void GelWizard::fillSidebar()
         const Lane &lane = m_lanes[i];
         GtkWidget *row = adw_action_row_new();
         adw_preferences_row_set_use_markup(ADW_PREFERENCES_ROW(row), FALSE);
-        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), lane.isLadder()     ? ladderAt(lane.ladder).name.c_str()
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), lane.empty          ? "Empty"
+                                                                : lane.isLadder()     ? ladderAt(lane.ladder).name.c_str()
                                                                 : lane.name.empty() ? "Untitled"
                                                                                     : lane.name.c_str());
-        adw_action_row_set_subtitle(ADW_ACTION_ROW(row), lane.isLadder()         ? "Ladder"
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(row), lane.empty             ? "Nothing loaded"
+                                                         : lane.isLadder()         ? "Ladder"
                                                          : lane.enzymes.empty() ? "Uncut"
                                                                                 : joined(lane.enzymes, " + ").c_str());
         GtkWidget *badge = gtk_label_new(names[i].c_str());
@@ -640,12 +650,14 @@ void GelWizard::fillSidebar()
     // The selected lane: what's loaded, and a sample's enzymes.
     const Lane &lane = m_lanes[size_t(m_selected)];
     adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(m_laneGroup),
-                                    lane.isLadder() ? "Ladder" : ("Lane " + names[size_t(m_selected)]).c_str());
+                                    lane.empty      ? "Empty Well"
+                                    : lane.isLadder() ? "Ladder"
+                                                      : ("Lane " + names[size_t(m_selected)]).c_str());
     adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(m_laneGroup),
-                                          lane.isLadder() ? nullptr : "Enzymes in one lane cut together.");
+                                          lane.isSample() ? "Enzymes in one lane cut together." : nullptr);
     fillSequences();
-    gtk_widget_set_visible(m_enzymeEntry, !lane.isLadder());
-    if (lane.isLadder())
+    gtk_widget_set_visible(m_enzymeEntry, lane.isSample());
+    if (!lane.isSample())
         gtk_widget_set_visible(m_enzymeNote, FALSE);
 
     gtk_flow_box_remove_all(GTK_FLOW_BOX(m_chips));
@@ -665,11 +677,11 @@ void GelWizard::fillSidebar()
                          this);
         gtk_flow_box_append(GTK_FLOW_BOX(m_chips), chip);
     }
-    gtk_widget_set_visible(m_chips, !lane.isLadder() && !lane.enzymes.empty());
+    gtk_widget_set_visible(m_chips, lane.isSample() && !lane.enzymes.empty());
 
     // Enzymes that cut this sequence, the fewest cuts first.
     std::map<std::string, int> cuts;
-    if (!lane.isLadder())
+    if (lane.isSample())
         for (const CutSite &s : findSites(lane.seq, commonEnzymes()))
             if (s.enzyme)
                 ++cuts[s.enzyme->name];
@@ -698,7 +710,7 @@ void GelWizard::fillSidebar()
     gtk_list_box_remove_all(GTK_LIST_BOX(m_fragmentList));
     const std::vector<Fragment> &frags = size_t(m_selected) < m_fragments.size() ? m_fragments[size_t(m_selected)]
                                                                                  : std::vector<Fragment>{};
-    gtk_widget_set_visible(m_fragmentGroup, !lane.isLadder());
+    gtk_widget_set_visible(m_fragmentGroup, lane.isSample());
     adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(m_fragmentGroup),
                                     frags.size() == 1 ? "1 Fragment"
                                                       : (std::to_string(frags.size()) + " Fragments").c_str());
@@ -742,8 +754,8 @@ void GelWizard::addLane()
     // After the lane being edited: the same sequence, uncut, ready for an
     // enzyme (a ladder's neighbour takes the first sample's sequence).
     Lane copy = m_lanes[size_t(m_selected)];
-    if (copy.isLadder()) {
-        const auto sample = std::find_if(m_lanes.begin(), m_lanes.end(), [](const Lane &l) { return !l.isLadder(); });
+    if (!copy.isSample()) {
+        const auto sample = std::find_if(m_lanes.begin(), m_lanes.end(), [](const Lane &l) { return l.isSample(); });
         if (sample != m_lanes.end()) {
             copy = *sample;
         } else {
@@ -752,6 +764,7 @@ void GelWizard::addLane()
     }
     copy.enzymes.clear();
     copy.ladder = -1;
+    copy.empty = false;
     m_lanes.insert(m_lanes.begin() + m_selected + 1, copy);
     ++m_selected;
     // Focus stays on +: moving it to the enzyme box would scroll the sidebar
@@ -783,7 +796,7 @@ void GelWizard::moveLane(int step)
 void GelWizard::addEnzyme(const std::string &typed)
 {
     Lane &lane = m_lanes[size_t(m_selected)];
-    if (lane.isLadder())
+    if (!lane.isSample())
         return;
     // Several at once, by commas or spaces; names are matched ignoring case.
     // Only known enzymes are added; anything else is named in the note.
@@ -832,16 +845,26 @@ void GelWizard::sequenceChosen()
 {
     const guint i = adw_combo_row_get_selected(ADW_COMBO_ROW(m_sequence));
     Lane &lane = m_lanes[size_t(m_selected)];
-    if (i >= m_listed.size()) {
+    if (i == GTK_INVALID_LIST_POSITION)
+        return;
+    if (i >= m_listed.size() + commonLadders().size()) {
+        // The last item: leave the well empty.
+        if (lane.empty)
+            return;
+        lane.empty = true;
+        lane.ladder = -1;
+        lane.enzymes.clear();
+    } else if (i >= m_listed.size()) {
         const int ladder = int(i - m_listed.size());
-        if (ladder >= int(commonLadders().size()) || lane.ladder == ladder)
+        if (lane.ladder == ladder)
             return;
         lane.ladder = g_ladder = ladder;
+        lane.empty = false;
         lane.name = ladderAt(ladder).name;
         lane.enzymes.clear();
     } else {
         const GelSource &s = m_listed[i];
-        if (s.doc == lane.doc && !lane.isLadder())
+        if (s.doc == lane.doc && lane.isSample())
             return;
         // The enzymes stay: the same digest of another sequence (one that
         // doesn't cut it leaves it uncut).
@@ -849,6 +872,7 @@ void GelWizard::sequenceChosen()
         lane.name = s.name;
         lane.seq = s.doc->sequence();
         lane.ladder = -1;
+        lane.empty = false;
     }
     // Choosing from the list mustn't refill it while it's still open.
     if (!m_refreshIdle)
@@ -935,6 +959,8 @@ void GelWizard::copyImage()
     const std::vector<std::string> names = laneNames();
     for (size_t i = 0; i < m_lanes.size(); ++i) {
         const Lane &lane = m_lanes[i];
+        if (lane.empty)
+            continue;
         legend.push_back({names[i], lane.isLadder() ? ladderAt(lane.ladder).name
                                                     : (lane.name.empty() ? std::string("Untitled") : lane.name) + " · "
                                                           + (lane.enzymes.empty() ? "uncut" : joined(lane.enzymes, " + "))});
