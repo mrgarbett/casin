@@ -810,5 +810,12 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         w.stainPopup.selectItem(at: imagerStains.firstIndex(of: stain) ?? 0)
         w.stainChanged(nil)
     }
+    /// As clicking tab `look` (0 Imager, 1 UV Box, 2 3D) over the gel.
+    static func showLook(_ look: Int) {
+        guard let w = visible.first else { return }
+        w.lookTabs.selectedSegment = look
+        w.lookChanged(nil)
+    }
+    static var showing3D: Bool { visible.first?.gel3D?.isHidden == false }
     static func closeAll() { visible.forEach { $0.window?.close() } }
 }

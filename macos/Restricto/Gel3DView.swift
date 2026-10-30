@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // EXPERIMENTAL: the gel as a lit 3D scene (RealityKit, on the GPU): a clear
 // slab lying on a violet UV box whose bars glow through it, comb-cut wells,
-// smeared lanes and glowing bands inside the agarose, with a bloom pass in
-// Core Image on Metal. Drag to orbit, scroll to move closer. View only: the
+// smeared lanes and glowing bands inside the agarose, each with a soft halo
+// of light around it. Drag to orbit, scroll to move closer. View only: the
 // sidebar and the other tabs still do the editing and hovering.
 import AppKit
-import CoreImage
-import CoreImage.CIFilterBuiltins
-import Metal
 import RealityKit
 
 /// An ARView that orbits on drag and zooms on scroll instead of its defaults.
@@ -26,7 +23,6 @@ final class Gel3DView: NSView {
     private var yaw: Float = 0
     private var pitch: Float = 1.05
     private var distance: Float = 0.30
-    private var ciContext: CIContext?
     private var lanes: [GelLaneModel] = []
     private var runLevel: Double = 1
 
@@ -62,8 +58,8 @@ final class Gel3DView: NSView {
             self.distance = min(0.7, max(0.12, self.distance * (1 - Float(dy) * 0.01)))
             self.placeCamera()
         }
-        // The glow a camera sees around bright bands, done on the GPU.
-        arView.renderCallbacks.postProcess = { [weak self] context in self?.bloom(context) }
+        // No post-processing pass: setting ARView's postProcess callback traps
+        // on macOS 27 (RealityKit 453), so the bands carry their own halos.
         setAccessibilityElement(true)
         setAccessibilityRole(.image)
         setAccessibilityLabel("Gel in 3D")
@@ -75,33 +71,6 @@ final class Gel3DView: NSView {
         let position = SIMD3<Float>(distance * sin(yaw) * cos(pitch), distance * sin(pitch),
                                     distance * cos(yaw) * cos(pitch))
         camera.look(at: [0, 0, 0.005], from: position, relativeTo: nil)
-    }
-
-    private func bloom(_ context: ARView.PostProcessContext) {
-        if ciContext == nil { ciContext = CIContext(mtlDevice: context.device) }
-        guard let ci = ciContext, let input = CIImage(mtlTexture: context.sourceColorTexture) else {
-            copy(context)
-            return
-        }
-        let filter = CIFilter.bloom()
-        filter.inputImage = input
-        filter.radius = 16
-        filter.intensity = 1.1
-        guard let output = filter.outputImage?.cropped(to: input.extent) else {
-            copy(context)
-            return
-        }
-        let destination = CIRenderDestination(mtlTexture: context.targetColorTexture,
-                                              commandBuffer: context.commandBuffer)
-        destination.isFlipped = false
-        if (try? ci.startTask(toRender: output, to: destination)) == nil { copy(context) }
-    }
-
-    /// Passes the frame through untouched.
-    private func copy(_ context: ARView.PostProcessContext) {
-        guard let blit = context.commandBuffer.makeBlitCommandEncoder() else { return }
-        blit.copy(from: context.sourceColorTexture, to: context.targetColorTexture)
-        blit.endEncoding()
     }
 
     // MARK: The scene
@@ -182,6 +151,14 @@ final class Gel3DView: NSView {
                                          materials: [unlit(glow, opacity: Float(0.35 + 0.65 * k))])
                 entity.position = [x, thick * 0.55, z]
                 gel.addChild(entity)
+                // Its glow: a soft halo lying just over the gel, brighter for more DNA.
+                if let halo = haloMaterial(color: Self.color(1.0, 0.35, 0.55), strength: Float(0.25 + 0.6 * k)) {
+                    let plane = ModelEntity(mesh: .generatePlane(width: laneW * 1.7,
+                                                                 depth: 0.006 + 0.008 * Float(k)),
+                                            materials: [halo])
+                    plane.position = [x, top + 0.0004, z]
+                    gel.addChild(plane)
+                }
             }
             // A loaded lane glows faintly from the well to its last band.
             if !lane.isLadder, lowest > 0 {
@@ -192,6 +169,32 @@ final class Gel3DView: NSView {
                 gel.addChild(smear)
             }
         }
+    }
+
+    /// A soft, oval falloff, white in the middle and clear at the edges.
+    private static let haloTexture: TextureResource? = {
+        let w = 128, h = 64
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB),
+                                        colors: [NSColor.white.cgColor, NSColor.white.withAlphaComponent(0.35).cgColor,
+                                                 NSColor.white.withAlphaComponent(0).cgColor] as CFArray,
+                                        locations: [0, 0.35, 1]) else { return nil }
+        // An ellipse: a circle's gradient, stretched across.
+        ctx.scaleBy(x: CGFloat(w) / CGFloat(h), y: 1)
+        ctx.drawRadialGradient(gradient, startCenter: CGPoint(x: h / 2, y: h / 2), startRadius: 0,
+                               endCenter: CGPoint(x: h / 2, y: h / 2), endRadius: CGFloat(h) / 2, options: [])
+        guard let image = ctx.makeImage() else { return nil }
+        return try? TextureResource.generate(from: image, options: .init(semantic: .color))
+    }()
+
+    private func haloMaterial(color: NSColor, strength: Float) -> UnlitMaterial? {
+        guard let texture = Self.haloTexture else { return nil }
+        var m = UnlitMaterial(color: color)
+        m.color = .init(tint: color, texture: .init(texture))
+        m.blending = .transparent(opacity: .init(scale: strength, texture: .init(texture)))
+        return m
     }
 
     /// Violet with brighter bars, as the tubes under a UV box.
