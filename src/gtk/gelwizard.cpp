@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "gelwizard.h"
+#include "window.h"
 
 #include "core/digest.h"
 #include "core/enzymes.h"
@@ -22,6 +23,7 @@ int g_ladder = 0;
 int g_comb = 1;
 double g_percent = 1.0;
 GelStain g_stain = GelStain::EthidiumUV;
+Gel3DScene g_scene3D = Gel3DScene::PinkOnBlue;
 // Each sequence's lanes as its gel was last closed, so reopening it keeps them.
 struct Remembered {
     Document *doc;
@@ -176,15 +178,11 @@ GtkWidget *GelWizard::buildView()
     m_gel->onPickBand = [this](int lane, int band) { pickFragment(lane, band); };
 
     // How the gel was stained and photographed.
-    GtkStringList *stains = stringList({gelStainTitle(GelStain::EthidiumUV), gelStainTitle(GelStain::SybrSafe),
-                                        gelStainTitle(GelStain::BlackAndWhite)});
-    m_stain = gtk_drop_down_new(G_LIST_MODEL(stains), nullptr);
-    gtk_drop_down_set_selected(GTK_DROP_DOWN(m_stain), guint(g_stain));
+    m_stain = gtk_drop_down_new(nullptr, nullptr);
+    fillStains();
     gtk_widget_set_tooltip_text(m_stain, "How the gel was stained and photographed");
     g_signal_connect_swapped(m_stain, "notify::selected", G_CALLBACK(+[](gpointer p) {
-                                 auto *self = static_cast<GelWizard *>(p);
-                                 g_stain = GelStain(gtk_drop_down_get_selected(GTK_DROP_DOWN(self->m_stain)));
-                                 self->m_gel->setStain(g_stain);
+                                 static_cast<GelWizard *>(p)->stainChanged();
                              }),
                              this);
     // How long the gel ran: drag it back to see the gel part way through.
@@ -222,10 +220,38 @@ GtkWidget *GelWizard::buildView()
     gtk_box_append(GTK_BOX(pill), m_run);
     gtk_box_append(GTK_BOX(pill), m_runLabel);
     gtk_box_append(GTK_BOX(pill), m_copy);
+    // The Imager's print and, with Experimental Tools on, the gel in 3D.
+    m_stage = gtk_stack_new();
+    gtk_stack_set_transition_type(GTK_STACK(m_stage), GTK_STACK_TRANSITION_TYPE_CROSSFADE);
+    gtk_stack_add_named(GTK_STACK(m_stage), m_gel->widget(), "imager");
     GtkWidget *stage = gtk_overlay_new();
-    gtk_overlay_set_child(GTK_OVERLAY(stage), m_gel->widget());
+    gtk_overlay_set_child(GTK_OVERLAY(stage), m_stage);
     gtk_overlay_add_overlay(GTK_OVERLAY(stage), pill);
     gtk_widget_set_hexpand(stage, TRUE);
+    // Experimental: the Imager or 3D, switched in the header bar as GNOME apps do.
+    GtkWidget *tabs = nullptr;
+    if (Window::experimentalTools()) {
+        tabs = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+        gtk_widget_add_css_class(tabs, "linked");
+        const char *titles[] = {"Imager", "3D"};
+        const char *tips[] = {"The gel as an imager prints it",
+                              "The gel in 3D (experimental): drag to turn it, scroll to come closer"};
+        for (int i = 0; i < 2; ++i) {
+            m_lookTabs[i] = gtk_toggle_button_new_with_label(titles[i]);
+            gtk_widget_set_tooltip_text(m_lookTabs[i], tips[i]);
+            if (i)
+                gtk_toggle_button_set_group(GTK_TOGGLE_BUTTON(m_lookTabs[i]), GTK_TOGGLE_BUTTON(m_lookTabs[0]));
+            g_object_set_data(G_OBJECT(m_lookTabs[i]), "oc-look", GINT_TO_POINTER(i));
+            g_signal_connect(m_lookTabs[i], "toggled", G_CALLBACK(+[](GtkToggleButton *b, gpointer p) {
+                                 if (gtk_toggle_button_get_active(b))
+                                     static_cast<GelWizard *>(p)->lookChanged(
+                                         GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "oc-look")));
+                             }),
+                             this);
+            gtk_box_append(GTK_BOX(tabs), m_lookTabs[i]);
+        }
+        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(m_lookTabs[0]), TRUE);
+    }
 
     GtkWidget *body = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_box_append(GTK_BOX(body), buildSidebar());
@@ -242,6 +268,8 @@ GtkWidget *GelWizard::buildView()
                              }),
                              this);
     adw_header_bar_pack_end(ADW_HEADER_BAR(header), done);
+    if (tabs)
+        adw_header_bar_pack_start(ADW_HEADER_BAR(header), tabs);
     adw_dialog_set_default_widget(ADW_DIALOG(m_dialog), done);
 
     // Enzymes picked from the menu come here, by name.
@@ -307,6 +335,8 @@ GtkWidget *GelWizard::buildSidebar()
                                  auto *self = static_cast<GelWizard *>(p);
                                  g_comb = int(adw_combo_row_get_selected(ADW_COMBO_ROW(self->m_comb)));
                                  self->m_gel->setComb(gelCombs()[size_t(g_comb)]);
+                                 if (self->m_gel3D)
+                                     self->m_gel3D->setComb(gelCombs()[size_t(g_comb)]);
                                  self->fillSidebar();
                              }),
                              this);
@@ -512,6 +542,7 @@ void GelWizard::refresh()
     m_selected = std::clamp(m_selected, 0, int(m_lanes.size()) - 1);
     m_gel->setSelectedLane(m_selected);
     m_gel->setLanes(std::move(models), running);
+    show3D();
     fillSidebar();
 }
 
@@ -829,8 +860,69 @@ void GelWizard::runChanged()
 {
     const double level = gtk_range_get_value(GTK_RANGE(m_run));
     m_gel->setRunLevel(level);
+    show3D();
     gtk_label_set_text(GTK_LABEL(m_runLabel),
                        level >= 0.995 ? "Full run" : (std::to_string(int(std::round(level * 100))) + "% run").c_str());
+}
+
+// The stain menu lists the Imager's stains on its tab, the 3D scenes on the other.
+void GelWizard::fillStains()
+{
+    const bool filling = m_filling;
+    m_filling = true;
+    GtkStringList *model = m_look == 1
+                               ? stringList({gel3DSceneTitle(Gel3DScene::PinkOnBlue), gel3DSceneTitle(Gel3DScene::GreenOnBlue),
+                                             gel3DSceneTitle(Gel3DScene::BlackAndWhite)})
+                               : stringList({gelStainTitle(GelStain::EthidiumUV), gelStainTitle(GelStain::SybrSafe),
+                                             gelStainTitle(GelStain::BlackAndWhite)});
+    gtk_drop_down_set_model(GTK_DROP_DOWN(m_stain), G_LIST_MODEL(model));
+    g_object_unref(model);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(m_stain), m_look == 1 ? guint(g_scene3D) : guint(g_stain));
+    m_filling = filling;
+}
+
+void GelWizard::stainChanged()
+{
+    if (m_filling)
+        return;
+    const guint i = gtk_drop_down_get_selected(GTK_DROP_DOWN(m_stain));
+    if (i == GTK_INVALID_LIST_POSITION)
+        return;
+    if (m_look == 1) {
+        g_scene3D = Gel3DScene(i);
+        if (m_gel3D)
+            m_gel3D->setScene(g_scene3D);
+        return;
+    }
+    g_stain = GelStain(i);
+    m_gel->setStain(g_stain);
+}
+
+// Imager: the flat imager print, in the chosen stain. 3D: the gel on the
+// light box, to turn around, in the chosen scene.
+void GelWizard::lookChanged(int look)
+{
+    if (look == m_look)
+        return;
+    m_look = look;
+    fillStains();
+    // Copy Image takes the Imager's print; the 3D scene isn't copied yet.
+    gtk_widget_set_sensitive(m_copy, look != 1);
+    if (look == 1 && !m_gel3D) {
+        m_gel3D = std::make_unique<Gel3DView>();
+        m_gel3D->setScene(g_scene3D);
+        m_gel3D->setComb(gelCombs()[size_t(std::clamp(g_comb, 0, int(gelCombs().size()) - 1))]);
+        gtk_stack_add_named(GTK_STACK(m_stage), m_gel3D->widget(), "3d");
+    }
+    show3D();
+    gtk_stack_set_visible_child_name(GTK_STACK(m_stage), look == 1 ? "3d" : "imager");
+}
+
+// The 3D gel follows the lanes and the run while it's showing.
+void GelWizard::show3D()
+{
+    if (m_gel3D && m_look == 1)
+        m_gel3D->show(m_gel->lanes(), gtk_range_get_value(GTK_RANGE(m_run)), m_gel->dyeRuns());
 }
 
 void GelWizard::copyImage()

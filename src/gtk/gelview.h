@@ -65,6 +65,7 @@ public:
     void setRunLevel(double level);
     // Where the loading dyes' fronts are after a full run, as band runs.
     void setDyeRuns(std::vector<double> runs);
+    const std::vector<double> &dyeRuns() const { return m_dyeRuns; }
     // The lane being edited, lit a little.
     void setSelectedLane(int lane);
     // Room left at the bottom for the floating controls.

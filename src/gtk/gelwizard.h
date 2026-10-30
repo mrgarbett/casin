@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "gel3dview.h"
 #include "gelview.h"
 #include "view/document.h"
 
@@ -74,6 +75,10 @@ private:
     void removeEnzyme(const std::string &name);
     void sequenceChosen();
     void runChanged();
+    void stainChanged();
+    void fillStains();
+    void lookChanged(int look);
+    void show3D();
     void copyImage();
     Document *live(const Lane &lane) const;
 
@@ -87,9 +92,12 @@ private:
     bool m_filling = false;
     guint m_copiedTimer = 0, m_refreshIdle = 0;
     std::unique_ptr<GelView> m_gel;
+    std::unique_ptr<Gel3DView> m_gel3D;   // made the first time the 3D tab opens
+    int m_look = 0;                       // 0 the Imager, 1 3D (experimental)
     GtkWidget *m_parent, *m_dialog, *m_agarose, *m_comb, *m_laneList, *m_add, *m_remove, *m_left, *m_right;
     GtkWidget *m_laneGroup, *m_sequence, *m_enzymeEntry, *m_enzymeMenu, *m_chips, *m_enzymeNote;
     GtkWidget *m_fragmentGroup, *m_fragmentList, *m_stain, *m_run, *m_runLabel, *m_copy;
+    GtkWidget *m_stage, *m_lookTabs[2] = {nullptr, nullptr};
 };
 
 } // namespace oc::gtk

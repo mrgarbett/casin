@@ -19,7 +19,7 @@ jobs:
     steps:
       - name: Install build dependencies
         run: |
-          dnf -y install git gcc-c++ cmake ninja-build pkgconfig gtk4-devel libadwaita-devel \
+          dnf -y install git gcc-c++ cmake ninja-build pkgconfig gtk4-devel libadwaita-devel libepoxy-devel \
                          cairo-devel pango-devel desktop-file-utils libappstream-glib \
                          rpm-build rpmdevtools xorg-x11-server-Xvfb google-noto-sans-fonts
       - uses: actions/checkout@v4

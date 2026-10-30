@@ -38,7 +38,7 @@ packaging/    .desktop file, MIME types, AppStream metainfo, icon, macOS Info.pl
 Fedora is the main Linux target.
 
 ```sh
-sudo dnf install gcc-c++ cmake ninja-build pkgconfig gtk4-devel libadwaita-devel cairo-devel pango-devel
+sudo dnf install gcc-c++ cmake ninja-build pkgconfig gtk4-devel libadwaita-devel libepoxy-devel cairo-devel pango-devel
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build --output-on-failure

@@ -1,6 +1,8 @@
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK4 REQUIRED IMPORTED_TARGET gtk4>=4.12)
 pkg_check_modules(ADW REQUIRED IMPORTED_TARGET libadwaita-1>=1.5)
+# The experimental 3D gel's OpenGL calls (GTK itself loads GL through epoxy).
+pkg_check_modules(EPOXY REQUIRED IMPORTED_TARGET epoxy)
 pkg_check_modules(PANGOCAIRO REQUIRED IMPORTED_TARGET pangocairo cairo)
 
 # cairo/Pango drawing of the shared scenes (also used for map export).
@@ -30,10 +32,11 @@ add_executable(restricto
     seqview.cpp
     primereditor.cpp
     gelview.cpp
+    gel3dview.cpp
     gelwizard.cpp
     pcrwizard.cpp)
 target_include_directories(restricto PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_link_libraries(restricto PRIVATE restricto_cairo PkgConfig::GTK4 PkgConfig::ADW)
+target_link_libraries(restricto PRIVATE restricto_cairo PkgConfig::GTK4 PkgConfig::ADW PkgConfig::EPOXY)
 # GLib's C macros trip -Wpedantic in C++.
 target_compile_options(restricto PRIVATE -Wno-pedantic -Wno-missing-field-initializers)
 
