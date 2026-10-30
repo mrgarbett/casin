@@ -1039,12 +1039,12 @@ void Window::showBadge(GtkWidget *from, double x, double y)
         end -= n;
     std::string text = view::withThousands(s.start + 1) + "–" + view::withThousands(end) + "  ·  "
                      + view::formatBp(s.length);
-    // Nearest-neighbour Tm is for oligos.
-    if (s.length <= 100) {
-        const PrimerCheck check = checkPrimer(m_doc.selectedBases());
-        if (!std::isnan(check.tm)) {
+    // Q5's Tm, as the status capsule and the primer editor show it.
+    if (s.length >= 8 && s.length <= 100) {
+        const int tm = polymeraseTm(cleanBases(m_doc.selectedBases()), Polymerase::Q5);
+        if (tm > 0) {
             char buf[32];
-            std::snprintf(buf, sizeof buf, "  ·  Tm %.1f °C", check.tm);
+            std::snprintf(buf, sizeof buf, "  ·  Q5 Tm %d °C", tm);
             text += buf;
         }
     }

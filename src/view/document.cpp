@@ -617,10 +617,12 @@ std::string Document::statusText(bool withLength) const
     char buf[64];
     std::snprintf(buf, sizeof buf, "  ·  GC %.1f%%", gcFraction(bases) * 100.0);
     s += buf;
+    // Q5's Tm, as the primer editor and Primers pane show it (one Tm per
+    // sequence, the one the PCR wizard uses). Nearest-neighbour Tm is for oligos.
     if (m_selection.length >= 8 && m_selection.length <= 100) {
-        const double tm = meltingTemperature(bases);
-        if (!std::isnan(tm)) {
-            std::snprintf(buf, sizeof buf, "  ·  Tm %.1f °C", tm);
+        const int tm = polymeraseTm(bases, Polymerase::Q5);
+        if (tm > 0) {
+            std::snprintf(buf, sizeof buf, "  ·  Q5 Tm %d °C", tm);
             s += buf;
         }
     }
