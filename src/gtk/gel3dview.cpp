@@ -529,19 +529,18 @@ GLuint link(const std::string &fragment, std::string &error)
     return p;
 }
 
-struct Vec3 {
-    float x, y, z;
-    Vec3 operator+(Vec3 o) const { return {x + o.x, y + o.y, z + o.z}; }
-    Vec3 operator-(Vec3 o) const { return {x - o.x, y - o.y, z - o.z}; }
-};
-Vec3 cross(Vec3 a, Vec3 b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
-Vec3 normalize(Vec3 a)
+} // namespace
+
+using Vec3 = Gel3DView::Vec3;
+static Vec3 operator+(Vec3 a, Vec3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+static Vec3 operator-(Vec3 a, Vec3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+static Vec3 operator*(Vec3 a, float k) { return {a.x * k, a.y * k, a.z * k}; }
+static Vec3 cross(Vec3 a, Vec3 b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
+static Vec3 normalize(Vec3 a)
 {
     const float l = std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
     return {a.x / l, a.y / l, a.z / l};
 }
-
-} // namespace
 
 const char *gel3DSceneTitle(Gel3DScene scene)
 {
@@ -579,10 +578,16 @@ Gel3DView::Gel3DView()
                              this);
 
     // Drag to orbit, scroll to come closer, double-click to go back.
+    // Drag to orbit; drag with the right or middle button, or with Shift, to
+    // move the gel across the view.
     GtkGesture *drag = gtk_gesture_drag_new();
-    g_signal_connect(drag, "drag-begin", G_CALLBACK(+[](GtkGestureDrag *, double, double, gpointer p) {
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(drag), 0);
+    g_signal_connect(drag, "drag-begin", G_CALLBACK(+[](GtkGestureDrag *g, double, double, gpointer p) {
                          auto *self = static_cast<Gel3DView *>(p);
                          self->m_dragX = self->m_dragY = 0;
+                         const guint button = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(g));
+                         const GdkModifierType mods = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(g));
+                         self->m_panning = button != GDK_BUTTON_PRIMARY || (mods & GDK_SHIFT_MASK);
                      }),
                      this);
     g_signal_connect(drag, "drag-update", G_CALLBACK(+[](GtkGestureDrag *, double x, double y, gpointer p) {
@@ -591,8 +596,12 @@ Gel3DView::Gel3DView()
                          const double dy = y - self->m_dragY;
                          self->m_dragX = x;
                          self->m_dragY = y;
-                         self->m_yaw -= float(dx) * 0.008f;
-                         self->m_pitch = std::clamp(self->m_pitch + float(dy) * 0.008f, 0.22f, 1.45f);
+                         if (self->m_panning) {
+                             self->pan(dx, dy);
+                         } else {
+                             self->m_yaw -= float(dx) * 0.008f;
+                             self->m_pitch = std::clamp(self->m_pitch + float(dy) * 0.008f, 0.22f, 1.45f);
+                         }
                          self->interacted();
                      }),
                      this);
@@ -616,11 +625,12 @@ Gel3DView::Gel3DView()
                          self->m_yaw = 0;
                          self->m_pitch = kHomePitch;
                          self->m_zoom = 1;
+                         self->m_pan.x = self->m_pan.y = self->m_pan.z = 0;
                          self->restart();
                      }),
                      this);
     gtk_widget_add_controller(m_area, GTK_EVENT_CONTROLLER(click));
-    gtk_widget_set_tooltip_text(m_area, "Drag to turn the gel, scroll to come closer, double-click to go back");
+    gtk_widget_set_tooltip_text(m_area, "Drag to turn the gel, right-drag or Shift-drag to move it, scroll to come closer, double-click to go back");
     gtk_accessible_update_property(GTK_ACCESSIBLE(m_area), GTK_ACCESSIBLE_PROPERTY_LABEL, "Gel in 3D", -1);
 
     m_note = gtk_label_new("");
@@ -741,6 +751,34 @@ gboolean Gel3DView::tick(GtkWidget *, GdkFrameClock *, gpointer p)
     }
     gtk_gl_area_queue_render(GTK_GL_AREA(self->m_area));
     return G_SOURCE_CONTINUE;
+}
+
+// The camera orbits a point just above the middle of the gel, moved by panning.
+Gel3DView::Camera Gel3DView::camera() const
+{
+    Camera c;
+    c.distance = m_fit * m_zoom;
+    const Vec3 target = Vec3{0, kThick / 2, 0.004f} + m_pan;
+    c.position = target + Vec3{c.distance * std::sin(m_yaw) * std::cos(m_pitch), c.distance * std::sin(m_pitch),
+                               c.distance * std::cos(m_yaw) * std::cos(m_pitch)};
+    c.forward = normalize(target - c.position);
+    c.right = normalize(cross(c.forward, {0, 1, 0}));
+    c.up = cross(c.right, c.forward);
+    return c;
+}
+
+// Moves the gel with the pointer: by `dx`, `dy` pixels across the view.
+void Gel3DView::pan(double dx, double dy)
+{
+    const Camera c = camera();
+    const double h = std::max(1, gtk_widget_get_height(m_area));
+    const float perPx = float(2.0 * c.distance * std::tan(17.5 * M_PI / 180) / h);
+    m_pan = m_pan - c.right * (float(dx) * perPx) + c.up * (float(dy) * perPx);
+    // Not out of sight: the gel stays within reach of the middle.
+    const float limit = m_fit * 0.7f;
+    m_pan.x = std::clamp(m_pan.x, -limit, limit);
+    m_pan.y = std::clamp(m_pan.y, -limit, limit);
+    m_pan.z = std::clamp(m_pan.z, -limit, limit);
 }
 
 void Gel3DView::fail(const std::string &message)
@@ -991,15 +1029,9 @@ void Gel3DView::render()
         m_bandDirty = false;
     }
 
-    // The camera, orbiting a point just above the middle of the gel.
     const SceneLook &look = lookOf(m_scene);
-    const float distance = m_fit * m_zoom;
-    const Vec3 target{0, kThick / 2, 0.004f};
-    const Vec3 position = target + Vec3{distance * std::sin(m_yaw) * std::cos(m_pitch), distance * std::sin(m_pitch),
-                                        distance * std::cos(m_yaw) * std::cos(m_pitch)};
-    const Vec3 f = normalize(target - position);
-    const Vec3 r = normalize(cross(f, {0, 1, 0}));
-    const Vec3 up = cross(r, f);
+    const Camera cam = camera();
+    const Vec3 position = cam.position, f = cam.forward, r = cam.right, up = cam.up;
     auto setUniforms = [&](GLuint prog) {
         auto v4 = [&](const char *name, float a, float b, float c, float d) {
             glUniform4f(glGetUniformLocation(prog, name), a, b, c, d);

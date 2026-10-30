@@ -40,7 +40,17 @@ public:
     // Why there's no picture, if there isn't one.
     const std::string &problem() const { return m_problem; }
 
+    struct Vec3 {
+        float x, y, z;
+    };
+
 private:
+    struct Camera {
+        Vec3 position, forward, right, up;
+        float distance;
+    };
+    Camera camera() const;
+    void pan(double dx, double dy);
     void rebuild();
     void restart();
     void fail(const std::string &message);
@@ -72,7 +82,9 @@ private:
 
     static constexpr float kHomePitch = 0.80f;
     float m_yaw = 0, m_pitch = kHomePitch, m_zoom = 1, m_fit = 0.2f;
+    Vec3 m_pan = {0, 0, 0};   // where the camera looks, off the gel's middle
     double m_dragX = 0, m_dragY = 0;
+    bool m_panning = false;   // this drag moves the gel rather than turning it
     std::vector<GelLaneModel> m_lanes;
     double m_runLevel = 1;
     std::vector<double> m_dyeRuns;
