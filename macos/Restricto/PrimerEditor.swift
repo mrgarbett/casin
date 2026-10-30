@@ -349,17 +349,18 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         let checkWarnings = typed.isEmpty ? "" : takeString(oc_primer_check(typed, &check))
         if !typed.isEmpty {
             var line = "\(check.length) nt · GC \(String(format: "%.0f", check.gc * 100))%"
+            // Q5's Tm, as the PCR wizard and the status line give it.
             if let s = site {
                 // Tm of the part that anneals; a 5' tail doesn't count.
                 let annealing = String(typed.suffix(Int(s.length)))
-                var a = OCPrimerCheck()
-                oc_string_free(oc_primer_check(annealing, &a))
-                if !a.tm.isNaN {
-                    line += " · Tm \(String(format: "%.1f", a.tm)) °C"
+                let tm = oc_polymerase_tm(annealing, OC_POLYMERASE_Q5)
+                if tm > 0 {
+                    line += " · Q5 Tm \(tm) °C"
                     if typed.count > Int(s.length) { line += " annealing" }
                 }
-            } else if !check.tm.isNaN {
-                line += " · Tm \(String(format: "%.1f", check.tm)) °C"
+            } else {
+                let tm = oc_polymerase_tm(typed, OC_POLYMERASE_Q5)
+                if tm > 0 { line += " · Q5 Tm \(tm) °C" }
             }
             lines.append(line)
         }

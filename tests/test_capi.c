@@ -331,6 +331,9 @@ int main(int argc, char **argv)
     /* PCR cycling for pOC-demo's seq-fwd and mcs-rev, in Q5 buffer. */
     OCPcrProgram prog;
     oc_pcr_program("ACGTACAATGTGTTCGAAACAGGT", "CGGCTCTCTTTACACGGCTC", 1530, OC_POLYMERASE_Q5, 30, &prog);
+    CHECK(oc_polymerase_tm("ACGTACAATGTGTTCGAAACAGGT", OC_POLYMERASE_Q5) == prog.tm1
+          && oc_polymerase_tm("CGGCTCTCTTTACACGGCTC", OC_POLYMERASE_Q5) == prog.tm2
+          && oc_polymerase_tm("ACGN", OC_POLYMERASE_Q5) == 0 && oc_polymerase_tm(NULL, OC_POLYMERASE_TAQ) == 0);
     CHECK(prog.tm1 == 66 && prog.tm2 == 68 && prog.annealing == 67 && prog.step_count == 6);
     CHECK(strcmp(prog.steps[2].name, "Annealing") == 0 && prog.steps[2].cycled);
     char *md = oc_pcr_program_markdown("ACGTACAATGTGTTCGAAACAGGT", "CGGCTCTCTTTACACGGCTC", 1530, OC_POLYMERASE_TAQ,

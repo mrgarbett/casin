@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -696,6 +697,12 @@ Polymerase polymeraseOf(int p)
                                                                                       : Polymerase::Q5;
 }
 } // namespace
+
+int oc_polymerase_tm(const char *bases, int polymerase)
+{
+    const int tm = bases ? polymeraseTm(bases, polymeraseOf(polymerase)) : INT_MIN;
+    return tm == INT_MIN ? 0 : tm;
+}
 
 void oc_pcr_program(const char *anneal1, const char *anneal2, int length, int polymerase, int cycles,
                     OCPcrProgram *out)
