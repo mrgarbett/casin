@@ -137,5 +137,8 @@ private:
 
 std::string formatBp(int n);   // "2,686 bp"
 std::string withThousands(int n);
+// A site as people number it, "1,201–1,224"; across the origin of a sequence
+// of n bases (its end past n), "3,180–12".
+std::string siteText(const Range &r, int n);
 
 } // namespace oc::view

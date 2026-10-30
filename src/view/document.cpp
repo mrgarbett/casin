@@ -558,13 +558,14 @@ int Document::annotateCommonFeatures()
 
 int Document::addPrimerFromSelection(const std::string &name, Strand strand)
 {
-    if (!m_hasSelection || m_selection.length <= 0 || m_selection.wraps(m_seq.length()))
+    // A selection across the origin of a circle makes a site that runs past the end.
+    if (!m_hasSelection || m_selection.length <= 0 || (m_selection.wraps(m_seq.length()) && !m_seq.circular))
         return -1;
     Primer p;
     p.name = trim(name).empty() ? "Primer " + std::to_string(m_seq.primers.size() + 1) : trim(name);
     p.binding = {m_selection.start, m_selection.end()};
     p.strand = strand == Strand::Reverse ? Strand::Reverse : Strand::Forward;
-    const std::string top = m_seq.bases.substr(size_t(p.binding.start), size_t(p.binding.length()));
+    const std::string top = m_seq.slice(p.binding.start, p.binding.length());
     p.bases = p.strand == Strand::Reverse ? reverseComplement(top) : top;
     const Span sel = m_selection;
     edit("Add Primer",

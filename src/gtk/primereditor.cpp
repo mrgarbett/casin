@@ -617,7 +617,7 @@ void PrimerEditor::refresh(bool select)
     if (m_site) {
         const PrimerSite &s = *m_site;
         const bool reverse = s.strand == Strand::Reverse;
-        lines.push_back("Binds " + view::withThousands(s.binding.start + 1) + "–" + view::withThousands(s.binding.end)
+        lines.push_back("Binds " + view::siteText(s.binding, m_doc->sequence().length())
                         + (reverse ? " on the bottom strand ←" : " on the top strand →"));
         const int tail = int(t.size()) - s.binding.length();
         if (tail > 0)
@@ -694,8 +694,9 @@ void PrimerEditor::refresh(bool select)
 // itself, so it can make a product on its own.
 std::string PrimerEditor::otherSites(const std::vector<PrimerSite> &sites, const PrimerSite &best, int tail) const
 {
-    auto place = [](const PrimerSite &o) {
-        return view::withThousands(o.binding.start + 1) + "–" + view::withThousands(o.binding.end)
+    const int n = m_doc->sequence().length();
+    auto place = [n](const PrimerSite &o) {
+        return view::siteText(o.binding, n)
              + (o.strand == Strand::Reverse ? " ←" : " →")
              + (o.mismatches > 0 ? " (" + std::to_string(o.mismatches)
                                        + (o.mismatches == 1 ? " mismatch)" : " mismatches)")
@@ -782,9 +783,12 @@ std::optional<Span> PrimerEditor::checkPartner(const std::string &t, const Prime
     const bool mineForward = s.strand == Strand::Forward;
     const Range fwd = mineForward ? s.binding : partner.binding;
     const Range rev = mineForward ? partner.binding : s.binding;
+    const int n = m_doc->sequence().length();
     int length = rev.end - fwd.start;
     if (length <= 0)
-        length += m_doc->sequence().length();
+        length += n;
+    else if (length > n)
+        length -= n;   // the reverse site runs across the origin, past the forward one
     return Span{fwd.start, length};
 }
 

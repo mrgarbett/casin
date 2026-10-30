@@ -49,10 +49,9 @@ std::string annealing(const Primer &p)
     return p.bases.substr(p.bases.size() - len);
 }
 
-std::string place(const Primer &p)
+std::string place(const Primer &p, int n)
 {
-    return std::string(p.strand == Strand::Forward ? "→ " : "← ") + view::withThousands(p.binding.start + 1) + "–"
-         + view::withThousands(p.binding.end);
+    return std::string(p.strand == Strand::Forward ? "→ " : "← ") + view::siteText(p.binding, n);
 }
 
 void setModel(GtkWidget *row, const std::vector<std::string> &items)
@@ -352,7 +351,7 @@ void PcrWizard::fillPrimers()
             if (p.binding.length() <= 0 || (p.strand == Strand::Forward) != forward)
                 continue;
             list.push_back(int(i));
-            items.push_back(p.name + "   " + place(p));
+            items.push_back(p.name + "   " + place(p, m_template->sequence().length()));
         }
         setModel(row, items);
         gtk_widget_set_sensitive(row, !list.empty());
@@ -430,7 +429,7 @@ void PcrWizard::addTyped()
     gtk_editable_set_text(GTK_EDITABLE(m_typed), "");
     const int index = int(m_template->sequence().primers.size()) - 1;
     pick(index, true);
-    gtk_label_set_text(GTK_LABEL(m_typedNote), ("Added " + p.name + " " + place(p) + " to the template.").c_str());
+    gtk_label_set_text(GTK_LABEL(m_typedNote), ("Added " + p.name + " " + place(p, m_template->sequence().length()) + " to the template.").c_str());
     gtk_widget_remove_css_class(m_typedNote, "warning");
     gtk_widget_add_css_class(m_typedNote, "dim-label");
 }
@@ -479,6 +478,8 @@ void PcrWizard::refresh()
         int end = rp->binding.end;
         if (end <= fp->binding.start)
             end += n;   // across the origin
+        else if (end - fp->binding.start > n)
+            end -= n;   // the reverse site runs across the origin, past the forward one
         const int copied = end - fp->binding.start;
         gtk_label_set_text(GTK_LABEL(m_size), (view::withThousands(length) + " bp").c_str());
         const std::string name = templ.name.empty() ? std::string("the template") : templ.name;

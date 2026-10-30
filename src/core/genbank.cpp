@@ -300,14 +300,13 @@ bool readPrimer(const RawFeature &rf, const Location &loc, int n, Primer *out)
     }
     if (bases.empty())
         return false;
-    // One binding site. A Range can't wrap, so a site across the origin keeps
-    // the part before it, as the .dna reader does.
+    // One binding site, maybe across the origin (then it runs past the end).
     const bool wraps = loc.ranges.size() == 2 && loc.ranges[0].end == n && loc.ranges[1].start == 0;
     if (loc.ranges.size() != 1 && !wraps)
         return false;
     out->name = label.empty() ? "primer" : label;
     out->bases = bases;
-    out->binding = loc.ranges[0];
+    out->binding = wraps ? Range{loc.ranges[0].start, n + loc.ranges[1].end} : loc.ranges[0];
     out->strand = loc.strand == Strand::Reverse ? Strand::Reverse : Strand::Forward;
     return true;
 }
@@ -592,6 +591,8 @@ std::string writeGenBank(const Sequence &seq)
         f.name = p.name;
         f.strand = p.strand == Strand::Reverse ? Strand::Reverse : Strand::Forward;
         f.ranges = {p.binding};
+        if (p.binding.end > seq.length())   // across the origin
+            f.ranges = {{p.binding.start, seq.length()}, {0, p.binding.end - seq.length()}};
         if (!p.name.empty())
             f.qualifiers.push_back({"label", p.name});
         f.qualifiers.push_back({"note", kPrimerNote + p.bases});

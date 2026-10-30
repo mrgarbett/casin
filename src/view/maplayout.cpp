@@ -48,6 +48,11 @@ std::string withThousands(int n)
     return n < 0 ? "-" + s : s;
 }
 
+std::string siteText(const Range &r, int n)
+{
+    return withThousands(r.start + 1) + "–" + withThousands(r.end > n && n > 0 ? r.end - n : r.end);
+}
+
 std::string formatBp(int n)
 {
     return withThousands(n) + " bp";
@@ -167,6 +172,16 @@ Point MapLayout::polar(double angle, double r) const
 {
     return {m_c.x + r * std::sin(angle), m_c.y - r * std::cos(angle)};
 }
+
+namespace {
+// Whether a primer has a site to draw: on a circular sequence one across the
+// origin runs past the end, up to a whole turn.
+bool primerShown(const Primer &pr, const Sequence &seq)
+{
+    const int n = seq.length();
+    return pr.binding.length() > 0 && pr.binding.end <= (seq.circular ? pr.binding.start + n : n);
+}
+} // namespace
 
 double MapLayout::angleOfPos(double pos) const
 {
@@ -498,7 +513,7 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
     // Primer names, from the primer arrows just outside the lanes.
     for (size_t i = 0; m_options.primers && i < m_seq.primers.size(); ++i) {
         const Primer &pr = m_seq.primers[i];
-        if (pr.binding.length() <= 0 || pr.binding.end > m_n || pr.name.empty())
+        if (!primerShown(pr, m_seq) || pr.name.empty())
             continue;
         LabelGlyph g;
         g.primer = int(i);
@@ -518,7 +533,7 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
     // the bends don't sit on the primer arrows.
     bool primerBand = false;
     for (const Primer &pr : m_seq.primers)
-        primerBand = primerBand || (m_options.primers && pr.binding.length() > 0 && pr.binding.end <= m_n);
+        primerBand = primerBand || (m_options.primers && primerShown(pr, m_seq));
     const double elbowR = m_featureOuter + (primerBand ? 15 : 6);
     const double rLabel = elbowR + 12;
     for (LabelGlyph &g : m_labels) {
@@ -770,7 +785,7 @@ void MapLayout::layoutLinear(TextMeasurer &tm)
     m_linearBottom = lane0 + laneCount * kLinearPitch;
     // A row for the primers under the features.
     for (const Primer &pr : m_seq.primers)
-        if (m_options.primers && pr.binding.length() > 0 && pr.binding.end <= m_n) {
+        if (m_options.primers && primerShown(pr, m_seq)) {
             m_primerRowY = std::max(m_linearBottom, m_yb + 30) + 6;
             m_linearBottom = m_primerRowY + 22;
             break;
@@ -859,7 +874,7 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
 
     // Primers: outlined arrows just outside the feature lanes, pointing 5' to 3'.
     for (const Primer &pr : m_seq.primers) {
-        if (!m_options.primers || pr.binding.length() <= 0 || pr.binding.end > m_n)
+        if (!m_options.primers || !primerShown(pr, m_seq))
             continue;
         const double r0 = m_featureOuter + 2, r1 = r0 + 7, rm = (r0 + r1) / 2;
         double a0 = angleOfPos(pr.binding.start), a1 = angleOfPos(pr.binding.end);
@@ -953,7 +968,7 @@ void MapLayout::renderLinear(Scene &s, const MapState &st) const
     // Primers: outlined arrows in their own row, pointing 5' to 3', named
     // beside them, with a stub up off the 5' end for a tail that doesn't anneal.
     for (const Primer &pr : m_seq.primers) {
-        if (!m_options.primers || pr.binding.length() <= 0 || pr.binding.end > m_n || m_primerRowY <= 0)
+        if (!m_options.primers || !primerShown(pr, m_seq) || m_primerRowY <= 0)
             continue;
         const bool rev = pr.strand == Strand::Reverse;
         const double y0 = m_primerRowY, y1 = y0 + 7, ym = (y0 + y1) / 2;
@@ -1061,7 +1076,7 @@ int MapLayout::primerAt(Point p) const
             return g.primer;
     for (int i = int(m_seq.primers.size()) - 1; i >= 0; --i) {
         const Primer &pr = m_seq.primers[size_t(i)];
-        if (pr.binding.length() <= 0 || pr.binding.end > m_n)
+        if (!primerShown(pr, m_seq))
             continue;
         if (m_circular) {
             const double r = std::hypot(p.x - m_c.x, p.y - m_c.y);
@@ -1070,7 +1085,8 @@ int MapLayout::primerAt(Point p) const
                 continue;
             const double pos = angleAt(p) / (2 * kPi) * m_n;
             const double slack = 3.0 / std::max(1.0, r) / (2 * kPi) * m_n;   // 3 px either side
-            if (pos >= pr.binding.start - slack && pos <= pr.binding.end + slack)
+            if ((pos >= pr.binding.start - slack && pos <= pr.binding.end + slack)
+                || pos + m_n <= pr.binding.end + slack)   // past the origin
                 return i;
         } else {
             if (m_primerRowY <= 0 || p.y < m_primerRowY - 3 || p.y > m_primerRowY + 10)

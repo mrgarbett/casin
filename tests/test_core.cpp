@@ -1750,6 +1750,100 @@ static void testCommonFeatures()
     CHECK(found.size() == 1 && found[0].name == "T7 promoter");
 }
 
+// Primers that bind across the origin of a circle: their site runs past the end.
+static void testPrimersAcrossOrigin()
+{
+    Sequence s;
+    s.name = "ring";
+    s.circular = true;
+    s.bases = "GCGTTGCATGCCTAGGATCCGTAACGGCATCAAGTCGACTTCAGCGTAGCATGAAACCCGGGTTTTAGTTGACCGGTACCATGCAAGCTTGCAGCAGGTCAG"
+              "CATCGATCGGCTAGCTAGGCGCGCCATCGATGGTACCTTAGCAGTCAAGGCTTACGATCGTTGCAACGTAGGCATCGGATACGTTAGCCAATGCATGCAA";
+    const int n = s.length();
+    // 12 bases before the origin and 10 after, on each strand.
+    const std::string across = s.bases.substr(size_t(n - 12)) + s.bases.substr(0, 10);
+    std::vector<PrimerSite> f = findPrimerSites(s, across);
+    CHECK(!f.empty() && f[0].strand == Strand::Forward && f[0].binding == (Range{n - 12, n + 10}));
+    std::vector<PrimerSite> r = findPrimerSites(s, reverseComplement(across));
+    CHECK(!r.empty() && r[0].strand == Strand::Reverse && r[0].binding == (Range{n - 12, n + 10}));
+    // Found once, whole: not again cut short at either end.
+    int forwardSites = 0;
+    for (const PrimerSite &x : f)
+        forwardSites += x.strand == Strand::Forward && x.mismatches == 0;
+    CHECK_EQ(forwardSites, 1);
+    // A linear sequence has no such site.
+    Sequence line = s;
+    line.circular = false;
+    for (const PrimerSite &x : findPrimerSites(line, across))
+        CHECK(x.binding.end <= n);
+
+    // Fitting grows the 5' end on across the origin, and back.
+    PrimerSite fitted;
+    const std::string inside = s.bases.substr(0, 20);
+    const std::string grown = fitAnnealingToTm(s, inside, {{0, 20}, Strand::Forward, 0}, meltingTemperature(inside) + 8,
+                                               &fitted);
+    CHECK(grown.size() > 20 && fitted.binding.end == n + 20 && fitted.binding.start < n);
+    CHECK_EQ(grown, s.slice(fitted.binding.start, fitted.binding.length()));
+
+    // PCR from a forward primer at 100 to a reverse one across the origin.
+    Primer fwd{"fwd", s.bases.substr(100, 20), {100, 120}, Strand::Forward};
+    Primer rev{"rev", reverseComplement(across), {n - 12, n + 10}, Strand::Reverse};
+    CHECK_EQ(pcrProductLength(s, {fwd.binding, Strand::Forward, 0}, 0, {rev.binding, Strand::Reverse, 0}, 0),
+             n - 100 + 10);
+    Sequence product;
+    CHECK(pcrProduct(s, fwd, rev, &product));
+    CHECK_EQ(product.bases, s.slice(100, n - 100 + 10));
+    // And from a forward primer across the origin to a reverse one at 60.
+    Primer fwd2{"fwd2", across, {n - 12, n + 10}, Strand::Forward};
+    Primer rev2{"rev2", reverseComplement(s.bases.substr(40, 20)), {40, 60}, Strand::Reverse};
+    CHECK(pcrProduct(s, fwd2, rev2, &product));
+    CHECK_EQ(product.bases, s.slice(n - 12, 72));
+
+    // Edits keep the site: bases added or taken away elsewhere, the strands
+    // swapped, the origin moved.
+    Sequence e = s;
+    e.primers = {rev};
+    insertBases(e, 50, "AAAA");
+    CHECK(e.primers.size() == 1 && e.primers[0].binding == (Range{n - 8, n + 14}));
+    CHECK_EQ(reverseComplement(e.primers[0].bases), e.slice(e.primers[0].binding.start, 22));
+    deleteBases(e, {50, 4});
+    CHECK(e.primers.size() == 1 && e.primers[0].binding == rev.binding);
+    insertBases(e, 5, "T");   // inside the part after the origin
+    CHECK(e.primers.empty());
+    e = s;
+    e.primers = {rev};
+    deleteBases(e, {3, 2});
+    CHECK(e.primers.empty());
+    e = s;
+    e.primers = {rev};
+    reverseComplementSequence(e);
+    CHECK(e.primers.size() == 1 && e.primers[0].binding == (Range{n - 10, n + 12}));
+    CHECK(e.primers[0].strand == Strand::Forward);
+    CHECK_EQ(e.primers[0].bases, e.slice(n - 10, 22));
+    e = s;
+    e.primers = {rev};
+    rotateOrigin(e, 50);
+    CHECK(e.primers.size() == 1 && e.primers[0].binding == (Range{n - 62, n - 40}));
+    rotateOrigin(e, n - 50);
+    CHECK(e.primers.size() == 1 && e.primers[0].binding == rev.binding);
+    // A fragment holding the site whole keeps it.
+    e = s;
+    e.primers = {rev};
+    const Sequence frag = extractFragment(e, {n - 20, 40});
+    CHECK(frag.primers.size() == 1 && frag.primers[0].binding == (Range{8, 30}));
+
+    // Files keep it: GenBank as a join over the origin, SnapGene as a site that wraps.
+    Sequence io = s;
+    io.primers = {fwd2, rev};
+    const std::string gb = writeGenBank(io);
+    CHECK(gb.find("join(" + std::to_string(n - 11) + ".." + std::to_string(n) + ",1..10)") != std::string::npos);
+    Sequence back;
+    CHECK(readGenBank(gb, &back));
+    CHECK(back.primers.size() == 2 && back.primers[0].binding == fwd2.binding
+          && back.primers[1].binding == rev.binding && back.primers[1].strand == Strand::Reverse);
+    CHECK(readSnapGene(writeSnapGene(io), &back));
+    CHECK(back.primers.size() == 2 && back.primers[0].binding == fwd2.binding && back.primers[1].binding == rev.binding);
+}
+
 int main(int argc, char **argv)
 {
     testBasics();
@@ -1776,6 +1870,7 @@ int main(int argc, char **argv)
     testInsertionByPcr();
     testPrimerDesign();
     testPrimerHelpers();
+    testPrimersAcrossOrigin();
     testMutagenesis();
     testAlign();
     testOrfs();

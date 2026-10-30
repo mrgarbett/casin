@@ -121,7 +121,7 @@ void parsePrimers(const std::string &xmlText, Sequence &seq)
         if (a <= b)
             p.binding = {a, b + 1};
         else
-            p.binding = {a, n};   // Range can't wrap; keep the part before the origin
+            p.binding = {a, b + 1 + n};   // across the origin: it runs past the end
         p.strand = site->attr("boundStrand") == "1" ? Strand::Reverse : Strand::Forward;
         seq.primers.push_back(p);
     }
@@ -244,7 +244,7 @@ std::string primersXml(const Sequence &seq)
                   : " description=\"" + escapeXml("<html><body>" + escapeXml(p.description) + "</body></html>") + "\"")
            + ">";
         if (p.binding.length() > 0)
-            x += "<BindingSite location=\"" + std::to_string(p.binding.start) + "-" + std::to_string(p.binding.end - 1)
+            x += "<BindingSite location=\"" + std::to_string(p.binding.start) + "-" + std::to_string((p.binding.end - 1) % std::max(1, seq.length()))
                + "\" boundStrand=\"" + (p.strand == Strand::Reverse ? "1" : "0") + "\"/>";
         x += "</Primer>";
     }

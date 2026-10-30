@@ -338,20 +338,24 @@ std::vector<PrimerSite> findPrimerSites(const Sequence &seq, const std::string &
         return out;
     const std::string &top = seq.bases;
     const std::string bottom = reverseComplement(top);   // read 5'->3' on the bottom strand
+    // On a circle a site can cross the origin: walking back from base 0 goes
+    // on from the strand's end.
+    const bool circle = seq.circular;
     for (int pass = 0; pass < 2; ++pass) {
         const std::string &t = pass == 0 ? top : bottom;
+        auto at = [&](int i) { return t[size_t(circle ? (i + n) % n : i)]; };
         // The primer's 3' end sits on base e of t; walk back towards its 5' end.
-        for (int e = minBinding - 1; e < n; ++e) {
-            if (t[size_t(e)] != p.back() || t[size_t(e - 1)] != p[size_t(lp - 2)] || t[size_t(e - 2)] != p[size_t(lp - 3)])
+        for (int e = circle ? 0 : minBinding - 1; e < n; ++e) {
+            if (at(e) != p.back() || at(e - 1) != p[size_t(lp - 2)] || at(e - 2) != p[size_t(lp - 3)])
                 continue;
             // Extend towards the 5' end; a mismatch costs three matches, so a
             // tail that happens to match a little doesn't pull the site out.
             int mism = 0, bestLen = 0, bestMism = 0, bestScore = 0;
-            for (int k = 0; k < lp && e - k >= 0; ++k) {
-                if (t[size_t(e - k)] != p[size_t(lp - 1 - k)] && ++mism > maxMismatches)
+            for (int k = 0; k < lp && (circle ? k < n : e - k >= 0); ++k) {
+                if (at(e - k) != p[size_t(lp - 1 - k)] && ++mism > maxMismatches)
                     break;
                 const int score = (k + 1 - mism) - 3 * mism;
-                if (t[size_t(e - k)] == p[size_t(lp - 1 - k)] && score >= bestScore) {
+                if (at(e - k) == p[size_t(lp - 1 - k)] && score >= bestScore) {
                     bestLen = k + 1;
                     bestMism = mism;
                     bestScore = score;
@@ -362,8 +366,10 @@ std::vector<PrimerSite> findPrimerSites(const Sequence &seq, const std::string &
             PrimerSite s;
             s.strand = pass == 0 ? Strand::Forward : Strand::Reverse;
             s.mismatches = bestMism;
-            const int start = e - bestLen + 1;   // in t
+            const int start = e - bestLen + 1;   // in t; below 0 across the origin
             s.binding = pass == 0 ? Range{start, e + 1} : Range{n - 1 - e, n - start};
+            if (s.binding.start < 0)   // across the origin: it runs past the end
+                s.binding = {s.binding.start + n, s.binding.end + n};
             out.push_back(s);
         }
     }
@@ -387,15 +393,18 @@ std::string fitAnnealingToTm(const Sequence &seq, const std::string &primer, con
     const int n = seq.length(), length = site.binding.length();
     if (fitted)
         *fitted = site;
-    if (length <= 0 || length > int(primer.size()) || site.binding.start < 0 || site.binding.end > n)
+    const int maxEnd = seq.circular ? site.binding.start + n : n;   // across the origin, on a circle
+    if (length <= 0 || length > int(primer.size()) || site.binding.start < 0 || site.binding.end > maxEnd)
         return primer;
     const std::string tail = primer.substr(0, primer.size() - size_t(length));
     const std::string annealing = primer.substr(primer.size() - size_t(length));
     const bool forward = site.strand != Strand::Reverse;
     // The template base `k` bases beyond the annealing part's 5' end, or -1
-    // past an end (or the origin: a site doesn't cross it).
+    // past an end of a linear sequence (a circle goes on across the origin).
     auto extra = [&](int k) -> int {
         const int pos = forward ? site.binding.start - k : site.binding.end - 1 + k;
+        if (seq.circular)
+            return length + k < n ? (pos % n + n) % n : -1;
         return pos >= 0 && pos < n ? pos : -1;
     };
     std::string best = annealing;
@@ -434,6 +443,11 @@ std::string fitAnnealingToTm(const Sequence &seq, const std::string &primer, con
             fitted->binding = {site.binding.start - change, site.binding.end};
         else
             fitted->binding = {site.binding.start, site.binding.end + change};
+        // Starting before base 0 is across the origin: it runs past the end instead.
+        if (fitted->binding.start < 0)
+            fitted->binding = {fitted->binding.start + n, fitted->binding.end + n};
+        else if (fitted->binding.start >= n)
+            fitted->binding = {fitted->binding.start - n, fitted->binding.end - n};
     }
     return tail + best;
 }
@@ -451,6 +465,8 @@ int pcrProductLength(const Sequence &seq, const PrimerSite &a, int tailA, const 
         if (!seq.circular)
             return -1;
         span += n;   // across the origin
+    } else if (seq.circular && span > n && span - n >= std::max(f.binding.length(), r.binding.length())) {
+        span -= n;   // the reverse site runs across the origin, past the forward one
     }
     if (span <= 0 || span > n + std::max(f.binding.length(), r.binding.length()))
         return -1;
@@ -463,7 +479,9 @@ FrameCheck checkPartFrame(const Sequence &seq, const PrimerSite &site, int tailL
     FrameCheck out;
     const bool primerForward = site.strand != Strand::Reverse;
     // Where the tail meets the annealing part, on the top strand.
-    const int junction = primerForward ? site.binding.start : site.binding.end;
+    int junction = primerForward ? site.binding.start : site.binding.end;
+    if (junction > seq.length())   // a site across the origin ends past it
+        junction -= seq.length();
     // The CDS the junction falls in; failing that, one the annealing part
     // runs into (a primer whose tail ends on the base before a start codon
     // anneals from that base on, so its junction sits just outside the CDS).

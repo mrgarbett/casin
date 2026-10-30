@@ -1256,7 +1256,7 @@ void Window::rebuildPrimerList()
             sub += buf;
         }
         if (pr.binding.length() > 0)
-            sub += " · " + view::withThousands(pr.binding.start + 1) + "–" + view::withThousands(pr.binding.end)
+            sub += " · " + view::siteText(pr.binding, s.length())
                  + (pr.strand == Strand::Reverse ? " · ←" : " · →");
         adw_action_row_set_subtitle(ADW_ACTION_ROW(row), sub.c_str());
         // The Tm warned about is Q5's, as shown.

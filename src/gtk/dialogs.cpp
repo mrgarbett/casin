@@ -2085,7 +2085,7 @@ void Window::deletePrimerDialog()
     for (const Primer &pr : seq.primers) {
         std::string site = "doesn't bind";
         if (pr.binding.length() > 0)
-            site = view::withThousands(pr.binding.start + 1) + "–" + view::withThousands(pr.binding.end)
+            site = view::siteText(pr.binding, seq.length())
                  + (pr.strand == Strand::Reverse ? " ←" : " →");
         labels.push_back(pr.name + " · " + site);
     }
