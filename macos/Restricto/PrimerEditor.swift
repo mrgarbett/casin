@@ -522,6 +522,15 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         guard var s = site else { NSSound.beep(); return }
         sequenceText.removeWhitespace()
         let typed = bases
+        // An insert whose last bases happen to match the template counts as
+        // binding; keep the fit to the bases after the last insert.
+        let tail = (typed as NSString).length - Int(s.length)
+        let over = (sequenceText.marks.map { $0.start + $0.length }.max() ?? 0) - tail
+        if over > 0 {
+            guard over < Int(s.length) else { NSSound.beep(); return }
+            if s.strand == Int32(OC_STRAND_FORWARD) { s.start += Int32(over) }
+            s.length -= Int32(over)
+        }
         var fitted = OCPrimerSite()
         let result = takeString(oc_primer_fit_tm(document.handle, typed, &s, Double(target), &fitted))
         guard fitted.length > 0, result.count >= Int(fitted.length) else { return }

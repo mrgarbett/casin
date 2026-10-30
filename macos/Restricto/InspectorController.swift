@@ -21,6 +21,8 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     var onPick: ((Pane, Bool) -> Void)?
     /// Called with a feature's index when its row is double-clicked.
     var onEditFeature: ((Int) -> Void)?
+    /// The Primers pane's PCR button.
+    var onPcr: (() -> Void)?
     /// Holds the window's sequence view while the panel shows it.
     private let sequenceHolder = NSView()
     private let featureTable = NSTableView()
@@ -212,7 +214,10 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         // A clear button, enabled while a primer is selected.
         remove.isEnabled = false
         removePrimerButton = remove
-        let bar = NSStackView(views: [add, NSView(), remove])
+        let pcr = NSButton(title: "PCR…", target: self, action: #selector(pcrClicked(_:)))
+        pcr.controlSize = .small
+        pcr.toolTip = "Amplify between two of these primers and see the product"
+        let bar = NSStackView(views: [add, pcr, NSView(), remove])
         bar.spacing = 8
         bar.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 2, right: 10)
         let list = NSStackView(views: [bar, scroll])
@@ -242,6 +247,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
     }
 
     @objc private func addPrimerClicked(_ sender: Any?) { beginAddingPrimer(bases: "") }
+    @objc private func pcrClicked(_ sender: Any?) { onPcr?() }
 
     @objc private func removePrimerClicked(_ sender: Any?) {
         let row = primerTable.selectedRow

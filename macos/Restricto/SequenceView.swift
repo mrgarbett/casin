@@ -42,6 +42,8 @@ final class SequenceView: NSView {
     /// was in view, else the first one shown) and its height below the top
     /// of the view, so the lines rewrap around it instead of scrolling away.
     private var scrollAnchor: (position: Int, offset: CGFloat)?
+    /// The zoom the layout was made at (Zoom.level may have moved on since).
+    private var layoutZoom: CGFloat = 1
 
     init(document: CoreDocument) {
         self.document = document
@@ -53,6 +55,12 @@ final class SequenceView: NSView {
                 self.scrollToPosition(self.document.selectionStart)
             }
             self.needsDisplay = true
+        }
+        // ⌘+ and ⌘−: the width the layout gets changes, so it rewraps
+        // around the base at the top, as a resize does.
+        NotificationCenter.default.addObserver(forName: Zoom.changed, object: nil, queue: .main) { [weak self] _ in
+            self?.updateSize()
+            self?.needsDisplay = true
         }
     }
 
@@ -82,10 +90,21 @@ final class SequenceView: NSView {
         didSet { if trailingInset != oldValue { invalidateLayout() } }
     }
 
-    /// An event's point in the layout's coordinates.
+    /// An event's point in the layout's coordinates: the view's, unzoomed.
     private func layoutPoint(_ event: NSEvent) -> NSPoint {
-        convert(event.locationInWindow, from: nil)
+        let p = convert(event.locationInWindow, from: nil)
+        return NSPoint(x: p.x / zoom, y: p.y / zoom)
     }
+
+    /// ⌘+ and ⌘−: laid out at the width divided by this and drawn scaled up
+    /// by it, so the text grows and the lines rewrap, as a web page zooms.
+    private var targetZoom: CGFloat { CGFloat(Zoom.level) }
+    /// The zoom the current layout was made at, which drawing and clicks
+    /// use: while a quick run of zooms settles, it lags `targetZoom`.
+    private var zoom: CGFloat { layoutZoom }
+
+    /// The layout's width for the view's: what's left of the inset, unzoomed.
+    private var zoomedWidth: Double { Double(max(1, (availableWidth - trailingInset) / targetZoom)) }
 
     private var availableWidth: CGFloat {
         enclosingScrollView?.contentSize.width ?? bounds.width
@@ -93,7 +112,7 @@ final class SequenceView: NSView {
 
     @discardableResult
     private func ensureLayout() -> OpaquePointer? {
-        let width = Double(max(1, availableWidth - trailingInset))
+        let width = zoomedWidth
         let dark = isDarkAppearance
         if let current = layout, layoutDark == dark, layoutWidth != width {
             noteScrollAnchor(current)
@@ -118,6 +137,7 @@ final class SequenceView: NSView {
             }
             layoutWidth = width
             layoutDark = dark
+            layoutZoom = targetZoom
             if let layout = layout { oc_seq_layout_set_hover_codon(layout, Int32(hoverCodon)) }
             // Laid out while drawing: size and scroll once the draw is done.
             if scrollAnchor != nil { DispatchQueue.main.async { [weak self] in self?.updateSize() } }
@@ -126,23 +146,23 @@ final class SequenceView: NSView {
     }
 
     private var layoutIsCurrent: Bool {
-        layout != nil && layoutWidth == Double(max(1, availableWidth - trailingInset))
+        layout != nil && layoutWidth == zoomedWidth
     }
 
     private func noteScrollAnchor(_ layout: OpaquePointer) {
         guard scrollAnchor == nil else { return }
         let visible = visibleRect
         guard visible.height > 0 else { return }
-        var position = Int(oc_seq_layout_position_at(layout, 0, visible.minY + 1))
+        var position = Int(oc_seq_layout_position_at(layout, 0, visible.minY / zoom + 1))
         guard position >= 0 else { return }
         if document.hasSelection {
             let caret = Int32(document.selectionStart)
-            let top = CGFloat(oc_seq_layout_line_top(layout, caret))
-            if top >= visible.minY, top + CGFloat(oc_seq_layout_line_height(layout, caret)) <= visible.maxY {
+            let top = CGFloat(oc_seq_layout_line_top(layout, caret)) * zoom
+            if top >= visible.minY, top + CGFloat(oc_seq_layout_line_height(layout, caret)) * zoom <= visible.maxY {
                 position = Int(caret)
             }
         }
-        scrollAnchor = (position, CGFloat(oc_seq_layout_line_top(layout, Int32(position))) - visible.minY)
+        scrollAnchor = (position, CGFloat(oc_seq_layout_line_top(layout, Int32(position))) * zoom - visible.minY)
     }
 
     private func relayoutWhenSettled() {
@@ -156,19 +176,20 @@ final class SequenceView: NSView {
     func updateSize() {
         guard let layout = ensureLayout() else { return }
         let visibleHeight = enclosingScrollView?.contentSize.height ?? 0
-        let size = NSSize(width: availableWidth, height: max(oc_seq_layout_total_height(layout) + 20, visibleHeight))
+        let size = NSSize(width: availableWidth,
+                          height: max(CGFloat(oc_seq_layout_total_height(layout)) * zoom + 20, visibleHeight))
         if frame.size != size { setFrameSize(size) }
         if let keep = scrollAnchor, layoutIsCurrent {
             scrollAnchor = nil
-            let top = CGFloat(oc_seq_layout_line_top(layout, Int32(keep.position))) - keep.offset
+            let top = CGFloat(oc_seq_layout_line_top(layout, Int32(keep.position))) * zoom - keep.offset
             scroll(NSPoint(x: 0, y: max(0, min(top, size.height - visibleHeight))))
         }
     }
 
     func scrollToPosition(_ position: Int) {
         guard let layout = ensureLayout() else { return }
-        let top = oc_seq_layout_line_top(layout, Int32(position))
-        let height = oc_seq_layout_line_height(layout, Int32(position))
+        let top = CGFloat(oc_seq_layout_line_top(layout, Int32(position))) * zoom
+        let height = CGFloat(oc_seq_layout_line_height(layout, Int32(position))) * zoom
         let target = NSRect(x: 0, y: top, width: 1, height: height)
         if !visibleRect.contains(target) {
             scroll(NSPoint(x: 0, y: max(0, top - 20)))
@@ -177,11 +198,13 @@ final class SequenceView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext, let layout = ensureLayout(),
-              let scene = oc_seq_layout_render(layout, document.handle, dirtyRect.minY, dirtyRect.height) else { return }
+              let scene = oc_seq_layout_render(layout, document.handle, dirtyRect.minY / zoom,
+                                               dirtyRect.height / zoom) else { return }
         defer { oc_scene_free(scene) }
         ctx.saveGState()
         ctx.translateBy(x: 0, y: dirtyRect.minY)   // scenes are relative to the scroll offset
-        drawScene(scene, in: ctx, trailing: trailingInset)
+        ctx.scaleBy(x: zoom, y: zoom)
+        drawScene(scene, in: ctx, trailing: trailingInset / zoom)
         ctx.restoreGState()
     }
 
@@ -309,7 +332,7 @@ final class SequenceView: NSView {
 
     private func extendSelection(to p: NSPoint) {
         guard let layout = layout else { return }
-        let y = min(max(p.y, visibleRect.minY), visibleRect.maxY - 1)
+        let y = min(max(p.y, visibleRect.minY / zoom), visibleRect.maxY / zoom - 1)
         if let first = codonAnchor {
             // From the first codon to the one under the mouse, both whole;
             // off the amino acids, to the nearest base.

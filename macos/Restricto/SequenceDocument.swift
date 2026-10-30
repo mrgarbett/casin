@@ -41,6 +41,16 @@ final class SequenceDocument: NSDocument {
 
     override class var autosavesInPlace: Bool { false }
 
+    /// An unsaved product goes by its sequence's name ("pOC-demo PCR 1530 bp")
+    /// rather than "Untitled 2"; the save panel starts from it too.
+    override var displayName: String! {
+        get {
+            let name = core.name
+            return fileURL == nil && !name.isEmpty ? name : super.displayName
+        }
+        set { super.displayName = newValue }
+    }
+
     // The sidebar's Not Saved section and red dots follow these.
     private var wasEdited = false
 
@@ -83,26 +93,35 @@ final class SequenceDocument: NSDocument {
         Self.postDocumentsChanged()
     }
 
+    private static let genbankType = "io.github.mrgarbett.restricto.genbank"
+    private static let snapgeneType = "io.github.mrgarbett.restricto.snapgene-dna"
+    private static let emblType = "io.github.mrgarbett.restricto.embl"
+
+    /// Our type for the open file, by its extension; nil when untitled or
+    /// when it's GenBank or another format. Read from the URL only: AppKit
+    /// works out an untitled document's fileType from writableTypes, so
+    /// reading fileType there recursed forever.
+    private var ownFileType: String? {
+        switch fileURL?.pathExtension.lowercased() {
+        case "dna": return Self.snapgeneType
+        case "embl", "emb": return Self.emblType
+        default: return nil
+        }
+    }
+
     /// The type a file was opened as may be another app's (SnapGene's own
     /// .dna type, say), which the save panel doesn't list, so it would
     /// default to GenBank. Name ours instead, so Save As keeps the format.
     override var fileType: String? {
-        get {
-            switch fileURL?.pathExtension.lowercased() {
-            case "dna": return "io.github.mrgarbett.restricto.snapgene-dna"
-            case "embl", "emb": return "io.github.mrgarbett.restricto.embl"
-            default: return super.fileType
-            }
-        }
+        get { ownFileType ?? super.fileType }
         set { super.fileType = newValue }
     }
 
     /// The file's own format first: the save panel's format popup starts on
     /// the first one when the type the file was opened as isn't listed.
     override func writableTypes(for saveOperation: NSDocument.SaveOperationType) -> [String] {
-        let types = ["io.github.mrgarbett.restricto.genbank", "io.github.mrgarbett.restricto.snapgene-dna",
-                     "io.github.mrgarbett.restricto.embl"]
-        guard let own = fileType, let i = types.firstIndex(of: own) else { return types }
+        let types = [Self.genbankType, Self.snapgeneType, Self.emblType]
+        guard let own = ownFileType, let i = types.firstIndex(of: own) else { return types }
         return [types[i]] + types.enumerated().filter { $0.offset != i }.map { $0.element }
     }
 

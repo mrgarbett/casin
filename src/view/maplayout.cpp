@@ -768,6 +768,13 @@ void MapLayout::layoutLinear(TextMeasurer &tm)
         m_features.push_back(g);
     }
     m_linearBottom = lane0 + laneCount * kLinearPitch;
+    // A row for the primers under the features.
+    for (const Primer &pr : m_seq.primers)
+        if (m_options.primers && pr.binding.length() > 0 && pr.binding.end <= m_n) {
+            m_primerRowY = std::max(m_linearBottom, m_yb + 30) + 6;
+            m_linearBottom = m_primerRowY + 22;
+            break;
+        }
 }
 
 // ---- rendering ---------------------------------------------------------------
@@ -943,6 +950,41 @@ void MapLayout::renderLinear(Scene &s, const MapState &st) const
         for (const TextItem &t : g.label)
             s.text(t);
     }
+    // Primers: outlined arrows in their own row, pointing 5' to 3', named
+    // beside them, with a stub up off the 5' end for a tail that doesn't anneal.
+    for (const Primer &pr : m_seq.primers) {
+        if (!m_options.primers || pr.binding.length() <= 0 || pr.binding.end > m_n || m_primerRowY <= 0)
+            continue;
+        const bool rev = pr.strand == Strand::Reverse;
+        const double y0 = m_primerRowY, y1 = y0 + 7, ym = (y0 + y1) / 2;
+        double x0 = xOfPos(pr.binding.start), x1 = xOfPos(pr.binding.end);
+        if (x1 - x0 < 6) {
+            const double mid = (x0 + x1) / 2;
+            x0 = mid - 3;
+            x1 = mid + 3;
+        }
+        const double head = std::min(6.0, (x1 - x0) * 0.5);
+        const std::vector<Point> poly = rev ? std::vector<Point>{{x0, ym}, {x0 + head, y0}, {x1, y0}, {x1, y1}, {x0 + head, y1}}
+                                            : std::vector<Point>{{x0, y0}, {x1 - head, y0}, {x1, ym}, {x1 - head, y1}, {x0, y1}};
+        const Color pc = Color::parse(pr.color, m_theme.primer);
+        s.polygon(poly, pc.withAlpha(0.12), pc, 1.4);
+        const int tail = std::max(0, int(pr.bases.size()) - pr.binding.length());
+        if (tail > 0) {
+            const double x5 = rev ? x1 : x0;
+            const double len = std::clamp(tail * (m_xr - m_xl) / std::max(1, m_n), 4.0, 24.0);
+            const double out = rev ? x5 + len : x5 - len;
+            s.line({x5, ym}, {x5 + (out - x5) * 0.25, y0 - 4}, pc, 1.4);
+            s.line({x5 + (out - x5) * 0.25, y0 - 4}, {out, y0 - 4}, pc, 1.4);
+        }
+        // The name past the 3' end, inside the map.
+        const Font font{10 * m_ts, false, false};
+        if (rev)
+            s.label(pr.name, {std::max(x0 - 4, m_xl), ym}, font, m_theme.text,
+                    x0 - 4 > m_xl + 40 ? HAlign::Right : HAlign::Left, VAlign::Middle);
+        else
+            s.label(pr.name, {std::min(x1 + 4, m_xr), ym}, font, m_theme.text,
+                    x1 + 4 < m_xr - 40 ? HAlign::Left : HAlign::Right, VAlign::Middle);
+    }
     if (st.hasSelection && st.selection.length == 0) {
         const double x = xOfPos(st.selection.start);
         s.line({x, m_yb - 8}, {x, bottom + 2}, m_theme.selectionEdge, 1.5);
@@ -984,6 +1026,12 @@ MapHit MapLayout::hitTest(Point p) const
     MapHit hit;
     if (m_n == 0)
         return hit;
+    if (const int pr = primerAt(p); pr >= 0) {
+        hit.kind = MapHit::Primer;
+        hit.index = pr;
+        hit.position = positionAt(p);
+        return hit;
+    }
     for (const LabelGlyph &g : m_labels)
         if (g.primer < 0 && g.rect.adjusted(2).contains(p)) {
             hit.kind = g.feature >= 0 ? MapHit::Feature : MapHit::Site;
@@ -1000,6 +1048,38 @@ MapHit MapLayout::hitTest(Point p) const
     hit.kind = MapHit::Sequence;
     hit.position = positionAt(p);
     return hit;
+}
+
+// The primer whose arrow or name is at p, or -1. The arrows are drawn
+// as in render(): a band just outside the features, or the linear primer row.
+int MapLayout::primerAt(Point p) const
+{
+    if (!m_options.primers)
+        return -1;
+    for (const LabelGlyph &g : m_labels)
+        if (g.primer >= 0 && g.rect.adjusted(2).contains(p))
+            return g.primer;
+    for (int i = int(m_seq.primers.size()) - 1; i >= 0; --i) {
+        const Primer &pr = m_seq.primers[size_t(i)];
+        if (pr.binding.length() <= 0 || pr.binding.end > m_n)
+            continue;
+        if (m_circular) {
+            const double r = std::hypot(p.x - m_c.x, p.y - m_c.y);
+            const double r0 = m_featureOuter + 2;
+            if (r < r0 - 3 || r > r0 + 10)
+                continue;
+            const double pos = angleAt(p) / (2 * kPi) * m_n;
+            const double slack = 3.0 / std::max(1.0, r) / (2 * kPi) * m_n;   // 3 px either side
+            if (pos >= pr.binding.start - slack && pos <= pr.binding.end + slack)
+                return i;
+        } else {
+            if (m_primerRowY <= 0 || p.y < m_primerRowY - 3 || p.y > m_primerRowY + 10)
+                continue;
+            if (p.x >= xOfPos(pr.binding.start) - 3 && p.x <= xOfPos(pr.binding.end) + 3)
+                return i;
+        }
+    }
+    return -1;
 }
 
 std::string MapLayout::featureTooltip(int i) const

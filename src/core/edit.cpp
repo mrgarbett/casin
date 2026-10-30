@@ -2,6 +2,7 @@
 #include "edit.h"
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace oc {
 
@@ -65,6 +66,63 @@ void deleteRange(Sequence &seq, int d0, int d1)
 
 } // namespace
 
+// A CDS cut short at its 5' end keeps its reading frame: codon_start moves
+// by the bases cut off, and the old translation no longer applies.
+// `kept` are the stretches of the template the fragment holds.
+static void keepReadingFrame(Feature &cut, const Feature &whole, const std::vector<Range> &kept)
+{
+    if (whole.strand == Strand::None)
+        return;
+    const bool forward = whole.strand != Strand::Reverse;
+    // The bases of `r` the fragment keeps: the lowest and highest, or false.
+    auto keptIn = [&](const Range &r, int *lo, int *hi) {
+        *lo = r.end;
+        *hi = r.start;
+        for (const Range &k : kept) {
+            const int a = std::max(r.start, k.start), b = std::min(r.end, k.end);
+            if (b > a) {
+                *lo = std::min(*lo, a);
+                *hi = std::max(*hi, b);
+            }
+        }
+        return *hi > *lo;
+    };
+    // Bases cut from the 5' end, reading the CDS the way it's translated.
+    int removed = 0;
+    bool found = false;
+    const int count = int(whole.ranges.size());
+    for (int i = 0; i < count && !found; ++i) {
+        const Range &r = whole.ranges[size_t(forward ? i : count - 1 - i)];
+        int lo, hi;
+        if (keptIn(r, &lo, &hi)) {
+            removed += forward ? lo - r.start : r.end - hi;
+            found = true;
+        } else {
+            removed += r.length();
+        }
+    }
+    if (!found || removed == 0)
+        return;
+    const int offset = std::max(0, std::atoi(whole.qualifier("codon_start").c_str()) - 1);
+    const std::string codonStart = std::to_string(((offset - removed) % 3 + 3) % 3 + 1);
+    std::vector<Qualifier> qualifiers;
+    bool set = false;
+    for (const Qualifier &q : cut.qualifiers) {
+        if (q.key == "translation")
+            continue;
+        if (q.key == "codon_start") {
+            if (!set)
+                qualifiers.push_back({"codon_start", codonStart});
+            set = true;
+            continue;
+        }
+        qualifiers.push_back(q);
+    }
+    if (!set)
+        qualifiers.push_back({"codon_start", codonStart});
+    cut.qualifiers = qualifiers;
+}
+
 Sequence extractFragment(const Sequence &seq, Span span)
 {
     const int n = seq.length();
@@ -107,6 +165,9 @@ Sequence extractFragment(const Sequence &seq, Span span)
         sortRangesTopStrand(out, len, false);
         Feature g = f;
         g.ranges = out;
+        if (f.type == "CDS")
+            keepReadingFrame(g, f, pieces.size() == 2 ? std::vector<Range>{pieces[0].r, pieces[1].r}
+                                                      : std::vector<Range>{pieces[0].r});
         frag.features.push_back(g);
     }
     for (const Primer &pr : seq.primers)

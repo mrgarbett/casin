@@ -37,7 +37,7 @@ enum {
 };
 enum { OC_FORMAT_GENBANK = 1, OC_FORMAT_FASTA = 2, OC_FORMAT_SNAPGENE = 3, OC_FORMAT_EMBL = 4 };
 enum { OC_STRAND_NONE = 0, OC_STRAND_FORWARD = 1, OC_STRAND_REVERSE = 2 };
-enum { OC_HIT_NONE = 0, OC_HIT_FEATURE = 1, OC_HIT_SITE = 2, OC_HIT_SEQUENCE = 3 };
+enum { OC_HIT_NONE = 0, OC_HIT_FEATURE = 1, OC_HIT_SITE = 2, OC_HIT_SEQUENCE = 3, OC_HIT_PRIMER = 4 };
 enum { OC_ITEM_PATH = 0, OC_ITEM_TEXT = 1 };
 enum { OC_HALIGN_LEFT = 0, OC_HALIGN_CENTER = 1, OC_HALIGN_RIGHT = 2 };
 enum { OC_VALIGN_BASELINE = 0, OC_VALIGN_MIDDLE = 1, OC_VALIGN_TOP = 2 };
@@ -245,9 +245,16 @@ OCMapLayout *oc_map_layout_new_options(const OCDocument *doc, double width, doub
 OCMapLayout *oc_map_layout_new_frames(const OCDocument *doc, double width, double height, bool dark,
                                       bool show_enzymes, bool show_primers, const char *hidden_types, int frames,
                                       OCMeasureText measure, void *context);
+/* Like oc_map_layout_new_frames, with the map's text (labels, ticks, names)
+   scaled by text_scale and its geometry left to fit: zoom without shrinking text. */
+OCMapLayout *oc_map_layout_new_scaled(const OCDocument *doc, double width, double height, bool dark,
+                                      bool show_enzymes, bool show_primers, const char *hidden_types, int frames,
+                                      double text_scale, OCMeasureText measure, void *context);
+/* Circular maps: the backbone's radius; 0 for linear ones. */
+double oc_map_layout_radius(const OCMapLayout *layout);
 void oc_map_layout_free(OCMapLayout *layout);
 OCScene *oc_map_layout_render(const OCMapLayout *layout, const OCDocument *doc);
-/* kind = OC_HIT_*; index = feature or visible-site index; position = base boundary. */
+/* kind = OC_HIT_*; index = feature, visible-site or primer index; position = base boundary. */
 void oc_map_layout_hit(const OCMapLayout *layout, double x, double y, int *kind, int *index, int *position);
 bool oc_map_layout_is_circular(const OCMapLayout *layout);
 double oc_map_layout_angle_at(const OCMapLayout *layout, double x, double y);
@@ -328,6 +335,35 @@ typedef struct {
 
 /* Returns the warnings, one per line ("" when the primer looks fine). */
 char *oc_primer_check(const char *bases, OCPrimerCheck *out);
+
+/* PCR cycling as NEB suggests it, with Tm and annealing temperature as NEB's
+   Tm calculator works them out for each polymerase's buffer. */
+enum { OC_POLYMERASE_Q5 = 0, OC_POLYMERASE_PHUSION = 1, OC_POLYMERASE_TAQ = 2, OC_POLYMERASE_COUNT = 3 };
+typedef struct {
+    char name[32];
+    int celsius;
+    int seconds;         /* 0 for a hold */
+    bool cycled;         /* repeated `cycles` times */
+} OCPcrStep;
+typedef struct {
+    int tm1, tm2;        /* the primers' annealing parts, whole degrees C */
+    int annealing;       /* Ta */
+    bool capped;         /* Ta held at the polymerase's highest */
+    bool two_step;       /* annealing and extension in one step */
+    int cycles;
+    int step_count;      /* 0 when a primer isn't plain DNA */
+    OCPcrStep steps[8];
+} OCPcrProgram;
+/* anneal1 and anneal2 are the primers' annealing parts (no tails). */
+void oc_pcr_program(const char *anneal1, const char *anneal2, int length, int polymerase, int cycles,
+                    OCPcrProgram *out);
+/* The same program as a Markdown table after `title`. Free with oc_string_free. */
+char *oc_pcr_program_markdown(const char *anneal1, const char *anneal2, int length, int polymerase, int cycles,
+                              const char *title);
+char *oc_polymerase_name(int polymerase);
+int oc_polymerase_max_length(int polymerase);
+/* "1 min 35 s", "30 s", "hold". */
+char *oc_format_seconds(int seconds);
 char *oc_primer_pair_check(const char *a, const char *b);
 /* Designs a pair that amplifies the selection and adds it as one undo step. */
 bool oc_document_design_primers(OCDocument *doc, double target_tm, char **error);

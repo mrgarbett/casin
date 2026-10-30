@@ -8,6 +8,7 @@ final class MapView: NSView {
     private var layout: OpaquePointer?
     private var layoutSize = CGSize.zero
     private var layoutDark = false
+    private var layoutZoom = 1.0
     // drag state
     private var selecting = false
     private var anchor = 0
@@ -17,6 +18,9 @@ final class MapView: NSView {
     var onHoverBase: ((Int) -> Void)?
     /// Called with a feature's index when it is double-clicked.
     var onEditFeature: ((Int) -> Void)?
+    /// Called with a primer's index when it is clicked, and whether shift
+    /// was down. Without it, a click on a primer selects where it binds.
+    var onPickPrimer: ((Int, Bool) -> Void)?
 
     init(document: CoreDocument) {
         self.document = document
@@ -25,6 +29,10 @@ final class MapView: NSView {
             guard let self = self else { return }
             if what & (Change.sequence | Change.enzymes | Change.pending) != 0 { self.invalidateLayout() }
             self.needsDisplay = true
+        }
+        // ⌘+ and ⌘−: the map's text grows and shrinks; its geometry fits.
+        NotificationCenter.default.addObserver(forName: Zoom.changed, object: nil, queue: .main) { [weak self] _ in
+            self?.invalidateLayout()
         }
     }
 
@@ -74,11 +82,13 @@ final class MapView: NSView {
         // Laid out afresh at every size, including each frame of a side
         // panel sliding open: it takes well under a millisecond, and the map
         // then ends exactly where it will stay, with no snap at the end.
-        if layout == nil || layoutSize != mapSize || layoutDark != dark {
+        let zoom = Zoom.level
+        if layout == nil || layoutSize != mapSize || layoutDark != dark || layoutZoom != zoom {
             if let old = layout { oc_map_layout_free(old) }
-            layout = newMapLayout(document, size: mapSize, dark: dark)
+            layout = newMapLayout(document, size: mapSize, dark: dark, textScale: zoom)
             layoutSize = mapSize
             layoutDark = dark
+            layoutZoom = zoom
         }
         return layout
     }
@@ -104,6 +114,12 @@ final class MapView: NSView {
             if event.clickCount == 2 { onEditFeature?(Int(index)) }
         case Int32(OC_HIT_SITE):
             document.activateSite(Int(index))
+        case Int32(OC_HIT_PRIMER):
+            if let pick = onPickPrimer {
+                pick(Int(index), event.modifierFlags.contains(.shift))
+            } else if let p = document.primers.first(where: { $0.index == Int(index) }), p.length > 0 {
+                document.select(start: p.start, length: p.length)
+            }
         case Int32(OC_HIT_SEQUENCE):
             selecting = true
             anchor = Int(position)

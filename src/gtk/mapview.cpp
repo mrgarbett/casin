@@ -146,6 +146,7 @@ void MapView::dragBegin(GtkGestureDrag *, double x, double y, gpointer p)
     case view::MapHit::Site:
         self->m_doc->activateSite(hit.index);
         break;
+    case view::MapHit::Primer:   // as before primers were hit-tested: start a selection
     case view::MapHit::Sequence:
         self->m_selecting = true;
         self->m_anchor = hit.position;
