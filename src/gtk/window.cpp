@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <utility>
 #include <unistd.h>
 
 namespace oc::gtk {
@@ -261,9 +262,12 @@ Window::Window(Shell *shell) : m_shell(shell), m_window(shell->widget())
 Window::~Window()
 {
     if (m_panelAnim) {
-        g_signal_handlers_disconnect_by_data(m_panelAnim, this);
-        adw_animation_reset(m_panelAnim);
-        g_object_unref(m_panelAnim);
+        // Resetting moves it to its start, which no longer reaches the paned:
+        // that's gone by now.
+        AdwAnimation *anim = std::exchange(m_panelAnim, nullptr);
+        g_signal_handlers_disconnect_by_data(anim, this);
+        adw_animation_reset(anim);
+        g_object_unref(anim);
     }
     if (m_badgeTimer)
         g_source_remove(m_badgeTimer);
@@ -834,7 +838,9 @@ void Window::setPanelShown(bool shown)
     if (!m_panelAnim) {
         AdwAnimationTarget *target = adw_callback_animation_target_new(
             +[](double v, gpointer p) {
-                gtk_paned_set_position(GTK_PANED(static_cast<Window *>(p)->m_outer), int(std::lround(v)));
+                auto *self = static_cast<Window *>(p);
+                if (self->m_panelAnim)
+                    gtk_paned_set_position(GTK_PANED(self->m_outer), int(std::lround(v)));
             },
             this, nullptr);
         m_panelAnim = adw_timed_animation_new(m_outer, 0, 1, 220, target);
