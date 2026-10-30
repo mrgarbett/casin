@@ -124,6 +124,7 @@ private:
     double m_innerR = 0;
     // linear geometry
     double m_xl = 0, m_xr = 0, m_yb = 0, m_linearBottom = 0;
+    double m_primerRowY = 0;   // linear: the primers' row, or 0 for none
     Font m_labelFont{11, false, false};
 };
 

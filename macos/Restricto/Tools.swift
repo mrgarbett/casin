@@ -117,7 +117,7 @@ enum ToolMenus {
                 exp(item("Choose Enzymes…", #selector(W.chooseEnzymes(_:)))),
                 exp(item("Enzyme Set…", #selector(W.enzymeSet(_:)))),
                 .separator(),
-                item("PCR Product…", #selector(W.pcrProduct(_:))),
+                item("PCR…", #selector(W.pcrProduct(_:))),
                 item("Insertion by PCR…", #selector(W.insertionByPcr(_:))),
                 item("Gibson Assembly…", #selector(W.gibson(_:))),
                 exp(.separator()),
@@ -625,22 +625,12 @@ extension DocumentWindowController {
 
     // MARK: Cloning
 
+    /// Opens the PCR wizard on this sequence (see PcrWizard).
     @objc func pcrProduct(_ sender: Any?) {
-        guard let d = doc else { return }
-        let primers = primerList(d)
-        guard primers.count >= 2 else {
-            tell("PCR Product", "Add a forward and a reverse primer to this sequence first.")
-            return
-        }
-        let form = Form("PCR Product")
-        let fwd = form.popup("Forward", primers.map { $0.label },
-                             selected: primers.firstIndex { $0.info.strand == Int32(OC_STRAND_FORWARD) } ?? 0)
-        let rev = form.popup("Reverse", primers.map { $0.label },
-                             selected: primers.firstIndex { $0.info.strand == Int32(OC_STRAND_REVERSE) } ?? 1)
-        form.run(in: window, ok: "Open Product") { [weak self] in
-            self?.product("PCR Product") {
-                oc_pcr_product(d.handle, Int32(fwd.indexOfSelectedItem), Int32(rev.indexOfSelectedItem), $0, $1)
-            }
+        guard let d = doc, !d.isEmpty else { return }
+        PcrWizard.show(for: d, near: window) { [weak self] in
+            self?.window?.makeKeyAndOrderFront(nil)
+            self?.beginAddingPrimer(bases: "")
         }
     }
 

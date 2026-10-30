@@ -133,6 +133,31 @@ jobs:
           APP=build/macos/Restricto.app/Contents/MacOS/Restricto
           "$APP" --ui-smoke ui-first-launch samples/pOC-demo.dna
           "$APP" --ui-smoke ui-second-launch samples/pOC-demo.dna
+      - name: Crash report, if the app crashed
+        if: failure()
+        run: |
+          sleep 20   # ReportCrash writes the report a little after the crash
+          for f in ~/Library/Logs/DiagnosticReports/Restricto*; do
+            [ -e "$f" ] || continue
+            echo "== $f"
+            python3 - "$f" <<'PY'
+          import json, sys
+          text = open(sys.argv[1]).read()
+          head, _, body = text.partition("\n")
+          try:
+              r = json.loads(body)
+          except ValueError:
+              print(text[:20000]); sys.exit()
+          print(r.get("exception"), r.get("termination", {}).get("indicator"))
+          images = r.get("usedImages", [])
+          for t in r.get("threads", []):
+              if not t.get("triggered"):
+                  continue
+              for fr in t.get("frames", [])[:40]:
+                  img = images[fr["imageIndex"]].get("name", "?") if fr.get("imageIndex", -1) < len(images) else "?"
+                  print(f'{img:28} {fr.get("symbol", "?")} +{fr.get("symbolLocation", 0)}')
+          PY
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:

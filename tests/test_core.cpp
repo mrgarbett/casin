@@ -744,6 +744,26 @@ static void testEditing()
     CHECK_EQ(t.bases, std::string("ACACAAAACCCCGG"));
     CHECK(sameRanges(t.features.back().ranges, {{0, 4}}));
     CHECK(sameRanges(t.features[0].ranges, {{6, 10}}));
+
+    // A CDS cut at its 5' end keeps its frame through codon_start.
+    Sequence g;
+    g.bases = "ATGAAACCCGGGTTTTAA";
+    Feature cds;
+    cds.type = "CDS";
+    cds.strand = Strand::Forward;
+    cds.ranges = {{0, 18}};
+    cds.qualifiers = {{"codon_start", "1"}, {"translation", "MKPGF"}};
+    g.features = {cds};
+    frag = extractFragment(g, {4, 14});              // from the second base of codon 2
+    CHECK_EQ(frag.features[0].qualifier("codon_start"), std::string("3"));
+    CHECK(!frag.features[0].hasQualifier("translation"));
+    frag = extractFragment(g, {3, 15});              // a whole codon off: still frame 1
+    CHECK_EQ(frag.features[0].qualifier("codon_start"), std::string("1"));
+    frag = extractFragment(g, {0, 10});              // the 5' end kept: untouched
+    CHECK(frag.features[0].hasQualifier("translation"));
+    g.features[0].strand = Strand::Reverse;          // reverse: the 5' end is on the right
+    frag = extractFragment(g, {0, 17});              // one base off the right
+    CHECK_EQ(frag.features[0].qualifier("codon_start"), std::string("3"));
 }
 
 static void testSnapGeneWriter()
