@@ -21,6 +21,25 @@ std::string bandText(int bp)
 }
 } // namespace
 
+double gelRunFraction(double bp, bool supercoiled)
+{
+    bp = std::clamp(supercoiled ? bp * kSupercoiled : bp, kMinBp, kMaxBp);
+    return (std::log10(kMaxBp) - std::log10(bp)) / (std::log10(kMaxBp) - std::log10(kMinBp));
+}
+
+double gelBandIntensity(const GelLane &lane, int bp)
+{
+    // Mass per band, relative to the heaviest band in the lane.
+    double heaviest = 1;
+    for (int b : lane.bands)
+        heaviest = std::max(heaviest, double(b));
+    const bool bright = std::find(lane.bright.begin(), lane.bright.end(), bp) != lane.bright.end();
+    double alpha = lane.ladder ? (bright ? 0.95 : 0.6) : 0.35 + 0.6 * std::sqrt(bp / heaviest);
+    if (bp > kMaxBp || bp < kMinBp)
+        alpha *= 0.5;   // off the gel's useful range
+    return std::min(1.0, alpha);
+}
+
 GelLayout::GelLayout(std::vector<GelLane> lanes, const Theme &theme, TextMeasurer &tm, double width, double height)
     : m_lanes(std::move(lanes)), m_theme(theme), m_w(width), m_h(height)
 {
@@ -41,9 +60,7 @@ GelLayout::GelLayout(std::vector<GelLane> lanes, const Theme &theme, TextMeasure
 
 double GelLayout::yOfSize(double bp) const
 {
-    bp = std::clamp(bp, kMinBp, kMaxBp);
-    const double t = (std::log10(kMaxBp) - std::log10(bp)) / (std::log10(kMaxBp) - std::log10(kMinBp));
-    return m_runTop + t * (m_runBottom - m_runTop);
+    return m_runTop + gelRunFraction(bp) * (m_runBottom - m_runTop);
 }
 
 Scene GelLayout::render() const
@@ -66,17 +83,9 @@ Scene GelLayout::render() const
         // Well.
         s.rect({x + 2, m_gelY + 8, m_laneW - 4, 6}, Color::rgb(0, 0, 0, 0.55));
 
-        // Mass per band, relative to the heaviest band in the lane.
-        double heaviest = 1;
-        for (int bp : lane.bands)
-            heaviest = std::max(heaviest, double(bp));
         for (int bp : lane.bands) {
-            const bool bright = std::find(lane.bright.begin(), lane.bright.end(), bp) != lane.bright.end();
-            const double apparent = lane.uncutCircular ? bp * kSupercoiled : bp;
-            const double y = yOfSize(apparent);
-            double alpha = lane.ladder ? (bright ? 0.95 : 0.6) : 0.35 + 0.6 * std::sqrt(bp / heaviest);
-            if (bp > kMaxBp || bp < kMinBp)
-                alpha *= 0.5;   // off the gel's useful range
+            const double y = m_runTop + gelRunFraction(bp, lane.uncutCircular) * (m_runBottom - m_runTop);
+            const double alpha = gelBandIntensity(lane, bp);
             s.rect({x + 3, y - 2.5, m_laneW - 6, 5}, band.withAlpha(std::min(1.0, alpha * 0.35)));
             s.rect({x + 3, y - 1.5, m_laneW - 6, 3}, band.withAlpha(std::min(1.0, alpha)));
             if (lane.ladder && first)

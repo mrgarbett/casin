@@ -4,6 +4,7 @@
 #include "mapview.h"
 #include "seqview.h"
 #include "primereditor.h"
+#include "gelwizard.h"
 #include "pcrwizard.h"
 #include "core/abif.h"
 #include "core/seqio.h"
@@ -187,7 +188,7 @@ private:
     void endAddingPrimer();
     // Feature dialog: index < 0 adds a feature from the selection.
     void featureDialog(int index);
-    void digestDialog();
+    void openGelWizard();
     void openPcrWizard();
     void cloningDialog();
     void goldenGateDialog();
@@ -263,6 +264,7 @@ private:
     std::unique_ptr<PrimerEditor> m_primerEditor;
     guint m_endPrimerIdle = 0;
     PcrWizard *m_pcr = nullptr;   // owns itself; closes with this tab
+    GelWizard *m_gel = nullptr;   // the same
     bool m_closeConfirmed = false;
     GtkWidget *m_filter = nullptr;
     GtkWidget *m_setDrop = nullptr;

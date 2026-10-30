@@ -247,6 +247,8 @@ Window::Window(Shell *shell) : m_shell(shell), m_window(shell->widget())
             m_primerEditor->sequenceChanged();
         if (m_pcr)
             m_pcr->templateChanged();
+        if (m_gel)
+            m_gel->templateChanged();
         rebuildFeatureList();
         rebuildPrimerList();
         rebuildEnzymeList();
@@ -1321,6 +1323,28 @@ void Window::openPcrWizard()
     m_pcr->present();
 }
 
+void Window::openGelWizard()
+{
+    if (m_doc.isEmpty())
+        return;
+    if (m_gel) {
+        m_gel->present();
+        return;
+    }
+    GtkApplication *app = gtk_window_get_application(gtkWindow());
+    m_gel = new GelWizard(&m_doc, m_window, displayName(), [app] {
+        std::vector<GelSource> out;
+        for (Window *w : Window::all(app)) {
+            // Lanes are named as the sequence is, not as its file.
+            const std::string &name = w->document().sequence().name;
+            out.push_back({&w->document(), name.empty() ? w->displayName() : name});
+        }
+        return out;
+    });
+    m_gel->onClosed = [this] { m_gel = nullptr; };
+    m_gel->present();
+}
+
 void Window::endAddingPrimer()
 {
     if (!m_primerEditor)
@@ -1892,6 +1916,11 @@ void Window::closeTools()
         m_pcr->close();
         m_pcr = nullptr;
     }
+    if (m_gel) {
+        m_gel->onClosed = nullptr;
+        m_gel->close();
+        m_gel = nullptr;
+    }
 }
 
 bool Window::confirmClose(bool closeWindow)
@@ -2180,7 +2209,7 @@ void Window::actAddPrimer(GSimpleAction *, GVariant *, gpointer p)
 
 void Window::actDigest(GSimpleAction *, GVariant *, gpointer p)
 {
-    static_cast<Window *>(p)->digestDialog();
+    static_cast<Window *>(p)->openGelWizard();
 }
 
 void Window::actPcr(GSimpleAction *, GVariant *, gpointer p)

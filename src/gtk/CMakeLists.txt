@@ -29,6 +29,8 @@ add_executable(restricto
     mapview.cpp
     seqview.cpp
     primereditor.cpp
+    gelview.cpp
+    gelwizard.cpp
     pcrwizard.cpp)
 target_include_directories(restricto PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(restricto PRIVATE restricto_cairo PkgConfig::GTK4 PkgConfig::ADW)

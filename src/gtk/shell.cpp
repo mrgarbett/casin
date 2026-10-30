@@ -215,6 +215,24 @@ void Shell::loadStyles()
 .restricto-program .head { font-size: smaller; font-weight: bold; opacity: 0.5; }
 .restricto-program .once { opacity: 0.6; }
 .restricto-program .accent { color: @accent_color; font-weight: 600; }
+.restricto-lane-badge {
+  min-width: 22px; min-height: 22px; border-radius: 999px;
+  background-color: alpha(currentColor, 0.1);
+  font-size: smaller; font-weight: bold; font-feature-settings: "tnum";
+}
+row:selected .restricto-lane-badge { background-color: @accent_bg_color; color: @accent_fg_color; }
+.restricto-chip { border-radius: 999px; padding: 2px 10px; min-height: 24px; font-weight: 600; }
+.restricto-chip image { opacity: 0.55; -gtk-icon-size: 12px; }
+.restricto-gel-pill {
+  background-color: alpha(#1c1c20, 0.82);
+  color: white;
+  border-radius: 999px;
+  padding: 6px 8px;
+  box-shadow: 0 2px 10px alpha(black, 0.4), inset 0 1px alpha(white, 0.08);
+}
+.restricto-gel-pill button { color: white; border-radius: 999px; }
+.restricto-gel-pill button:checked { background-color: alpha(white, 0.18); }
+.restricto-gel-pill .linked > button:not(:checked) { background-color: alpha(white, 0.06); }
 )";
     // Our own icons (compiled in from src/gtk/icons): Fedora's Adwaita no
     // longer ships some of the generic ones the map toggle used.
