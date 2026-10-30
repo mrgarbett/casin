@@ -812,8 +812,9 @@ void GelWizard::addEnzyme(const std::string &typed)
     }
     gtk_label_set_text(GTK_LABEL(m_enzymeNote), ("Not a known enzyme: " + joined(unknown, ", ")).c_str());
     gtk_widget_set_visible(m_enzymeNote, !unknown.empty());
-    if (unknown.empty())
-        gtk_editable_set_text(GTK_EDITABLE(m_enzymeEntry), "");
+    // Only what wasn't added stays in the box, to be corrected.
+    gtk_editable_set_text(GTK_EDITABLE(m_enzymeEntry), joined(unknown, ", ").c_str());
+    gtk_editable_set_position(GTK_EDITABLE(m_enzymeEntry), -1);
     if (changed)
         refresh();
 }
