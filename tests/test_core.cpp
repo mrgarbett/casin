@@ -17,9 +17,11 @@
 #include "core/seqio.h"
 #include "core/sequence.h"
 #include "core/snapgene.h"
+#include "core/pcrprogram.h"
 #include "core/tm.h"
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -422,6 +424,53 @@ static void testTm()
     // Self-complementary path runs.
     const double sc = meltingTemperature("GAATTCGAATTC");
     CHECK(sc > 0 && sc < 60);
+}
+
+// Tm and annealing temperatures in each polymerase's buffer, as NEB's Tm
+// calculator gives them. The first pair is the example the independent
+// polymerase-tm project checks against NEB's tool (Q5: 72 and 75, Ta 72).
+static void testPcrProgram()
+{
+    const std::string a = "ATGTCCCTGCTCTTCTCTCGATGCAA", b = "GTGCCTCCGAGCCAGCACC";
+    CHECK_EQ(polymeraseTm(a, Polymerase::Q5), 72);
+    CHECK_EQ(polymeraseTm(b, Polymerase::Q5), 75);
+    CHECK_EQ(polymeraseTm(a, Polymerase::Phusion), 68);
+    CHECK_EQ(polymeraseTm(a, Polymerase::Taq), 64);
+    CHECK_EQ(polymeraseTm("acgn", Polymerase::Q5), INT_MIN);
+    CHECK_EQ(polymeraseTm("A", Polymerase::Q5), INT_MIN);
+
+    // Q5: the lower Tm + 1, at most 72; at 72 it anneals and extends in one step.
+    PcrProgram q5 = pcrProgram(a, b, 2500, Polymerase::Q5);
+    CHECK_EQ(q5.annealing, 72);
+    CHECK(q5.capped && q5.twoStep);   // 72 + 1, held at 72
+    CHECK_EQ(q5.steps.size(), size_t(5));
+    CHECK(q5.steps[2].name == "Annealing and extension" && q5.steps[2].seconds == 75);   // 2.5 kb x 30 s
+    // pOC-demo's seq-fwd and mcs-rev: 66 and 68 in Q5 buffer, Ta 67, three steps.
+    PcrProgram demo = pcrProgram("ACGTACAATGTGTTCGAAACAGGT", "CGGCTCTCTTTACACGGCTC", 1530, Polymerase::Q5);
+    CHECK(demo.tm1 == 66 && demo.tm2 == 68 && demo.annealing == 67 && !demo.twoStep);
+    CHECK_EQ(demo.steps.size(), size_t(6));
+    CHECK(demo.steps[3].name == "Extension" && demo.steps[3].seconds == 50);   // 46 s, rounded up to 5 s
+    CHECK(demo.steps[4].seconds == 120 && demo.steps[5].seconds == 0);
+    // Checked against NEB's Tm calculator for these two primers (500 nM):
+    // Phusion 63 / 62, Ta 65.5; Taq 59 / 61 (58.9 / 61.4), Ta 53.9.
+    PcrProgram ph = pcrProgram("ACGTACAATGTGTTCGAAACAGGT", "CGGCTCTCTTTACACGGCTC", 1530, Polymerase::Phusion);
+    CHECK(ph.tm1 == 63 && ph.tm2 == 62 && ph.annealing == 65);
+    PcrProgram taq = pcrProgram("ACGTACAATGTGTTCGAAACAGGT", "CGGCTCTCTTTACACGGCTC", 1530, Polymerase::Taq, 35);
+    CHECK(taq.tm1 == 59 && taq.tm2 == 61 && taq.annealing == 54 && taq.cycles == 35);
+    CHECK(taq.steps[0].celsius == 95 && taq.steps[3].celsius == 68 && taq.steps[3].seconds == 95);
+    // Hot primers in Taq: capped at 68, which is also its extension temperature.
+    PcrProgram hot = pcrProgram(b, b, 500, Polymerase::Taq);
+    CHECK(hot.tm1 == 69 && hot.annealing == 64 && !hot.capped);
+    CHECK(pcrProgram("GCGGCCGCGGCGCCGCGGCCGC", "GCGGCCGCGGCGCCGCGGCCGC", 500, Polymerase::Taq).capped);
+    // No program for a primer that isn't plain DNA.
+    CHECK(pcrProgram("ACGN", b, 500, Polymerase::Q5).steps.empty());
+
+    CHECK(formatSeconds(95) == "1 min 35 s" && formatSeconds(120) == "2 min" && formatSeconds(30) == "30 s");
+    const std::string md = pcrProgramMarkdown(demo, "Q5 · seq-fwd + mcs-rev · 1,530 bp");
+    CHECK(md.find("| Step | Temperature | Time | Cycles |") != std::string::npos);
+    CHECK(md.find("| Denaturation | 98 °C | 10 s | 30 |") != std::string::npos);
+    CHECK(md.find("| Annealing | 67 °C | 20 s |  |") != std::string::npos);
+    CHECK(md.find("| Hold | 4 °C | hold | 1 |") != std::string::npos);
 }
 
 static void testFastaAndIO()
@@ -1539,6 +1588,7 @@ int main(int argc, char **argv)
     testSnapGene();
     testEnzymes();
     testTm();
+    testPcrProgram();
     testFastaAndIO();
     testEditing();
     testSnapGeneWriter();

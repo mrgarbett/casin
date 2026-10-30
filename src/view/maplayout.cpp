@@ -60,6 +60,8 @@ MapLayout::MapLayout(const oc::Sequence &seq, const std::vector<CutSite> &sites,
     : m_seq(seq), m_sites(sites), m_theme(theme), m_options(std::move(options)), m_w(width), m_h(height),
       m_n(seq.length()), m_circular(seq.circular)
 {
+    m_ts = clampd(m_options.textScale, 0.5, 3);
+    m_labelFont.size *= m_ts;
     std::map<const Enzyme *, int> counts;
     for (const CutSite &s : m_sites)
         ++counts[s.enzyme];
@@ -293,7 +295,7 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
     double enzymeLabelW = 0;
     for (const LabelGlyph &g : m_labels)
         enzymeLabelW = std::max(enzymeLabelW, g.rect.w);
-    const Font calloutFont{11, false, false};
+    const Font calloutFont{11 * m_ts, false, false};
 
     // Lanes: longest features first so short ones can stack outside them.
     std::vector<int> order;
@@ -317,7 +319,7 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
                 const Feature &f = m_seq.features[size_t(fi)];
                 const double rMid = r + 6 + lanes[size_t(fi)] * (laneH + kLaneGap) + laneH / 2;
                 const double arc = 2 * kPi * rMid * f.span(m_n, true).length / std::max(1, m_n) - laneH;
-                const Font font{std::min(10.5, laneH * 0.72), true, false};
+                const Font font{std::min(10.5 * m_ts, laneH * 0.72), true, false};
                 if (tm.width(f.name, font) + 8 >= arc)
                     w = std::max(w, tm.width(f.name, calloutFont) + 12);
             }
@@ -350,13 +352,13 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
     // Ticks, inside the backbone, with labels kept clear of the name and
     // length in the centre (see renderCircular).
     const std::string centreName = m_seq.name.empty() ? "Untitled" : m_seq.name;
-    const double nameSize = clampd(m_innerR / 7, 11, 18);
+    const double nameSize = clampd(m_innerR / 7, 11, 18) * m_ts;
     const Font centreFont{nameSize, true, false}, lengthFont{nameSize * 0.72, false, false};
     const double centreW = std::max(tm.width(centreName, centreFont), tm.width(formatBp(m_n), lengthFont));
     const Rect centre{m_c.x - centreW / 2 - 4, m_c.y - 2 - tm.height(centreFont) - 2, centreW + 8,
                       tm.height(centreFont) + nameSize * 0.6 + 10 + tm.height(lengthFont)};
     const int step = niceStep(m_n, int(clampd(m_r / 14, 6, 24)));
-    const Font tickFont{std::max(8.0, std::min(10.0, m_r / 14)), false, false};
+    const Font tickFont{std::max(8.0, std::min(10.0, m_r / 14)) * m_ts, false, false};
     for (int p = 0; p < m_n; p += step) {
         const double a = angleOfPos(p);
         const double len = p == 0 ? 9 : 5;
@@ -444,7 +446,7 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
         }
 
         // Name along the arc, when it fits.
-        Font font{std::min(10.5, m_laneH * 0.72), true, false};
+        Font font{std::min(10.5 * m_ts, m_laneH * 0.72), true, false};
         const double textW = tm.width(f.name, font);
         if (textW + 8 < bestLen * rMid) {
             const double am = (textA0 + textA1) / 2;
@@ -666,7 +668,7 @@ void MapLayout::layoutLinear(TextMeasurer &tm)
 
     // Ticks below the backbone.
     const int step = niceStep(m_n, int(clampd((m_xr - m_xl) / 90, 3, 15)));
-    const Font tickFont{9.5, false, false};
+    const Font tickFont{9.5 * m_ts, false, false};
     for (int p = 0; p <= m_n; p += step) {
         const double x = xOfPos(p == 0 ? 0 : p);
         m_ticks.push_back({{x, m_yb + 4 + m_orfBand}, {x, m_yb + 9 + m_orfBand}});
@@ -731,7 +733,7 @@ void MapLayout::layoutLinear(TextMeasurer &tm)
             if (b + 1 < bl.size())
                 g.connectors.push_back({{x1, ym}, {xOfPos(bl[b + 1].start), ym}});
         }
-        Font font{10, true, false};
+        Font font{10 * m_ts, true, false};
         if (tm.width(f.name, font) + 8 < bestW) {
             TextItem t;
             t.text = f.name;
@@ -743,7 +745,7 @@ void MapLayout::layoutLinear(TextMeasurer &tm)
             g.label.push_back(t);
         } else {
             // Name under the arrow, unless it would collide with another in this lane.
-            const Font small{10, false, false};
+            const Font small{10 * m_ts, false, false};
             const double w = tm.width(f.name, small);
             const double cx = std::clamp((tx0 + tx1) / 2, w / 2 + 2, m_w - w / 2 - 2);
             auto &used = below[g.lane];
@@ -914,7 +916,7 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
 
     // Name and length in the center.
     const std::string name = m_seq.name.empty() ? "Untitled" : m_seq.name;
-    const double nameSize = clampd(m_innerR / 7, 11, 18);   // as in layoutCircular
+    const double nameSize = clampd(m_innerR / 7, 11, 18) * m_ts;   // as in layoutCircular
     s.label(name, {m_c.x, m_c.y - 2}, {nameSize, true, false}, m_theme.text, HAlign::Center, VAlign::Baseline);
     s.label(formatBp(m_n), {m_c.x, m_c.y + nameSize * 0.6 + 4}, {nameSize * 0.72, false, false},
             m_theme.mutedText, HAlign::Center, VAlign::Top);
@@ -931,7 +933,7 @@ void MapLayout::renderLinear(Scene &s, const MapState &st) const
     renderLabels(s, st);
     s.line({m_xl, m_yb}, {m_xr, m_yb}, m_theme.backbone, 1.2);
     s.line({m_xl, m_yb + 3}, {m_xr, m_yb + 3}, m_theme.backbone, 1.2);
-    const Font endFont{10, false, false};
+    const Font endFont{10 * m_ts, false, false};
     s.label("5\u2032", {m_xl - 4, m_yb + 1.5}, endFont, m_theme.mutedText, HAlign::Right, VAlign::Middle);
     s.label("3\u2032", {m_xr + 4, m_yb + 1.5}, endFont, m_theme.mutedText, HAlign::Left, VAlign::Middle);
     for (const auto &t : m_ticks)
@@ -975,7 +977,7 @@ void MapLayout::renderLinear(Scene &s, const MapState &st) const
             s.line({x5 + (out - x5) * 0.25, y0 - 4}, {out, y0 - 4}, pc, 1.4);
         }
         // The name past the 3' end, inside the map.
-        const Font font{10, false, false};
+        const Font font{10 * m_ts, false, false};
         if (rev)
             s.label(pr.name, {std::max(x0 - 4, m_xl), ym}, font, m_theme.text,
                     x0 - 4 > m_xl + 40 ? HAlign::Right : HAlign::Left, VAlign::Middle);
@@ -1024,6 +1026,12 @@ MapHit MapLayout::hitTest(Point p) const
     MapHit hit;
     if (m_n == 0)
         return hit;
+    if (const int pr = primerAt(p); pr >= 0) {
+        hit.kind = MapHit::Primer;
+        hit.index = pr;
+        hit.position = positionAt(p);
+        return hit;
+    }
     for (const LabelGlyph &g : m_labels)
         if (g.primer < 0 && g.rect.adjusted(2).contains(p)) {
             hit.kind = g.feature >= 0 ? MapHit::Feature : MapHit::Site;
@@ -1040,6 +1048,38 @@ MapHit MapLayout::hitTest(Point p) const
     hit.kind = MapHit::Sequence;
     hit.position = positionAt(p);
     return hit;
+}
+
+// The primer whose arrow or name is at p, or -1. The arrows are drawn
+// as in render(): a band just outside the features, or the linear primer row.
+int MapLayout::primerAt(Point p) const
+{
+    if (!m_options.primers)
+        return -1;
+    for (const LabelGlyph &g : m_labels)
+        if (g.primer >= 0 && g.rect.adjusted(2).contains(p))
+            return g.primer;
+    for (int i = int(m_seq.primers.size()) - 1; i >= 0; --i) {
+        const Primer &pr = m_seq.primers[size_t(i)];
+        if (pr.binding.length() <= 0 || pr.binding.end > m_n)
+            continue;
+        if (m_circular) {
+            const double r = std::hypot(p.x - m_c.x, p.y - m_c.y);
+            const double r0 = m_featureOuter + 2;
+            if (r < r0 - 3 || r > r0 + 10)
+                continue;
+            const double pos = angleAt(p) / (2 * kPi) * m_n;
+            const double slack = 3.0 / std::max(1.0, r) / (2 * kPi) * m_n;   // 3 px either side
+            if (pos >= pr.binding.start - slack && pos <= pr.binding.end + slack)
+                return i;
+        } else {
+            if (m_primerRowY <= 0 || p.y < m_primerRowY - 3 || p.y > m_primerRowY + 10)
+                continue;
+            if (p.x >= xOfPos(pr.binding.start) - 3 && p.x <= xOfPos(pr.binding.end) + 3)
+                return i;
+        }
+    }
+    return -1;
 }
 
 std::string MapLayout::featureTooltip(int i) const

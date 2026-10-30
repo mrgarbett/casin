@@ -24,12 +24,15 @@ struct MapOptions {
     std::set<std::string> hiddenTypes;
     int frames = 0;           // 3: forward ORFs as arrows, 6: both strands (as the sequence's translation)
     int minOrfCodons = 75;    // as SeqOptions::minOrfCodons
+    // Scales the map's text (labels, ticks, names) but not its geometry, so
+    // zooming in makes the text easier to read without shrinking the circle.
+    double textScale = 1;
 };
 
 struct MapHit {
-    enum Kind { None, Feature, Site, Sequence } kind = None;
-    int index = -1;          // feature index, or site index for Site
-    int position = 0;        // nearest base boundary for Sequence
+    enum Kind { None, Feature, Site, Sequence, Primer } kind = None;
+    int index = -1;          // feature, site or primer index
+    int position = 0;        // nearest base boundary (Sequence and Primer)
 };
 
 // Lays out a circular map (circular sequences) or a linear map (otherwise)
@@ -46,6 +49,8 @@ public:
     // Circular only: angle of p around the center, radians clockwise from 12 o'clock.
     double angleAt(Point p) const;
     bool isCircular() const { return m_circular; }
+    // Circular only: the backbone's radius, which the labels' room decides.
+    double radius() const { return m_r; }
     std::string tooltipAt(Point p) const;
 
 private:
@@ -91,6 +96,7 @@ private:
     void renderLabels(Scene &s, const MapState &st) const;
     void findMapOrfs();
     void renderOrfs(Scene &s) const;
+    int primerAt(Point p) const;
     std::string featureTooltip(int i) const;
     std::string siteTooltip(const std::vector<int> &sites) const;
 
@@ -125,6 +131,7 @@ private:
     // linear geometry
     double m_xl = 0, m_xr = 0, m_yb = 0, m_linearBottom = 0;
     double m_primerRowY = 0;   // linear: the primers' row, or 0 for none
+    double m_ts = 1;   // MapOptions::textScale, kept sane
     Font m_labelFont{11, false, false};
 };
 

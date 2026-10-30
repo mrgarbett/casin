@@ -7,6 +7,7 @@
 #include "core/digest.h"
 #include "core/edit.h"
 #include "core/orf.h"
+#include "core/pcrprogram.h"
 #include "core/protein.h"
 #include "core/primercheck.h"
 #include "core/search.h"
@@ -688,6 +689,51 @@ char *oc_primer_check(const char *bases, OCPrimerCheck *out)
     return dupString(joinLines(c.warnings));
 }
 
+namespace {
+Polymerase polymeraseOf(int p)
+{
+    return p == OC_POLYMERASE_PHUSION ? Polymerase::Phusion : p == OC_POLYMERASE_TAQ ? Polymerase::Taq
+                                                                                      : Polymerase::Q5;
+}
+} // namespace
+
+void oc_pcr_program(const char *anneal1, const char *anneal2, int length, int polymerase, int cycles,
+                    OCPcrProgram *out)
+{
+    if (!out)
+        return;
+    const PcrProgram p = pcrProgram(anneal1 ? anneal1 : "", anneal2 ? anneal2 : "", length,
+                                    polymeraseOf(polymerase), cycles);
+    *out = {};
+    out->tm1 = p.tm1;
+    out->tm2 = p.tm2;
+    out->annealing = p.annealing;
+    out->capped = p.capped;
+    out->two_step = p.twoStep;
+    out->cycles = p.cycles;
+    for (const PcrStep &st : p.steps) {
+        if (out->step_count >= int(std::size(out->steps)))
+            break;
+        OCPcrStep &o = out->steps[out->step_count++];
+        std::snprintf(o.name, sizeof o.name, "%s", st.name.c_str());
+        o.celsius = st.celsius;
+        o.seconds = st.seconds;
+        o.cycled = st.cycled;
+    }
+}
+
+char *oc_pcr_program_markdown(const char *anneal1, const char *anneal2, int length, int polymerase, int cycles,
+                              const char *title)
+{
+    const PcrProgram p = pcrProgram(anneal1 ? anneal1 : "", anneal2 ? anneal2 : "", length,
+                                    polymeraseOf(polymerase), cycles);
+    return dupString(pcrProgramMarkdown(p, title ? title : ""));
+}
+
+char *oc_polymerase_name(int polymerase) { return dupString(polymeraseName(polymeraseOf(polymerase))); }
+int oc_polymerase_max_length(int polymerase) { return polymeraseMaxLength(polymeraseOf(polymerase)); }
+char *oc_format_seconds(int seconds) { return dupString(formatSeconds(seconds)); }
+
 char *oc_primer_pair_check(const char *a, const char *b)
 {
     return dupString(joinLines(checkPrimerPair(a ? a : "", b ? b : "").warnings));
@@ -1008,12 +1054,21 @@ OCMapLayout *oc_map_layout_new_frames(const OCDocument *doc, double width, doubl
                                       bool show_enzymes, bool show_primers, const char *hidden_types, int frames,
                                       OCMeasureText measure, void *context)
 {
+    return oc_map_layout_new_scaled(doc, width, height, dark, show_enzymes, show_primers, hidden_types, frames, 1,
+                                    measure, context);
+}
+
+OCMapLayout *oc_map_layout_new_scaled(const OCDocument *doc, double width, double height, bool dark,
+                                      bool show_enzymes, bool show_primers, const char *hidden_types, int frames,
+                                      double text_scale, OCMeasureText measure, void *context)
+{
     CallbackMeasurer tm(measure, context);
     view::MapOptions opt;
     opt.enzymes = show_enzymes;
     opt.primers = show_primers;
     opt.hiddenTypes = typeSet(hidden_types);
     opt.frames = frames;
+    opt.textScale = text_scale;
     auto *l = new OCMapLayout;
     l->layout = std::make_unique<view::MapLayout>(doc->doc.displaySequence(), doc->doc.visibleSites(),
                                                   dark ? view::Theme::darkTheme() : view::Theme::light(), tm, width,
@@ -1040,6 +1095,7 @@ void oc_map_layout_hit(const OCMapLayout *layout, double x, double y, int *kind,
         *kind = h.kind == view::MapHit::Feature ? OC_HIT_FEATURE
               : h.kind == view::MapHit::Site    ? OC_HIT_SITE
               : h.kind == view::MapHit::Sequence ? OC_HIT_SEQUENCE
+              : h.kind == view::MapHit::Primer   ? OC_HIT_PRIMER
                                                  : OC_HIT_NONE;
     if (index)
         *index = h.index;
@@ -1048,6 +1104,11 @@ void oc_map_layout_hit(const OCMapLayout *layout, double x, double y, int *kind,
 }
 
 bool oc_map_layout_is_circular(const OCMapLayout *layout) { return layout->layout->isCircular(); }
+
+double oc_map_layout_radius(const OCMapLayout *layout)
+{
+    return layout->layout->isCircular() ? layout->layout->radius() : 0;
+}
 double oc_map_layout_angle_at(const OCMapLayout *layout, double x, double y) { return layout->layout->angleAt({x, y}); }
 int oc_map_layout_position_at(const OCMapLayout *layout, double x, double y) { return layout->layout->positionAt({x, y}); }
 char *oc_map_layout_tooltip(const OCMapLayout *layout, double x, double y) { return dupString(layout->layout->tooltipAt({x, y})); }

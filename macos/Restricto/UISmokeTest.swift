@@ -145,8 +145,28 @@ enum UISmokeTest {
             ("9i-pcr-wizard", {
                 // Sequence > PCR… with the sample's two primers.
                 controller?.pcrProduct(nil)
-                guard PcrWizard.isAnyOpen, let length = PcrWizard.productLengths.first, length > 0 else {
+                guard PcrWizard.isAnyOpen, let length = PcrWizard.productLengths.first, length > 0,
+                      PcrWizard.programSteps.first == 6 else {
                     FileHandle.standardError.write("ui-smoke: the PCR wizard showed no product\n".data(using: .utf8)!)
+                    exit(6)
+                }
+            }),
+            ("9i-pcr-pick", {
+                // Clicking primers on the vector map: a plain click starts over
+                // with one primer (no product), shift-click adds the second.
+                let primers = (controller?.document as? SequenceDocument)?.core.primers.filter { $0.length > 0 } ?? []
+                let expected = PcrWizard.productLengths.first ?? 0
+                guard let f = primers.first(where: { $0.strand == Int32(OC_STRAND_FORWARD) }),
+                      let r = primers.first(where: { $0.strand == Int32(OC_STRAND_REVERSE) }) else {
+                    FileHandle.standardError.write("ui-smoke: the sample has no primer pair\n".data(using: .utf8)!)
+                    exit(6)
+                }
+                PcrWizard.pickOnMap(f.index, adding: false)
+                let one = PcrWizard.productLengths.first ?? -1
+                let tabOff = !PcrWizard.productTabEnabled
+                PcrWizard.pickOnMap(r.index, adding: true)
+                guard one == 0, tabOff, PcrWizard.productLengths.first == expected, PcrWizard.productTabEnabled else {
+                    FileHandle.standardError.write("ui-smoke: picking primers on the PCR map went wrong\n".data(using: .utf8)!)
                     exit(6)
                 }
             }),
@@ -171,6 +191,24 @@ enum UISmokeTest {
                 product.close()
                 note("closed")
                 window.makeKeyAndOrderFront(nil)
+            }),
+            ("9j-zoomed-125", {
+                // ⌘0 then ⌘+ twice: 100% → 110% → 125%, map and sequence together.
+                Zoom.shared.actualSize(nil)
+                Zoom.shared.zoomIn(nil)
+                Zoom.shared.zoomIn(nil)
+                guard abs(Zoom.level - 1.25) < 0.001 else {
+                    FileHandle.standardError.write("ui-smoke: zooming in went wrong\n".data(using: .utf8)!)
+                    exit(7)
+                }
+            }),
+            ("9j-zoomed-80", { for _ in 0..<8 { Zoom.shared.zoomOut(nil) } }),
+            ("9j-actual-size", {
+                Zoom.shared.actualSize(nil)
+                guard Zoom.level == 1 else {
+                    FileHandle.standardError.write("ui-smoke: Actual Size didn't go back to 100%\n".data(using: .utf8)!)
+                    exit(7)
+                }
             }),
             ("9e-edited", { (controller?.document as? NSDocument)?.updateChangeCount(.changeDone) }),
             ("9f-saved", { (controller?.document as? NSDocument)?.updateChangeCount(.changeCleared) }),
