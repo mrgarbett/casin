@@ -278,11 +278,11 @@ final class Gel3DView: NSView, MTKViewDelegate {
         u.camU = SIMD4<Float>(up, 0)
         // The stained gel drinks a little of the blue and less of the red;
         // 1% agarose scatters gently, mostly forward.
-        u.sigma = SIMD4<Float>(10, 26, 7, 18)
+        u.sigma = SIMD4<Float>(8, 40, 6, 18)
         u.lens = SIMD4<Float>(tan(17.5 * .pi / 180), Float(w) / Float(h), 0.0012, distance)
         u.slab = SIMD4<Float>(width, depth, thick, 0.7)
         u.emitter = SIMD4<Float>(width / 2 + 0.13, depth / 2 + 0.11, 0.025, 1.0)
-        u.look = SIMD4<Float>(0.7, 0.035, 40, 0.75)
+        u.look = SIMD4<Float>(0.75, 0.02, 14, 0.75)
         u.counts = SIMD4<UInt32>(frameIndex, samples, UInt32(w), UInt32(h))
         return u
     }
@@ -381,6 +381,16 @@ final class Gel3DView: NSView, MTKViewDelegate {
         var random = Noise(seed: 11)
         let half = CGFloat(laneW) * ppm * 0.46
 
+        // The loading dyes' fronts: broad, soft, dark bands across every lane,
+        // the first (bromophenol blue) the darker.
+        for (d, dye) in dyeRuns.enumerated() {
+            let p = dye * runLevel
+            guard p <= 1.02 else { continue }
+            let y = pz(runZ(p)), hh = (1.4 + 0.3 * CGFloat(d)) * mm
+            let front = CGRect(x: px(-width / 2) + 2 * mm, y: y - hh, width: px(width / 2) - px(-width / 2) - 4 * mm, height: 2 * hh)
+            Self.softFill(ctx, CGPath(rect: front, transform: nil), color: Self.rgb(0, 1, 0, d == 0 ? 0.5 : 0.3), blur: 1.6 * mm)
+        }
+
         for (i, lane) in lanes.enumerated() {
             let cx = px(laneX(i)), load = Self.loading(i)
             var lowest = -1.0
@@ -410,18 +420,8 @@ final class Gel3DView: NSView, MTKViewDelegate {
             if !lane.isLadder, lowest > 0 {
                 let top = pz(wellZ) + 1.5 * mm, bottom = pz(runZ(lowest))
                 let smear = CGRect(x: cx - half * 0.85, y: top, width: half * 1.7, height: max(0, bottom - top))
-                Self.softFill(ctx, CGPath(rect: smear, transform: nil), color: Self.rgb(1, 0, 0, 0.05 * load),
+                Self.softFill(ctx, CGPath(rect: smear, transform: nil), color: Self.rgb(1, 0, 0, 0.012 * load),
                               blur: 0.9 * mm)
-            }
-            if !lane.isLadder {
-                for dye in dyeRuns {
-                    let p = dye * runLevel
-                    guard p <= 1.02 else { continue }
-                    let dw = half * (1.7 + 0.25 * random.next()), dh = (1.4 + 0.8 * random.next()) * mm
-                    let r = CGRect(x: cx - dw / 2 + (random.next() - 0.5) * mm, y: pz(runZ(p)) - dh / 2, width: dw, height: dh)
-                    Self.softFill(ctx, CGPath(ellipseIn: r, transform: nil), color: Self.rgb(0, 1, 0, 0.35 + 0.2 * random.next()),
-                                  blur: 1.0 * mm)
-                }
             }
             // The well: its cavity, and its walls (half blue) which catch the light.
             let well = CGRect(x: cx - half * 0.95, y: pz(wellZ) - 0.9 * mm, width: 1.9 * half, height: 1.8 * mm)
@@ -523,8 +523,8 @@ final class Gel3DView: NSView, MTKViewDelegate {
         float2 cell = floor(p);
         if (hashf(cell) > share) return 1.0;
         float2 c = cell + float2(hashf(cell + 13.0), hashf(cell + 29.0));
-        float r = 0.18 + 0.22 * hashf(cell + 41.0);
-        return mix(0.3, 1.0, smoothstep(r * 0.7, r, length(p - c)));
+        float r = 0.2 + 0.25 * hashf(cell + 41.0);
+        return mix(0.45, 1.0, smoothstep(r * 0.3, r, length(p - c)));
     }
 
     // The blue plate: a diffuser lit from below, brightest under the gel,
@@ -534,20 +534,23 @@ final class Gel3DView: NSView, MTKViewDelegate {
         float zmin = -u.slab.y * 0.5 - back;
         float edge = smoothstep(0.0, 0.012, halfX - abs(q.x))
                    * smoothstep(0.0, 0.012, q.y - zmin) * smoothstep(0.0, 0.012, front - q.y);
-        float3 dark = float3(0.004, 0.004, 0.02);
+        float3 dark = float3(0.001, 0.0, 0.012);
         if (edge <= 0.0) return dark;
-        float2 rel = q / float2(halfX, front);
-        float fall = mix(1.0, 0.3, smoothstep(0.15, 1.25, length(rel)));
-        float mott = 0.82 + 0.36 * vnoise(q * 70.0 + 3.0);
-        float speck = dust(q * 1800.0, 0.05) * dust(q * 700.0 + 5.0, 0.02);
-        float grain = 0.93 + 0.14 * vnoise(q * 900.0);
-        float3 blue = float3(0.09, 0.10, 1.0) * u.emitter.w;
-        return mix(dark, blue * fall * mott * speck * grain, edge);
+        // Brightest a little behind the gel, near black at the corners.
+        float2 rel = (q - float2(0.0, -0.3 * front)) / float2(halfX, front);
+        float fall = mix(1.0, 0.06, smoothstep(0.12, 1.1, length(rel)));
+        // Blotches, out of focus: the plate's scratches and smudges.
+        float mott = 0.80 + 0.40 * vnoise(q * 25.0 + 3.0);
+        float blot = 1.0 - 0.35 * smoothstep(0.55, 0.8, vnoise(q * 60.0 + 9.0));
+        float speck = dust(q * 500.0, 0.06) * dust(q * 1500.0 + 5.0, 0.03);
+        float grain = 0.95 + 0.10 * vnoise(q * 900.0);
+        float3 blue = float3(0.02, 0.0, 0.75) * u.emitter.w;
+        return mix(dark, blue * fall * mott * blot * speck * grain, edge);
     }
 
     // The dim room above, with one small lamp high up behind the gel.
     inline float3 room(float3 p, float3 d) {
-        float3 dark = float3(0.012, 0.012, 0.018);
+        float3 dark = float3(0.002, 0.001, 0.006);
         if (d.y <= 0.0001) return dark;
         float t = (0.55 - p.y) / d.y;
         float3 h = p + d * t;
@@ -590,10 +593,10 @@ final class Gel3DView: NSView, MTKViewDelegate {
         float wall = (m.b > 0.2 && m.b <= 0.8 && yf > 1.0 - u.slab.w) ? 1.0 : 0.0;
         // The stain is never quite even.
         float uneven = 0.72 + 0.36 * vnoise(uv * float2(9.0, 5.0) + 1.0) + 0.12 * vnoise(uv * float2(60.0, 33.0));
-        float3 pink = float3(1.0, 0.36, 0.60), orange = float3(1.0, 0.50, 0.33);
+        float3 pink = float3(1.0, 0.10, 0.50), band = float3(1.0, 0.22, 0.60);
         Medium md;
-        md.emit = (pink * uneven * (1.0 + 2.5 * wall) + orange * m.r * 3.5 * prof) * u.look.z * (1.0 - inWell);
-        md.absorb = u.sigma.xyz + float3(0.9, 0.6, 0.12) * 260.0 * m.g;
+        md.emit = (pink * uneven * (1.0 + 6.0 * wall) + band * m.r * 12.0 * prof) * u.look.z * (1.0 - inWell);
+        md.absorb = u.sigma.xyz + float3(0.6, 0.9, 0.15) * 260.0 * m.g;
         return md;
     }
 
@@ -633,6 +636,12 @@ final class Gel3DView: NSView, MTKViewDelegate {
                 if (!hit || t0 < 0.0) { L += T * outside(p, d, u); break; }
                 // Into the gel, or off its surface.
                 float3 x = p + d * t0;
+                // The top's cut edges scatter the trapped light: a thin bright lip.
+                if (n0.y > 0.5) {
+                    float ex = min(bmax.x - abs(x.x), bmax.z - abs(x.z));
+                    float lip = smoothstep(0.0012, 0.0, ex);
+                    L += T * float3(0.55, 0.12, 0.9) * lip * 0.6 * u.emitter.w;
+                }
                 float3 n = ripple(x, n0);
                 float cosi = max(0.01, -dot(d, n));
                 float eta = 1.0 / IOR;
@@ -718,16 +727,20 @@ final class Gel3DView: NSView, MTKViewDelegate {
                 q = clamp(q, int2(0), int2(int(W) - 1, int(H) - 1));
                 float w = exp(-0.35 * float(i * i + j * j));
                 float3 s = accum.read(uint2(q)).rgb / n;
-                bloom += max(s - float3(1.0), float3(0.0)) * w;
+                bloom += max(s - float3(1.1), float3(0.0)) * w;
                 wsum += w;
             }
         }
-        c = (c + bloom / wsum * 0.6) * u.look.x;
+        c = (c + bloom / wsum * 0.25) * u.look.x;
         float2 uv = float2(gid) / float2(W, H) - 0.5;
         c *= 1.0 - 0.6 * dot(uv, uv);
+        // Shot noise: more where there's more light, none in the black.
         float g = (hashf(float2(gid) + float2(float(u.counts.x % 977u), 0.0)) - 0.5) * u.look.y;
-        c += g / (1.0 + c);
-        c = (c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14);
+        c += g * 2.5 * sqrt(max(c, float3(0.0)));
+        // A gentle curve that keeps the colours saturated, with a soft shoulder.
+        float lum = dot(c, float3(0.2126, 0.7152, 0.0722));
+        c *= 1.0 / (1.0 + 0.25 * lum);
+        c = select(0.85 + 0.15 * (1.0 - exp(-(c - 0.85) / 0.15)), c, c < 0.85);
         c = pow(clamp(c, float3(0.0), float3(1.0)), float3(1.0 / 2.2));
         out.write(float4(c, 1.0), gid);
     }
