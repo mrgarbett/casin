@@ -815,5 +815,7 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         w.lookChanged(nil)
     }
     static var showing3D: Bool { visible.first?.gel3D?.isHidden == false }
+    /// Why the 3D gel shows a note instead of a picture, if it does.
+    static var problem3D: String? { visible.first?.gel3D?.problem }
     static func closeAll() { visible.forEach { $0.window?.close() } }
 }

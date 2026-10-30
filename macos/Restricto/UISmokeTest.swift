@@ -241,6 +241,12 @@ enum UISmokeTest {
                     FileHandle.standardError.write("ui-smoke: the gel's 3D tab didn't open\n".data(using: .utf8)!)
                     exit(8)
                 }
+                // A shader that doesn't compile is a bug; a machine without
+                // a GPU is just this machine.
+                if let problem = GelWizard.problem3D {
+                    FileHandle.standardError.write("ui-smoke: 3D gel: \(problem)\n".data(using: .utf8)!)
+                    if problem.contains("compile") { exit(9) }
+                }
             }),
             ("9k-gel-imager", {
                 if let wizard = GelWizard.openWindows.first {

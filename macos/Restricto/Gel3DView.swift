@@ -160,7 +160,11 @@ final class Gel3DView: NSView, MTKViewDelegate {
         }
     }
 
+    /// Why there's no picture, if there isn't one (the launch check reads it).
+    private(set) var problem: String?
+
     private func fail(_ message: String) {
+        problem = message
         note.stringValue = message
         note.isHidden = false
         metalView.isHidden = true
