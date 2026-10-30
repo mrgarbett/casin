@@ -2575,4 +2575,23 @@ void showOpenDialog(GtkApplication *app, GtkWindow *parent)
     g_object_unref(dialog);
 }
 
+void showWholeNames(AdwComboRow *row)
+{
+    GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
+    g_signal_connect(factory, "setup", G_CALLBACK(+[](GtkSignalListItemFactory *, GtkListItem *item, gpointer) {
+                         GtkWidget *label = gtk_label_new(nullptr);
+                         gtk_label_set_xalign(GTK_LABEL(label), 0);
+                         gtk_list_item_set_child(item, label);
+                     }),
+                     nullptr);
+    g_signal_connect(factory, "bind", G_CALLBACK(+[](GtkSignalListItemFactory *, GtkListItem *item, gpointer) {
+                         auto *text = GTK_STRING_OBJECT(gtk_list_item_get_item(item));
+                         gtk_label_set_text(GTK_LABEL(gtk_list_item_get_child(item)),
+                                            text ? gtk_string_object_get_string(text) : "");
+                     }),
+                     nullptr);
+    adw_combo_row_set_list_factory(row, factory);
+    g_object_unref(factory);
+}
+
 } // namespace oc::gtk

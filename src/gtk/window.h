@@ -302,4 +302,8 @@ void showNewSequenceDialog(GtkApplication *app, GtkWindow *parent);
 // to pass files in. Otherwise returns `error` unchanged.
 std::string withSandboxHint(const std::string &path, const std::string &error);
 
+// Lets a combo row's menu show its items' whole names (the row itself still
+// shortens the chosen one to fit). For rows whose model is a GtkStringList.
+void showWholeNames(AdwComboRow *row);
+
 } // namespace oc::gtk

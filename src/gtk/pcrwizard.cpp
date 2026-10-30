@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "pcrwizard.h"
+#include "window.h"
 
 #include "core/edit.h"
 #include "core/primercheck.h"
@@ -243,6 +244,7 @@ GtkWidget *PcrWizard::buildSidebar()
 
     GtkWidget *polymerase = adw_preferences_group_new();
     m_polymerase = adw_combo_row_new();
+    showWholeNames(ADW_COMBO_ROW(m_polymerase));
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(m_polymerase), "Polymerase");
     std::vector<std::string> names;
     for (Polymerase p : kPolymerases)

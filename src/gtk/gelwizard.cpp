@@ -384,6 +384,7 @@ GtkWidget *GelWizard::buildSidebar()
     // The selected lane: what's loaded, and a sample's enzymes.
     m_laneGroup = adw_preferences_group_new();
     m_sequence = adw_combo_row_new();
+    showWholeNames(ADW_COMBO_ROW(m_sequence));
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(m_sequence), "Loaded");
     g_signal_connect_swapped(m_sequence, "notify::selected", G_CALLBACK(+[](gpointer p) {
                                  auto *self = static_cast<GelWizard *>(p);
