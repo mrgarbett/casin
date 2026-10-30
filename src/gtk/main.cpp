@@ -164,9 +164,20 @@ void actNew(GSimpleAction *, GVariant *, gpointer app)
     gtk::showNewSequenceDialog(GTK_APPLICATION(app), parent);
 }
 
+// Closes the windows one by one, as their close buttons would, so unsaved
+// documents are asked about. Stops at a window that asks; the app quits once
+// the last window closes.
 void actQuit(GSimpleAction *, GVariant *, gpointer app)
 {
-    g_application_quit(G_APPLICATION(app));
+    GList *windows = g_list_copy_deep(gtk_application_get_windows(GTK_APPLICATION(app)),
+                                      [](gconstpointer w, gpointer) -> gpointer { return g_object_ref(G_OBJECT(w)); },
+                                      nullptr);
+    bool asking = false;
+    for (GList *l = windows; l && !asking; l = l->next) {
+        gtk_window_close(GTK_WINDOW(l->data));
+        asking = g_list_find(gtk_application_get_windows(GTK_APPLICATION(app)), l->data) != nullptr;
+    }
+    g_list_free_full(windows, g_object_unref);
 }
 
 void actAbout(GSimpleAction *, GVariant *, gpointer app)
