@@ -53,7 +53,7 @@ final class SelectionBadge {
         // Q5's Tm, as the primer editor, the Primers pane and the status
         // line show it (the one the PCR wizard uses). Below 8 bases it means nothing.
         if length >= 8, length <= maxTmLength {
-            let tm = oc_polymerase_tm(document.selectedBases, OC_POLYMERASE_Q5)
+            let tm = oc_polymerase_tm(document.selectedBases, Int32(OC_POLYMERASE_Q5))
             if tm > 0 { parts.append("Q5 Tm \(tm) °C") }
         }
         return parts.joined(separator: "  ·  ")

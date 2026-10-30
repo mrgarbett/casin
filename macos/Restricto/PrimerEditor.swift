@@ -353,13 +353,13 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
             if let s = site {
                 // Tm of the part that anneals; a 5' tail doesn't count.
                 let annealing = String(typed.suffix(Int(s.length)))
-                let tm = oc_polymerase_tm(annealing, OC_POLYMERASE_Q5)
+                let tm = oc_polymerase_tm(annealing, Int32(OC_POLYMERASE_Q5))
                 if tm > 0 {
                     line += " · Q5 Tm \(tm) °C"
                     if typed.count > Int(s.length) { line += " annealing" }
                 }
             } else {
-                let tm = oc_polymerase_tm(typed, OC_POLYMERASE_Q5)
+                let tm = oc_polymerase_tm(typed, Int32(OC_POLYMERASE_Q5))
                 if tm > 0 { line += " · Q5 Tm \(tm) °C" }
             }
             lines.append(line)
