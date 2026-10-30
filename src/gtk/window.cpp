@@ -1000,6 +1000,8 @@ void Window::showBadge(GtkWidget *from, double x, double y)
     if (!gtk_widget_get_visible(m_badge))
         gtk_widget_set_opacity(m_badge, 0);
     gtk_widget_set_visible(m_badge, TRUE);
+    // Measured without the last margin, which would count as its width.
+    gtk_widget_set_margin_start(m_badge, 0);
     int bw = 0, unused = 0;
     gtk_widget_measure(m_badge, GTK_ORIENTATION_HORIZONTAL, -1, &unused, &bw, nullptr, nullptr);
     int bx = int(at.x) + 12;
