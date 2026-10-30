@@ -53,7 +53,8 @@ PcrProgram pcrProgram(const std::string &anneal1, const std::string &anneal2, in
     if (out.tm1 == INT_MIN || out.tm2 == INT_MIN)
         return out;
     const Cycling c = cycling(p);
-    const int low = std::min(out.tm1, out.tm2);
+    // From the lower Tm before rounding, as NEB's calculator does.
+    const double low = std::min(polymeraseTmExact(anneal1, p), polymeraseTmExact(anneal2, p));
     const double ta = p == Polymerase::Phusion ? 0.93 * low + 7.5 : p == Polymerase::Q5 ? low + 1.0 : low - 5.0;
     out.annealing = int(std::lround(std::min(ta, double(c.cap))));
     out.capped = ta > c.cap;

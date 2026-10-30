@@ -27,6 +27,7 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
     private let programNote = NSTextField(wrappingLabelWithString: "")
     private let cyclesField = NSTextField(labelWithString: "30 cycles")
     private let cyclesStepper = NSStepper()
+    private let cyclesRow = NSStackView()
     /// What Copy puts on the clipboard: a Markdown table under a title line.
     private var programMarkdown = ""
     private var stepCount = 0
@@ -171,6 +172,7 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
         cyclesStepper.maxValue = 45
         cyclesStepper.integerValue = 30
         cyclesStepper.controlSize = .small
+        cyclesStepper.valueWraps = false
         cyclesStepper.target = self
         cyclesStepper.action = #selector(inputsChanged(_:))
         warnings.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -188,7 +190,9 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
         let copy = NSButton(title: "Copy", target: self, action: #selector(copyProgram(_:)))
         copy.controlSize = .small
         copy.toolTip = "Copy the program as a Markdown table"
-        programRow.setViews([heading("SUGGESTED PROGRAM"), NSView(), cyclesField, cyclesStepper, copy], in: .leading)
+        programRow.setViews([heading("SUGGESTED PROGRAM"), NSView(), copy], in: .leading)
+        cyclesRow.setViews([cyclesField, cyclesStepper], in: .leading)
+        cyclesRow.spacing = 4
         let inputs = NSStackView(views: [
             header, status,
             heading("FORWARD PRIMER"), forwardPopup,
@@ -196,7 +200,7 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
             typedField, typedError, hint, addPrimerButton,
             heading("POLYMERASE"), polymerasePopup,
             productHeading, info, warnings,
-            programRow, programGrid, programNote,
+            programRow, programGrid, cyclesRow, programNote,
         ])
         inputs.orientation = .vertical
         inputs.alignment = .leading
@@ -493,6 +497,7 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
         warnings.isHidden = warn.isEmpty
         fillProgram(prog, show: hasProduct)
         programRow.isHidden = programGrid.isHidden
+        cyclesRow.isHidden = programGrid.isHidden
         productHeading.isHidden = info.isHidden && warnings.isHidden
         openButton.isEnabled = hasProduct
     }
@@ -500,6 +505,8 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
     /// The program as a table: step, temperature, time, and the cycle count
     /// beside the first repeated step; a note when Ta was held or merged.
     private func fillProgram(_ prog: OCPcrProgram, show: Bool) {
+        // Removing a grid's rows leaves their views behind, drawn over the next table.
+        programGrid.subviews.forEach { $0.removeFromSuperview() }
         while programGrid.numberOfRows > 0 { programGrid.removeRow(at: 0) }
         stepCount = show ? Int(prog.step_count) : 0
         programGrid.isHidden = stepCount == 0
@@ -593,6 +600,11 @@ final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate
                           height: max(window.minSize.height, f.height * 0.8))
         window.setFrame(NSRect(x: f.midX - size.width / 2, y: f.midY - size.height / 2,
                                width: size.width, height: size.height), display: true)
+        // The content may need more than asked for; centre what it took.
+        let actual = window.frame.size
+        if actual != size {
+            window.setFrameOrigin(NSPoint(x: f.midX - actual.width / 2, y: f.midY - actual.height / 2))
+        }
     }
 
     // MARK: Dimming

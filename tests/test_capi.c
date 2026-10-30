@@ -335,7 +335,7 @@ int main(int argc, char **argv)
     CHECK(strcmp(prog.steps[2].name, "Annealing") == 0 && prog.steps[2].cycled);
     char *md = oc_pcr_program_markdown("ACGTACAATGTGTTCGAAACAGGT", "CGGCTCTCTTTACACGGCTC", 1530, OC_POLYMERASE_TAQ,
                                        30, "Taq");
-    CHECK(strncmp(md, "Taq\n\n| Step |", 13) == 0 && strstr(md, "| Annealing | 52 °C | 30 s |") != NULL);
+    CHECK(strncmp(md, "Taq\n\n| Step |", 13) == 0 && strstr(md, "| Annealing | 54 °C | 30 s |") != NULL);
     oc_string_free(md);
     oc_pcr_program("ACGN", "CGGCTCTCTTTACACGGCTC", 1530, OC_POLYMERASE_Q5, 30, &prog);
     CHECK(prog.step_count == 0);

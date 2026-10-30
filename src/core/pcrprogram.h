@@ -33,8 +33,8 @@ int polymeraseMaxLength(Polymerase p);
 
 // The cycling NEB suggests for a product of `length` bp made with primers
 // whose annealing parts are `anneal1` and `anneal2`. Ta follows NEB's
-// calculator: Q5 the lower Tm + 1 (at most 72), Phusion 0.93 x the lower
-// Tm + 7.5 (at most 72), Taq the lower Tm - 5 (at most 68). Extension: Q5
+// calculator, from the lower Tm before rounding: Q5 + 1 (at most 72),
+// Phusion 0.93 x Tm + 7.5 (at most 72), Taq - 5 (at most 68). Extension: Q5
 // and Phusion 30 s per kb at 72, Taq 1 min per kb at 68, rounded up to 5 s.
 // No steps when either part isn't plain DNA.
 PcrProgram pcrProgram(const std::string &anneal1, const std::string &anneal2, int length, Polymerase p,

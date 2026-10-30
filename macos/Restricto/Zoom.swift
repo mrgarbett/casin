@@ -40,7 +40,10 @@ final class Zoom: NSObject, NSMenuItemValidation {
         switch menuItem.action {
         case #selector(zoomIn(_:)): return Self.level < Self.steps.last! - 0.001
         case #selector(zoomOut(_:)): return Self.level > Self.steps.first! + 0.001
-        case #selector(actualSize(_:)): return Self.level != 1
+        case #selector(actualSize(_:)):
+            // The level now, where it's easy to find.
+            menuItem.title = Self.level == 1 ? "Actual Size" : "Actual Size (now \(Int((Self.level * 100).rounded()))%)"
+            return Self.level != 1
         default: return true
         }
     }

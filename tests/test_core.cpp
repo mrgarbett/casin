@@ -435,7 +435,7 @@ static void testPcrProgram()
     CHECK_EQ(polymeraseTm(a, Polymerase::Q5), 72);
     CHECK_EQ(polymeraseTm(b, Polymerase::Q5), 75);
     CHECK_EQ(polymeraseTm(a, Polymerase::Phusion), 68);
-    CHECK_EQ(polymeraseTm(a, Polymerase::Taq), 63);
+    CHECK_EQ(polymeraseTm(a, Polymerase::Taq), 64);
     CHECK_EQ(polymeraseTm("acgn", Polymerase::Q5), INT_MIN);
     CHECK_EQ(polymeraseTm("A", Polymerase::Q5), INT_MIN);
 
@@ -451,15 +451,16 @@ static void testPcrProgram()
     CHECK_EQ(demo.steps.size(), size_t(6));
     CHECK(demo.steps[3].name == "Extension" && demo.steps[3].seconds == 50);   // 46 s, rounded up to 5 s
     CHECK(demo.steps[4].seconds == 120 && demo.steps[5].seconds == 0);
-    // Phusion: 0.93 x 62 + 7.5 = 65.2; Taq: 57 - 5 = 52, 1 min per kb at 68.
+    // Checked against NEB's Tm calculator for these two primers (500 nM):
+    // Phusion 63 / 62, Ta 65.5; Taq 59 / 61 (58.9 / 61.4), Ta 53.9.
     PcrProgram ph = pcrProgram("ACGTACAATGTGTTCGAAACAGGT", "CGGCTCTCTTTACACGGCTC", 1530, Polymerase::Phusion);
     CHECK(ph.tm1 == 63 && ph.tm2 == 62 && ph.annealing == 65);
     PcrProgram taq = pcrProgram("ACGTACAATGTGTTCGAAACAGGT", "CGGCTCTCTTTACACGGCTC", 1530, Polymerase::Taq, 35);
-    CHECK(taq.tm1 == 57 && taq.tm2 == 60 && taq.annealing == 52 && taq.cycles == 35);
+    CHECK(taq.tm1 == 59 && taq.tm2 == 61 && taq.annealing == 54 && taq.cycles == 35);
     CHECK(taq.steps[0].celsius == 95 && taq.steps[3].celsius == 68 && taq.steps[3].seconds == 95);
     // Hot primers in Taq: capped at 68, which is also its extension temperature.
     PcrProgram hot = pcrProgram(b, b, 500, Polymerase::Taq);
-    CHECK(hot.tm1 == 67 && hot.annealing == 62 && !hot.capped);
+    CHECK(hot.tm1 == 69 && hot.annealing == 64 && !hot.capped);
     CHECK(pcrProgram("GCGGCCGCGGCGCCGCGGCCGC", "GCGGCCGCGGCGCCGCGGCCGC", 500, Polymerase::Taq).capped);
     // No program for a primer that isn't plain DNA.
     CHECK(pcrProgram("ACGN", b, 500, Polymerase::Q5).steps.empty());
