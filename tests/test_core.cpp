@@ -1364,6 +1364,8 @@ static void testGateway()
     GatewayResult other;
     CHECK(gatewayRecombine(flipped, dest, GatewayReaction::LR, &other, &err));
     CHECK_EQ(other.clone.bases, lr.clone.bases);
+    CHECK(other.insertFlipped);
+    CHECK(!lr.insertFlipped && !bp.insertFlipped);
 
     // A product amplified the other way round (attB2 first) is turned over.
     Sequence backwards;
@@ -1372,6 +1374,7 @@ static void testGateway()
     GatewayResult turned;
     CHECK(gatewayRecombine(backwards, donor, GatewayReaction::BP, &turned, &err));
     CHECK_EQ(turned.clone.bases, expectEntry);
+    CHECK(turned.insertFlipped);
 
     // A MultiSite pair (att4 with att1) works the same.
     const std::string core4 = attCore(4), core1r = reverseComplement(attCore(1));
