@@ -10,8 +10,9 @@
 // until they escape at a cut edge (which is why the edges shine), and the wet
 // top catches the lamp. Each frame adds a sample per pixel; the picture
 // converges while the gel is still and goes grainy while it moves.
-// Drag to orbit, right-drag or Shift-drag to move the gel, scroll to move
-// closer, double-click to go back. View only: the sidebar and the Imager tab
+// It opens straight down, as the imager shows it; drag to tilt and orbit,
+// right-drag or Shift-drag to move the gel, scroll to move closer,
+// double-click to go back. View only: the sidebar and the Imager tab
 // still do the editing and hovering. The knobs of the look (Gel3DLook) are
 // the wizard's sliders, for settling on the shipped values by eye.
 import AppKit
@@ -195,7 +196,10 @@ final class Gel3DView: NSView, MTKViewDelegate {
         set { metalView.ignoredViews = newValue }
     }
 
-    private static let homePitch: Float = 0.80
+    /// It opens straight down, the imager's view; dragging tilts it, and
+    /// from `tiltPitch` down the camera comes closer.
+    private static let homePitch: Float = .pi / 2
+    private static let tiltPitch: Float = 0.80
     private var yaw: Float = 0
     private var pitch: Float = homePitch
     private var zoom: Float = 1
@@ -442,7 +446,7 @@ final class Gel3DView: NSView, MTKViewDelegate {
         // Tilted towards straight down, the camera stands further back: from
         // above the whole gel has to fit, with room under it for the pill.
         let fitTop = depth * 0.5 * 1.55 / tan(17.5 * Float.pi / 180)
-        let above = min(1, max(0, (pitch - Self.homePitch) / (.pi / 2 - Self.homePitch)))
+        let above = min(1, max(0, (pitch - Self.tiltPitch) / (.pi / 2 - Self.tiltPitch)))
         let distance = (fit + (max(fitTop, fit) - fit) * above) * zoom
         let target = SIMD3<Float>(0, thick / 2, 0.004) + pan
         let position = target + SIMD3<Float>(distance * sin(yaw) * cos(pitch), distance * sin(pitch),

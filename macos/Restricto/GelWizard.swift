@@ -160,18 +160,14 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
             return String(format: "%.\(decimals)f", onStep(v))
         }
     }
+    /// The picture's knobs; the lamp, bloom, vignette and grain stay at what
+    /// ships (Rodrigo: the sliders stop at Scatter).
     private static let knobs: [Knob] = [
         Knob(name: "Exposure", value: \.exposure, lo: 0.2, hi: 2.0, step: 0.05),
         Knob(name: "Contrast", value: \.contrast, lo: 0.6, hi: 2.5, step: 0.05),
         Knob(name: "Stain glow", value: \.stain, lo: 0.0, hi: 3.0, step: 0.05),
         Knob(name: "Band glow", value: \.band, lo: 0.0, hi: 3.0, step: 0.05),
         Knob(name: "Scatter", value: \.scatter, lo: 0.0, hi: 60.0, step: 1.0),
-        Knob(name: "Lamp", value: \.lamp, lo: 0.0, hi: 30.0, step: 0.5),
-        Knob(name: "Lamp size", value: \.lampSize, lo: 0.01, hi: 0.2, step: 0.005),
-        Knob(name: "Spot cone", value: \.spot, lo: 0.1, hi: 1.2, step: 0.02),
-        Knob(name: "Bloom", value: \.bloom, lo: 0.0, hi: 1.0, step: 0.02),
-        Knob(name: "Vignette", value: \.vignette, lo: 0.0, hi: 1.0, step: 0.05),
-        Knob(name: "Grain", value: \.grain, lo: 0.0, hi: 0.1, step: 0.005),
     ]
     private var chrome: WizardChrome?
     /// Sequences listed in the sequence popup, in its order.
