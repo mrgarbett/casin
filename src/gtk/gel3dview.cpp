@@ -470,6 +470,9 @@ void main() {
     c = (c + bloom / wsum * 0.25) * u.look.x;
     vec2 v = uv - 0.5;
     c *= 1.0 - 0.6 * dot(v, v);
+    // Contrast, about mid grey: the plate's dark corners sink and the bands
+    // stand out, as a phone's camera would push the picture.
+    c = max(0.18 + (c - 0.18) * 1.5, 0.0);
     // Shot noise: more where there's more light, none in the black.
     float g = (hashf(gl_FragCoord.xy + vec2(float(u.counts.x % 977u), 0.0)) - 0.5) * u.look.y;
     c += g * 2.5 * sqrt(max(c, vec3(0.0)));
