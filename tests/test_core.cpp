@@ -147,6 +147,12 @@ static void testLocations()
              std::string("complement(join(10..20,30..40))"));
     CHECK_EQ(formatLocation({{4, 5}}, Strand::Forward, 100, false), std::string("5"));
     CHECK_EQ(formatLocation({{5, 5}}, Strand::Forward, 100, false), std::string("5^6"));
+    // A site at the origin of a circle (either end) is n^1, which reads
+    // back; on a linear sequence a site before base 1 becomes base 1.
+    CHECK_EQ(formatLocation({{0, 0}}, Strand::Forward, 100, true), std::string("100^1"));
+    CHECK_EQ(formatLocation({{100, 100}}, Strand::Forward, 100, true), std::string("100^1"));
+    CHECK(parseLocation("100^1", 100, true).ok);
+    CHECK_EQ(formatLocation({{0, 0}}, Strand::Forward, 100, false), std::string("1"));
     // Formatting then parsing gives the same ranges back.
     l = parseLocation(formatLocation({{89, 100}, {0, 10}}, Strand::Forward, 100, true), 100, true);
     CHECK(sameRanges(l.ranges, {{89, 100}, {0, 10}}));

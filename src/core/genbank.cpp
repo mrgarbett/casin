@@ -205,8 +205,14 @@ std::string formatLocation(const std::vector<Range> &ranges, Strand strand, int 
     std::vector<std::string> parts;
     for (const Range &r : ranges) {
         if (r.length() == 0) {
-            if (circular && r.start >= seqLength)
+            // A site between bases. Both ends of a circle are the one
+            // boundary, written n^1 (0^1 isn't a location); a linear
+            // sequence has nothing before base 1, so a site there is
+            // written as base 1.
+            if (circular && (r.start >= seqLength || r.start <= 0))
                 parts.push_back(std::to_string(seqLength) + "^1");
+            else if (r.start <= 0)
+                parts.push_back("1");
             else
                 parts.push_back(std::to_string(r.start) + "^" + std::to_string(r.start + 1));
         } else if (r.length() == 1) {
@@ -594,7 +600,9 @@ std::string writeGenBank(const Sequence &seq)
 
     const std::string indent(kQualIndent, ' ');
     for (const Feature &f : features) {
-        const std::string head = "     " + pad(f.type, 15) + " ";
+        // A feature with no type would be written as bare spaces and lost on
+        // the way back in.
+        const std::string head = "     " + pad(f.type.empty() ? "misc_feature" : f.type, 15) + " ";
         const std::string loc = formatLocation(f.ranges, f.strand, n, seq.circular);
         const std::vector<std::string> locLines = wrapText(loc, kLineWidth - kQualIndent, false, ',');
         for (size_t i = 0; i < locLines.size(); ++i)
