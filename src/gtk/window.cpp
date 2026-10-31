@@ -254,6 +254,8 @@ Window::Window(Shell *shell) : m_shell(shell), m_window(shell->widget())
             m_pcr->templateChanged();
         if (m_gel)
             m_gel->templateChanged();
+        if (m_gateway)
+            m_gateway->templateChanged();
         rebuildFeatureList();
         rebuildPrimerList();
         rebuildEnzymeList();
@@ -335,6 +337,7 @@ void Window::addActions(GActionMap *map, Shell *shell)
         OC_ACT("add-primer", actAddPrimer),
         OC_ACT("digest", actDigest),
         OC_ACT("pcr", actPcr),
+        OC_ACT("gateway", actGateway),
         OC_ACT("clone", actClone),
         OC_ACT("golden-gate", actGoldenGate),
         OC_ACT("gibson", actGibson),
@@ -1368,6 +1371,34 @@ void Window::openGelWizard()
     m_gel->present();
 }
 
+// This tab is the insert; the vector is picked from the tabs open now.
+void Window::openGatewayWizard()
+{
+    if (m_doc.isEmpty())
+        return;
+    if (m_gateway) {
+        m_gateway->present();
+        return;
+    }
+    GtkApplication *app = gtk_window_get_application(gtkWindow());
+    m_gateway = new GatewayWizard(&m_doc, m_window, displayName(), [app] {
+        std::vector<GatewaySource> out;
+        for (Window *w : Window::all(app)) {
+            const std::string &name = w->document().sequence().name;
+            out.push_back({&w->document(), name.empty() ? w->displayName() : name});
+        }
+        return out;
+    });
+    m_gateway->onClosed = [this] { m_gateway = nullptr; };
+    m_gateway->onOpenProduct = [this](const Sequence &product) {
+        Window *w = Window::create(gtk_window_get_application(gtkWindow()));
+        w->document().setSequence(product);
+        w->document().markUnsaved();
+        w->present();
+    };
+    m_gateway->present();
+}
+
 void Window::endAddingPrimer()
 {
     if (!m_primerEditor)
@@ -1964,6 +1995,11 @@ void Window::closeTools()
         m_gel->close();
         m_gel = nullptr;
     }
+    if (m_gateway) {
+        m_gateway->onClosed = nullptr;
+        m_gateway->close();
+        m_gateway = nullptr;
+    }
 }
 
 bool Window::confirmClose(bool closeWindow)
@@ -2284,6 +2320,11 @@ void Window::actDigest(GSimpleAction *, GVariant *, gpointer p)
 void Window::actPcr(GSimpleAction *, GVariant *, gpointer p)
 {
     static_cast<Window *>(p)->openPcrWizard();
+}
+
+void Window::actGateway(GSimpleAction *, GVariant *, gpointer p)
+{
+    static_cast<Window *>(p)->openGatewayWizard();
 }
 
 void Window::actClone(GSimpleAction *, GVariant *, gpointer p)
