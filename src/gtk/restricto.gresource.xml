@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/io/github/mrgarbett/Restricto/icons">
+    <file preprocess="xml-stripblanks" alias="scalable/actions/restricto-map-symbolic.svg">icons/restricto-map-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="scalable/actions/restricto-stack-symbolic.svg">icons/restricto-stack-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="scalable/actions/restricto-panel-symbolic.svg">icons/restricto-panel-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="scalable/actions/restricto-sequence-symbolic.svg">icons/restricto-sequence-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="scalable/actions/restricto-enzymes-symbolic.svg">icons/restricto-enzymes-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="scalable/actions/restricto-features-symbolic.svg">icons/restricto-features-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="scalable/actions/restricto-primers-symbolic.svg">icons/restricto-primers-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="scalable/actions/restricto-complement-symbolic.svg">icons/restricto-complement-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="scalable/actions/restricto-translation-symbolic.svg">icons/restricto-translation-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="scalable/actions/restricto-run-symbolic.svg">icons/restricto-run-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="scalable/actions/restricto-tune-symbolic.svg">icons/restricto-tune-symbolic.svg</file>
+  </gresource>
+</gresources>
