@@ -17,6 +17,28 @@ They were copied from the test data of the pydna project, because this build
 environment can't reach NCBI directly; the LOCUS, ACCESSION and VERSION lines
 and the lengths match the records above.
 
+## Gateway att sites
+
+Recombination crosses inside the core every att site of one number shares, so
+`src/core/gateway.cpp` holds one 15 bp core per number rather than whole att
+sites. Each core is read in the direction that number's attB primer tail reads
+it, which is why two sites flanking an insert point at each other.
+
+| Number | Core | Where it comes from |
+| --- | --- | --- |
+| att1 | `TTTGTACAAAAAAGC` | the middle of attB1 (25 bp), Invitrogen Gateway Technology manual |
+| att2 | `GCTTTCTTGTACAAA` | the middle of attB2 (25 bp), same manual |
+| att3 | `TTTGTATAATAAAGT` | the middle of the attB3 primer tail, MultiSite Gateway manual |
+| att4 | `TTTGTATAGAAAAGT` | the middle of the attB4 primer tail, same manual |
+
+att5 is not included yet, so three-fragment MultiSite (att4-att1, att1-att2,
+att2-att3) works and four-fragment doesn't.
+
+The manuals state that the att sites of one number share a 15 bp core and that
+the strands cross within it; the products of a reaction therefore carry half
+the core from either parent, which `testGateway` checks by rebuilding each
+core whole across both joins.
+
 ## Expected results
 
 | Check | Expected | Source |

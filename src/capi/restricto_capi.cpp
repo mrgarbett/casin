@@ -4,6 +4,7 @@
 #include "core/version.h"
 #include "core/align.h"
 #include "core/cloning.h"
+#include "core/gateway.h"
 #include "core/digest.h"
 #include "core/edit.h"
 #include "core/orf.h"
@@ -488,6 +489,26 @@ bool oc_document_primer(OCDocument *doc, int index, OCPrimerInfo *out)
     out->color = doc->scratch3.c_str();
     doc->scratch4 = p.description;
     out->description = doc->scratch4.c_str();
+    return true;
+}
+
+int oc_document_att_site_count(const OCDocument *doc)
+{
+    return doc ? int(findAttSites(doc->doc.sequence()).size()) : 0;
+}
+
+bool oc_document_att_site(const OCDocument *doc, int index, OCAttSite *out)
+{
+    if (!doc || !out)
+        return false;
+    const std::vector<AttSite> sites = findAttSites(doc->doc.sequence());
+    if (index < 0 || index >= int(sites.size()))
+        return false;
+    const AttSite &site = sites[size_t(index)];
+    out->number = site.number;
+    out->start = site.span.start;
+    out->length = site.span.length;
+    out->reversed = site.reversed;
     return true;
 }
 
@@ -1084,6 +1105,27 @@ bool oc_gibson(const OCDocument *vector, const char *vector_enzyme1, const char 
             return failWith(error, err);
         return deliver(out, p);
     });
+}
+
+bool oc_gateway(const OCDocument *insert, const OCDocument *vector, int reaction, OCDocument *out,
+                OCDocument *byproduct, int *first_site, int *second_site, char **error)
+{
+    if (!insert || !vector)
+        return failWith(error, "pick an insert and a vector");
+    if (reaction != OC_GATEWAY_BP && reaction != OC_GATEWAY_LR)
+        return failWith(error, "unknown reaction");
+    GatewayResult result;
+    std::string err;
+    if (!gatewayRecombine(insert->doc.sequence(), vector->doc.sequence(),
+                          reaction == OC_GATEWAY_LR ? GatewayReaction::LR : GatewayReaction::BP, &result, &err))
+        return failWith(error, err);
+    if (first_site)
+        *first_site = result.firstSite;
+    if (second_site)
+        *second_site = result.secondSite;
+    if (byproduct)
+        deliver(byproduct, result.byproduct);   // empty when the reaction leaves none
+    return deliver(out, result.clone);
 }
 
 bool oc_overlap_extension(const OCDocument *const *fragments, int fragment_count, int min_overlap, OCDocument *out,
