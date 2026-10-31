@@ -297,6 +297,10 @@ Window::~Window()
         g_source_remove(m_badgeTimer);
     if (m_settleTimer)
         g_source_remove(m_settleTimer);
+    if (m_closeAlert) {
+        g_signal_handlers_disconnect_by_data(m_closeAlert, this);
+        adw_dialog_force_close(std::exchange(m_closeAlert, nullptr));
+    }
     // The views first: the sequence pane they draw in is ours to drop.
     m_seq.reset();
     m_map.reset();
@@ -1962,6 +1966,12 @@ bool Window::confirmClose(bool closeWindow)
         return true;
     m_closeWindow = closeWindow;
     present();   // show the document being asked about
+    if (m_closeAlert) {
+        // Already being asked (a second Ctrl+W, or Ctrl+Q over a tab's
+        // question): the one alert stands, so its answer can't be given twice.
+        gtk_widget_grab_focus(GTK_WIDGET(m_closeAlert));
+        return false;
+    }
     AdwDialog *d = adw_alert_dialog_new(("Save changes to " + displayName() + "?").c_str(),
                                         closeWindow ? "Unsaved changes are lost when the window closes."
                                                     : "Unsaved changes are lost when the tab closes.");
@@ -1973,12 +1983,14 @@ bool Window::confirmClose(bool closeWindow)
     adw_alert_dialog_set_close_response(ADW_ALERT_DIALOG(d), "cancel");
     g_signal_connect(d, "response", G_CALLBACK((+[](AdwAlertDialog *, const char *response, gpointer p) {
                          auto *self = static_cast<Window *>(p);
+                         self->m_closeAlert = nullptr;
                          if (g_strcmp0(response, "discard") == 0)
                              self->finishClose();
                          else if (g_strcmp0(response, "save") == 0)
                              self->save(true);
                      })),
                      this);
+    m_closeAlert = d;
     adw_dialog_present(d, m_window);
     return false;
 }

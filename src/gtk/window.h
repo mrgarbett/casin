@@ -273,6 +273,7 @@ private:
     PcrWizard *m_pcr = nullptr;   // owns itself; closes with this tab
     GelWizard *m_gel = nullptr;   // the same
     std::vector<AdwDialog *> m_dialogs;   // the tab's open dialogs, closed with it
+    AdwDialog *m_closeAlert = nullptr;    // the Save/Discard/Cancel being asked
     bool m_closeConfirmed = false;
     GtkWidget *m_filter = nullptr;
     GtkWidget *m_setDrop = nullptr;
