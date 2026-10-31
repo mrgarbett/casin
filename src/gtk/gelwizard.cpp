@@ -24,6 +24,22 @@ int g_comb = 1;
 double g_percent = 1.0;
 GelStain g_stain = GelStain::EthidiumUV;
 Gel3DScene g_scene3D = Gel3DScene::PinkOnBlue;
+// The 3D picture's knobs, kept while the app runs (experimental: for
+// settling on the shipped values by eye).
+Gel3DLook g_look3D;
+struct Knob {
+    const char *name;
+    float Gel3DLook::*value;
+    double lo, hi, step;
+};
+const Knob kKnobs[] = {
+    {"Exposure", &Gel3DLook::exposure, 0.2, 2.0, 0.05},   {"Contrast", &Gel3DLook::contrast, 0.6, 2.5, 0.05},
+    {"Stain glow", &Gel3DLook::stain, 0.0, 3.0, 0.05},    {"Band glow", &Gel3DLook::band, 0.0, 3.0, 0.05},
+    {"Scatter", &Gel3DLook::scatter, 0.0, 60.0, 1.0},     {"Lamp", &Gel3DLook::lamp, 0.0, 30.0, 0.5},
+    {"Lamp size", &Gel3DLook::lampSize, 0.01, 0.2, 0.005}, {"Spot cone", &Gel3DLook::spot, 0.1, 1.2, 0.02},
+    {"Bloom", &Gel3DLook::bloom, 0.0, 1.0, 0.02},         {"Vignette", &Gel3DLook::vignette, 0.0, 1.0, 0.05},
+    {"Grain", &Gel3DLook::grain, 0.0, 0.1, 0.005},
+};
 // Each sequence's lanes as its gel was last closed, so reopening it keeps them.
 struct Remembered {
     Document *doc;
@@ -222,6 +238,14 @@ GtkWidget *GelWizard::buildView()
     gtk_box_append(GTK_BOX(pill), m_run);
     gtk_box_append(GTK_BOX(pill), m_runLabel);
     gtk_box_append(GTK_BOX(pill), m_copy);
+    if (Window::experimentalTools()) {
+        m_tune = gtk_menu_button_new();
+        gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(m_tune), "restricto-tune-symbolic");
+        gtk_widget_set_tooltip_text(m_tune, "Tune the 3D picture");
+        gtk_menu_button_set_popover(GTK_MENU_BUTTON(m_tune), buildTuner());
+        gtk_widget_set_visible(m_tune, FALSE);
+        gtk_box_append(GTK_BOX(pill), m_tune);
+    }
     // The Imager's print and, with Experimental Tools on, the gel in 3D.
     m_stage = gtk_stack_new();
     gtk_stack_set_transition_type(GTK_STACK(m_stage), GTK_STACK_TRANSITION_TYPE_CROSSFADE);
@@ -935,14 +959,92 @@ void GelWizard::lookChanged(int look)
     fillStains();
     // Copy Image takes the Imager's print; the 3D scene isn't copied yet.
     gtk_widget_set_sensitive(m_copy, look != 1);
+    if (m_tune)
+        gtk_widget_set_visible(m_tune, look == 1);
     if (look == 1 && !m_gel3D) {
         m_gel3D = std::make_unique<Gel3DView>();
         m_gel3D->setScene(g_scene3D);
+        m_gel3D->setLook(g_look3D);
         m_gel3D->setComb(gelCombs()[size_t(std::clamp(g_comb, 0, int(gelCombs().size()) - 1))]);
         gtk_stack_add_named(GTK_STACK(m_stage), m_gel3D->widget(), "3d");
     }
     show3D();
     gtk_stack_set_visible_child_name(GTK_STACK(m_stage), look == 1 ? "3d" : "imager");
+}
+
+// Sliders for the 3D picture's knobs, with their values, and a button that
+// copies them all as text (to settle on the shipped values).
+GtkWidget *GelWizard::buildTuner()
+{
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 4);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    int row = 0;
+    for (const Knob &k : kKnobs) {
+        GtkWidget *name = gtk_label_new(k.name);
+        gtk_label_set_xalign(GTK_LABEL(name), 0);
+        GtkWidget *scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, k.lo, k.hi, k.step);
+        gtk_scale_set_draw_value(GTK_SCALE(scale), FALSE);
+        gtk_widget_set_size_request(scale, 160, -1);
+        gtk_range_set_value(GTK_RANGE(scale), g_look3D.*k.value);
+        GtkWidget *value = gtk_label_new("");
+        gtk_widget_add_css_class(value, "numeric");
+        gtk_widget_add_css_class(value, "dim-label");
+        gtk_label_set_xalign(GTK_LABEL(value), 1);
+        gtk_widget_set_size_request(value, 48, -1);
+        auto show = [](GtkWidget *label, double v) {
+            char buf[32];
+            std::snprintf(buf, sizeof buf, v >= 10 ? "%.0f" : v >= 1 ? "%.2f" : "%.3f", v);
+            gtk_label_set_text(GTK_LABEL(label), buf);
+        };
+        show(value, g_look3D.*k.value);
+        g_object_set_data(G_OBJECT(scale), "oc-knob", const_cast<Knob *>(&k));
+        g_object_set_data(G_OBJECT(scale), "oc-value", value);
+        g_signal_connect(scale, "value-changed", G_CALLBACK(+[](GtkRange *r, gpointer p) {
+                             auto *self = static_cast<GelWizard *>(p);
+                             auto *k = static_cast<const Knob *>(g_object_get_data(G_OBJECT(r), "oc-knob"));
+                             auto *label = static_cast<GtkWidget *>(g_object_get_data(G_OBJECT(r), "oc-value"));
+                             const double v = gtk_range_get_value(r);
+                             g_look3D.*k->value = float(v);
+                             char buf[32];
+                             std::snprintf(buf, sizeof buf, v >= 10 ? "%.0f" : v >= 1 ? "%.2f" : "%.3f", v);
+                             gtk_label_set_text(GTK_LABEL(label), buf);
+                             if (self->m_gel3D)
+                                 self->m_gel3D->setLook(g_look3D);
+                         }),
+                         this);
+        gtk_grid_attach(GTK_GRID(grid), name, 0, row, 1, 1);
+        gtk_grid_attach(GTK_GRID(grid), scale, 1, row, 1, 1);
+        gtk_grid_attach(GTK_GRID(grid), value, 2, row, 1, 1);
+        ++row;
+    }
+    GtkWidget *copy = gtk_button_new_with_label("Copy Values");
+    gtk_widget_set_tooltip_text(copy, "Put every value on the clipboard, to send");
+    gtk_widget_set_halign(copy, GTK_ALIGN_END);
+    gtk_widget_set_margin_top(copy, 6);
+    g_signal_connect_swapped(copy, "clicked", G_CALLBACK(+[](gpointer p) { static_cast<GelWizard *>(p)->copyLook(); }),
+                             this);
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_append(GTK_BOX(box), grid);
+    gtk_box_append(GTK_BOX(box), copy);
+    GtkWidget *popover = gtk_popover_new();
+    gtk_popover_set_child(GTK_POPOVER(popover), box);
+    gtk_widget_set_margin_start(box, 6);
+    gtk_widget_set_margin_end(box, 6);
+    gtk_widget_set_margin_top(box, 6);
+    gtk_widget_set_margin_bottom(box, 6);
+    return popover;
+}
+
+void GelWizard::copyLook()
+{
+    std::string text = "3D gel look (" + std::string(gel3DSceneTitle(g_scene3D)) + ")\n";
+    for (const Knob &k : kKnobs) {
+        char buf[64];
+        std::snprintf(buf, sizeof buf, "%s: %g\n", k.name, double(g_look3D.*k.value));
+        text += buf;
+    }
+    gdk_clipboard_set_text(gtk_widget_get_clipboard(m_dialog), text.c_str());
 }
 
 // The 3D gel follows the lanes and the run while it's showing.

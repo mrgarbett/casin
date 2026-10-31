@@ -233,6 +233,8 @@ row:selected .restricto-lane-badge { background-color: @accent_bg_color; color: 
 .restricto-gel-pill button { color: white; border-radius: 999px; }
 .restricto-gel-pill button:checked { background-color: alpha(white, 0.18); }
 .restricto-gel-pill .linked > button:not(:checked) { background-color: alpha(white, 0.06); }
+/* The pill's popovers hang off its buttons, so undo the white-on-dark for them. */
+.restricto-gel-pill popover button { color: @window_fg_color; border-radius: 6px; }
 )";
     // Our own icons (compiled in from src/gtk/icons): Fedora's Adwaita no
     // longer ships some of the generic ones the map toggle used.
