@@ -19,6 +19,7 @@
 #include "core/snapgene.h"
 #include "core/pcrprogram.h"
 #include "core/tm.h"
+#include "core/xml.h"
 
 #include <algorithm>
 #include <climits>
@@ -523,6 +524,13 @@ static void testTm()
     // Self-complementary path runs.
     const double sc = meltingTemperature("GAATTCGAATTC");
     CHECK(sc > 0 && sc < 60);
+}
+
+static void testXmlEntities()
+{
+    CHECK_EQ(xml::decodeEntities("a &amp; b &#65;&#x42;"), std::string("a & b AB"));
+    // An empty character reference isn't a NUL byte.
+    CHECK_EQ(xml::decodeEntities("x&#;y&#x;z"), std::string("xyz"));
 }
 
 // Tm and annealing temperatures in each polymerase's buffer, as NEB's Tm
@@ -1751,6 +1759,7 @@ int main(int argc, char **argv)
     testSnapGene();
     testEnzymes();
     testTm();
+    testXmlEntities();
     testPcrProgram();
     testFastaAndIO();
     testEditing();
