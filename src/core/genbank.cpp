@@ -328,6 +328,7 @@ bool readGenBank(const std::string &data, Sequence *out, std::string *error)
     std::vector<RawFeature> raw;
     std::string bases;
     bool sawLocus = false;
+    int locusLength = 0;   // what the LOCUS line says the sequence holds
     std::string openRaw;     // raw value of a qualifier still being read
     bool inQualifier = false;
 
@@ -364,9 +365,15 @@ bool readGenBank(const std::string &data, Sequence *out, std::string *error)
                 std::vector<std::string> tok = splitWhitespace(line);
                 if (tok.size() > 1)
                     seq.name = tok[1];
-                for (const std::string &t : tok)
-                    if (toLower(t) == "circular")
+                for (size_t i = 0; i < tok.size(); ++i) {
+                    if (toLower(tok[i]) == "circular")
                         seq.circular = true;
+                    if (i + 1 < tok.size() && toLower(tok[i + 1]) == "bp" && !tok[i].empty()
+                        && std::all_of(tok[i].begin(), tok[i].end(),
+                                       [](unsigned char c) { return std::isdigit(c); })
+                        && tok[i].size() < 10)
+                        locusLength = std::stoi(tok[i]);
+                }
                 mode = Mode::Header;
             } else if (keyword == "DEFINITION") {
                 definition = trim(line.substr(10));
@@ -445,6 +452,19 @@ bool readGenBank(const std::string &data, Sequence *out, std::string *error)
     }
 
     seq.setBasesFromText(bases);   // GenBank is usually all lowercase: that means none marked
+    // A file cut short, or one with no ORIGIN, would open as a shorter
+    // sequence with its features past the end: refused instead.
+    if (seq.bases.empty()) {
+        if (error)
+            *error = "no bases: the file has no ORIGIN section";
+        return false;
+    }
+    if (locusLength > 0 && seq.length() != locusLength) {
+        if (error)
+            *error = "the LOCUS line says " + std::to_string(locusLength) + " bp but the file holds "
+                   + std::to_string(seq.length()) + " (is it cut short?)";
+        return false;
+    }
     definition = trim(definition);
     if (definition == ".")
         definition.clear();

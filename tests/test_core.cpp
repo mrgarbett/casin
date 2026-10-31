@@ -533,6 +533,27 @@ static void testXmlEntities()
     CHECK_EQ(xml::decodeEntities("x&#;y&#x;z"), std::string("xyz"));
 }
 
+// A damaged file is refused rather than opened as a shorter sequence with
+// its features past the end.
+static void testDamagedFiles()
+{
+    const std::string good = "LOCUS       x 30 bp DNA circular\nFEATURES             Location/Qualifiers\n"
+                             "     misc_feature    21..30\n"
+                             "ORIGIN\n        1 acgtacgtac gtacgtacgt acgtacgtac\n//\n";
+    Sequence r;
+    std::string err;
+    CHECK(readGenBank(good, &r, &err));
+    // Cut short in the bases: the LOCUS line still says 30 bp.
+    CHECK(!readGenBank(good.substr(0, good.size() - 15), &r, &err) && err.find("30 bp") != std::string::npos);
+    // Cut before ORIGIN, or no ORIGIN at all.
+    CHECK(!readGenBank(good.substr(0, good.find("ORIGIN")), &r, &err) && err.find("ORIGIN") != std::string::npos);
+    // A LOCUS line without a length doesn't complain about one.
+    CHECK(readGenBank("LOCUS x\nORIGIN\n 1 acgt\n//\n", &r, &err) && r.length() == 4);
+    // A FASTA that's only a header.
+    CHECK(!readFasta(">name only\n", &r, &err) && !err.empty());
+    CHECK(!readFasta("", &r, &err));
+}
+
 // Tm and annealing temperatures in each polymerase's buffer, as NEB's Tm
 // calculator gives them. The first pair is the example the independent
 // polymerase-tm project checks against NEB's tool (Q5: 72 and 75, Ta 72).
@@ -1854,6 +1875,7 @@ int main(int argc, char **argv)
     testEnzymes();
     testTm();
     testXmlEntities();
+    testDamagedFiles();
     testPcrProgram();
     testFastaAndIO();
     testEditing();
