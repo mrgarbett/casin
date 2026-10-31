@@ -3,22 +3,26 @@
 // the GPU (Metal). Nothing here is painted to look like a gel: the scene is
 // a block of agarose (a refracting, faintly scattering, stain-filled medium,
 // shaped as a cast gel is: a sagging top, a lip at the edges, wells cut in)
-// lying on a glowing plate, in spilt buffer, under a dark room with one lamp, and the
-// picture is what a camera would see. Light enters the block from the plate,
-// the stain fluoresces faintly everywhere and brightly where the DNA is, rays
-// that leave at a shallow angle bounce inside the slab until they escape at
-// a cut edge (which is why the edges shine), and the wet top catches the
-// lamp. Each frame adds a sample per pixel; the picture converges while the
-// gel is still and goes grainy while it moves.
-// Drag to orbit, scroll to move closer, double-click to go back. View only:
-// the sidebar and the Imager tab still do the editing and hovering.
+// lying on a glowing plate, in spilt buffer, in a dark room under one
+// spotlight, and the picture is what a camera would see. Light enters the
+// block from the plate, the stain fluoresces faintly everywhere and brightly
+// where the DNA is, rays that leave at a shallow angle bounce inside the slab
+// until they escape at a cut edge (which is why the edges shine), and the wet
+// top catches the lamp. Each frame adds a sample per pixel; the picture
+// converges while the gel is still and goes grainy while it moves.
+// Drag to orbit, right-drag or Shift-drag to move the gel, scroll to move
+// closer, double-click to go back. View only: the sidebar and the Imager tab
+// still do the editing and hovering. The knobs of the look (Gel3DLook) are
+// the wizard's sliders, for settling on the shipped values by eye.
 import AppKit
 import Metal
 import MetalKit
 
-/// The Metal view: orbits on drag, zooms on scroll, resets on double-click.
+/// The Metal view: orbits on drag (moves the gel on a right or Shift drag),
+/// zooms on scroll, resets on double-click.
 private final class TracerView: MTKView {
-    var onDrag: ((CGFloat, CGFloat) -> Void)?
+    /// A drag by (dx, dy) points; `pan` moves the gel rather than turning it.
+    var onDrag: ((CGFloat, CGFloat, Bool) -> Void)?
     var onScroll: ((CGFloat) -> Void)?
     var onReset: (() -> Void)?
     /// Views floating over the gel (the pills): a drag from one of them,
@@ -35,7 +39,17 @@ private final class TracerView: MTKView {
     }
     override func mouseUp(with event: NSEvent) { grabbed = false }
     override func mouseDragged(with event: NSEvent) {
-        if grabbed { onDrag?(event.deltaX, event.deltaY) }
+        if grabbed { onDrag?(event.deltaX, event.deltaY, event.modifierFlags.contains(.shift)) }
+    }
+    override func rightMouseDown(with event: NSEvent) { mouseDown(with: event) }
+    override func rightMouseUp(with event: NSEvent) { grabbed = false }
+    override func rightMouseDragged(with event: NSEvent) {
+        if grabbed { onDrag?(event.deltaX, event.deltaY, true) }
+    }
+    override func otherMouseDown(with event: NSEvent) { mouseDown(with: event) }
+    override func otherMouseUp(with event: NSEvent) { grabbed = false }
+    override func otherMouseDragged(with event: NSEvent) {
+        if grabbed { onDrag?(event.deltaX, event.deltaY, true) }
     }
     override func scrollWheel(with event: NSEvent) { onScroll?(event.scrollingDeltaY) }
 }
@@ -96,6 +110,34 @@ enum Gel3DScene: Int, CaseIterable {
     }
 }
 
+/// The knobs of the 3D picture, for tuning the look by eye (the wizard's
+/// sliders); the defaults are what ships. The same knobs, with the same
+/// defaults, are on the Linux build: values tuned on one carry to the other.
+struct Gel3DLook: Equatable {
+    /// How bright the picture is developed.
+    var exposure: Float = 0.75
+    /// About mid grey; 1 leaves it alone.
+    var contrast: Float = 1.25
+    /// The free stain's glow, as a multiple.
+    var stain: Float = 1.0
+    /// The DNA's glow, as a multiple.
+    var band: Float = 1.0
+    /// How much the gel scatters, per metre.
+    var scatter: Float = 18.0
+    /// The spotlight's brightness.
+    var lamp: Float = 7.0
+    /// The spotlight's size, m.
+    var lampSize: Float = 0.09
+    /// The spotlight's cone, radians (half angle).
+    var spot: Float = 0.35
+    /// The bright parts' halo.
+    var bloom: Float = 0.25
+    /// How dark the corners go.
+    var vignette: Float = 0.6
+    /// The camera's noise.
+    var grain: Float = 0.02
+}
+
 /// What the kernels need; laid out as the Metal `Uniforms` struct.
 private struct GelUniforms {
     var camPos = SIMD4<Float>(repeating: 0)
@@ -117,6 +159,10 @@ private struct GelUniforms {
     var stain = SIMD4<Float>(repeating: 0)
     var band = SIMD4<Float>(repeating: 0)
     var lip = SIMD4<Float>(repeating: 0)
+    /// Contrast, the spotlight's brightness, size and cone.
+    var tune0 = SIMD4<Float>(repeating: 0)
+    /// Bloom, vignette, the free stain's and the DNA's glow as multiples.
+    var tune1 = SIMD4<Float>(repeating: 0)
     /// Frame, samples so far, width, height.
     var counts = SIMD4<UInt32>(repeating: 0)
 }
@@ -133,7 +179,16 @@ final class Gel3DView: NSView, MTKViewDelegate {
     private var samples: UInt32 = 0
     private var frameIndex: UInt32 = 0
     /// Enough for a clean picture; then the GPU rests until something changes.
-    private let maxSamples: UInt32 = 160
+    private static let cleanSamples: UInt32 = 160
+    /// A frame slower than 60 ms a sample (a tired or shared GPU) settles
+    /// for a grainier picture rather than tracing for minutes.
+    private var maxSamples: UInt32 { frameMs > 60 ? 48 : Self.cleanSamples }
+    /// How long a traced frame takes, smoothed.
+    private var frameMs: Double = 0
+    private var lastRender: CFTimeInterval = 0
+    /// Being turned, moved or zoomed: trace coarsely until it rests for a moment.
+    private var moving = false
+    private var restTimer: Timer?
     /// Views floating over the gel that a drag may start on without turning it.
     var ignoredViews: [NSView] {
         get { metalView.ignoredViews }
@@ -144,6 +199,8 @@ final class Gel3DView: NSView, MTKViewDelegate {
     private var yaw: Float = 0
     private var pitch: Float = homePitch
     private var zoom: Float = 1
+    /// Where the camera looks, off the gel's middle.
+    private var pan = SIMD3<Float>(0, 0, 0)
     /// How far the camera stands back to take in the whole gel.
     private var fit: Float = 0.2
     private var lanes: [GelLaneModel] = []
@@ -152,6 +209,10 @@ final class Gel3DView: NSView, MTKViewDelegate {
     /// How the gel is stained and lit; changing it starts the picture over.
     var scene: Gel3DScene = .pinkOnBlue {
         didSet { if scene != oldValue { restart() } }
+    }
+    /// The knobs of the picture; changing one starts it over.
+    var look = Gel3DLook() {
+        didSet { if look != oldValue { restart() } }
     }
     /// The comb that cast the wells; the tray is 7 cm wide whatever it is.
     var comb: GelComb = .standard {
@@ -190,28 +251,35 @@ final class Gel3DView: NSView, MTKViewDelegate {
             note.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -60),
         ])
         setUpMetal()
-        metalView.onDrag = { [weak self] dx, dy in
+        metalView.onDrag = { [weak self] dx, dy, panning in
             guard let self = self else { return }
-            self.yaw -= Float(dx) * 0.008
-            self.pitch = min(1.45, max(0.22, self.pitch + Float(dy) * 0.008))
-            self.restart()
+            if panning {
+                self.panBy(dx: dx, dy: dy)
+            } else {
+                self.yaw -= Float(dx) * 0.008
+                // Past the top, the view snaps to straight down.
+                self.pitch = min(.pi / 2, max(0.22, self.pitch + Float(dy) * 0.008))
+                if self.pitch > 1.5 { self.pitch = .pi / 2 }
+            }
+            self.interacted()
         }
         metalView.onScroll = { [weak self] dy in
             guard let self = self else { return }
             self.zoom = min(2.0, max(0.45, self.zoom * (1 - Float(dy) * 0.004)))
-            self.restart()
+            self.interacted()
         }
         metalView.onReset = { [weak self] in
             guard let self = self else { return }
             self.yaw = 0
             self.pitch = Self.homePitch
             self.zoom = 1
+            self.pan = SIMD3<Float>(0, 0, 0)
             self.restart()
         }
         setAccessibilityElement(true)
         setAccessibilityRole(.image)
         setAccessibilityLabel("Gel in 3D")
-        setAccessibilityHelp("Drag to turn the gel, scroll to come closer, double-click to go back")
+        setAccessibilityHelp("Drag to turn the gel, right-drag or Shift-drag to move it, scroll to come closer, double-click to go back")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -289,6 +357,34 @@ final class Gel3DView: NSView, MTKViewDelegate {
         if !isHidden, tracePipeline != nil { metalView.isPaused = false }
     }
 
+    /// Being turned or zoomed: trace at a quarter of the pixels until it
+    /// rests for a moment, so the gel keeps up with the pointer.
+    private func interacted() {
+        if !moving {
+            moving = true
+            needsLayout = true
+        }
+        restTimer?.invalidate()
+        restTimer = Timer.scheduledTimer(withTimeInterval: 0.18, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+            self.moving = false
+            self.restTimer = nil
+            self.needsLayout = true
+            self.restart()
+        }
+        restart()
+    }
+
+    /// Moves the gel with the pointer: by `dx`, `dy` points across the view.
+    private func panBy(dx: CGFloat, dy: CGFloat) {
+        let c = camera()
+        let perPx = 2 * c.distance * tan(17.5 * Float.pi / 180) / Float(max(1, bounds.height))
+        pan = pan - c.right * (Float(dx) * perPx) + c.up * (Float(dy) * perPx)
+        // Not out of sight: the gel stays within reach of the middle.
+        let limit = fit * 0.7
+        pan = pan.clamped(lowerBound: SIMD3<Float>(repeating: -limit), upperBound: SIMD3<Float>(repeating: limit))
+    }
+
     override func viewDidHide() {
         super.viewDidHide()
         metalView.isPaused = true
@@ -305,7 +401,7 @@ final class Gel3DView: NSView, MTKViewDelegate {
         // let the display scale it: the picture is soft and grainy anyway.
         let scale = window?.backingScaleFactor ?? 2
         var w = bounds.width * scale, h = bounds.height * scale
-        let cap: CGFloat = 2_000_000
+        let cap: CGFloat = moving ? 500_000 : 2_000_000
         if w * h > cap {
             let s = sqrt(cap / (w * h))
             w *= s
@@ -336,26 +432,44 @@ final class Gel3DView: NSView, MTKViewDelegate {
         return true
     }
 
-    private func uniforms(width w: Int, height h: Int) -> GelUniforms {
-        var u = GelUniforms()
-        let distance = fit * zoom
-        let target = SIMD3<Float>(0, thick / 2, 0.004)
+    private struct Camera {
+        var position, forward, right, up: SIMD3<Float>
+        var distance: Float
+    }
+
+    /// The camera orbits a point just above the middle of the gel, moved by panning.
+    private func camera() -> Camera {
+        // Tilted towards straight down, the camera stands further back: from
+        // above the whole gel has to fit, with room under it for the pill.
+        let fitTop = depth * 0.5 * 1.55 / tan(17.5 * Float.pi / 180)
+        let above = min(1, max(0, (pitch - Self.homePitch) / (.pi / 2 - Self.homePitch)))
+        let distance = (fit + (max(fitTop, fit) - fit) * above) * zoom
+        let target = SIMD3<Float>(0, thick / 2, 0.004) + pan
         let position = target + SIMD3<Float>(distance * sin(yaw) * cos(pitch), distance * sin(pitch),
                                              distance * cos(yaw) * cos(pitch))
         let f = simd_normalize(target - position)
-        let r = simd_normalize(simd_cross(f, SIMD3<Float>(0, 1, 0)))
-        let up = simd_cross(r, f)
-        u.camPos = SIMD4<Float>(position, 0)
-        u.camF = SIMD4<Float>(f, 0)
-        u.camR = SIMD4<Float>(r, 0)
-        u.camU = SIMD4<Float>(up, 0)
+        // Right comes from the yaw alone, so looking straight down still has
+        // a well-defined up (the wells' side at the top of the picture).
+        let r = SIMD3<Float>(cos(yaw), 0, -sin(yaw))
+        return Camera(position: position, forward: f, right: r, up: simd_cross(r, f), distance: distance)
+    }
+
+    private func uniforms(width w: Int, height h: Int) -> GelUniforms {
+        var u = GelUniforms()
+        let c = camera()
+        u.camPos = SIMD4<Float>(c.position, 0)
+        u.camF = SIMD4<Float>(c.forward, 0)
+        u.camR = SIMD4<Float>(c.right, 0)
+        u.camU = SIMD4<Float>(c.up, 0)
         // The stained gel drinks some of the light that excites the stain;
         // 1% agarose scatters gently, mostly forward.
-        u.sigma = scene.sigma
-        u.lens = SIMD4<Float>(tan(17.5 * .pi / 180), Float(w) / Float(h), 0.0005, distance)
+        u.sigma = SIMD4<Float>(scene.sigma.x, scene.sigma.y, scene.sigma.z, look.scatter)
+        u.lens = SIMD4<Float>(tan(17.5 * .pi / 180), Float(w) / Float(h), 0.0005, c.distance)
         u.slab = SIMD4<Float>(width, depth, thick, 0.7)
         u.emitter = SIMD4<Float>(width / 2 + 0.13, depth / 2 + 0.11, 0.025, 1.0)
-        u.look = SIMD4<Float>(0.75, 0.02, 14, 0.75)
+        u.look = SIMD4<Float>(look.exposure, look.grain, 14, 0.75)
+        u.tune0 = SIMD4<Float>(look.contrast, look.lamp, look.lampSize, look.spot)
+        u.tune1 = SIMD4<Float>(look.bloom, look.vignette, look.stain, look.band)
         u.plate = scene.plate
         u.stain = scene.stain
         u.band = scene.band
@@ -396,6 +510,9 @@ final class Gel3DView: NSView, MTKViewDelegate {
         }
         buffer.present(drawable)
         buffer.commit()
+        let now = CACurrentMediaTime()
+        if lastRender > 0, samples > 1 { frameMs = 0.8 * frameMs + 0.2 * (now - lastRender) * 1000 }
+        lastRender = now
         if samples >= maxSamples { view.isPaused = true }
     }
 
@@ -564,6 +681,9 @@ final class Gel3DView: NSView, MTKViewDelegate {
 
     struct Uniforms {
         float4 camPos, camF, camR, camU, sigma, lens, slab, emitter, look, plate, stain, band, lip;
+        // contrast, the spotlight's brightness, size and cone; bloom, vignette,
+        // the free stain's and the DNA's glow as multiples.
+        float4 tune0, tune1;
         uint4 counts;
     };
 
@@ -623,6 +743,21 @@ final class Gel3DView: NSView, MTKViewDelegate {
         return mix(0.45, 1.0, smoothstep(r * 0.3, r, length(p - c)));
     }
 
+    // One spotlight, high up behind the gel, aimed at it: what it throws on a
+    // matte surface at x facing n (a cone with a soft edge, falling off with
+    // distance), and how it looks head on.
+    constant float3 LAMP = float3(0.03, 0.55, -0.30);
+    constant float3 LAMP_COLOUR = float3(1.0, 0.94, 0.86);
+    inline float3 spot(float3 x, float3 n, constant Uniforms &u) {
+        float3 axis = normalize(float3(0.0, 0.0, 0.0) - LAMP);
+        float3 to = x - LAMP;
+        float dist2 = dot(to, to);
+        float3 dir = to * rsqrt(dist2);
+        float cone = smoothstep(cos(u.tune0.w), cos(u.tune0.w * 0.55), dot(dir, axis));
+        float lambert = max(0.0, -dot(dir, n));
+        return LAMP_COLOUR * (u.tune0.y * 0.035 * cone * lambert / max(dist2, 0.05));
+    }
+
     // The plate: a diffuser lit from below, brightest under the gel,
     // mottled, dusty, dark beyond its edges.
     inline float3 plate(float2 q, constant Uniforms &u) {
@@ -632,35 +767,48 @@ final class Gel3DView: NSView, MTKViewDelegate {
                    * smoothstep(0.0, 0.012, q.y - zmin) * smoothstep(0.0, 0.012, front - q.y);
         float3 dark = u.plate.xyz * 0.016 + 0.0004;
         if (edge <= 0.0) {
-            // The box's black frame around the glass: matte, with a faint
-            // bevel lit by the glass beside it.
+            // The box's black frame around the glass, with a faint bevel lit
+            // by the glass; beyond the frame, the bench. Both matte, lit by
+            // the spotlight.
             float past = max(max(abs(q.x) - halfX, q.y - front), zmin - q.y);
             float bevel = smoothstep(0.004, 0.0, past);
             float frame = smoothstep(0.03, 0.018, past);
-            return dark + frame * (float3(0.012) * (0.8 + 0.4 * vnoise(q * 300.0)) + u.plate.xyz * u.emitter.w * 0.05 * bevel);
+            float3 lit = spot(float3(q.x, 0.0, q.y), float3(0.0, 1.0, 0.0), u);
+            float3 bench = (1.0 - frame) * lit * float3(0.30, 0.27, 0.24) * (0.9 + 0.2 * vnoise(q * 200.0));
+            return dark + bench + frame * ((float3(0.012) + lit * 0.06) * (0.8 + 0.4 * vnoise(q * 300.0))
+                                           + u.plate.xyz * u.emitter.w * 0.05 * bevel);
         }
         // Brightest a little behind the gel, near black at the corners.
         float2 rel = (q - float2(0.0, -0.3 * front)) / float2(halfX, front);
         float fall = mix(1.0, 0.06, smoothstep(0.12, 1.1, length(rel)));
         // Blotches, out of focus: the plate's scratches and smudges.
         float mott = 0.80 + 0.40 * vnoise(q * 25.0 + 3.0);
-        float blot = 1.0 - 0.35 * smoothstep(0.55, 0.8, vnoise(q * 60.0 + 9.0));
+        float blot = 1.0 - 0.12 * smoothstep(0.55, 0.8, vnoise(q * 60.0 + 9.0));
         float speck = dust(q * 500.0, 0.06) * dust(q * 1500.0 + 5.0, 0.03);
         float grain = 0.95 + 0.10 * vnoise(q * 900.0);
         float3 lit = u.plate.xyz * u.emitter.w;
         return mix(dark, lit * fall * mott * blot * speck * grain, edge);
     }
 
-    // The dim room above, with one small lamp high up behind the gel.
-    inline float3 room(float3 p, float3 d) {
+    // The room: dark, with the spotlight itself where a ray meets it, a wall
+    // behind the gel lit by it, and the bench the light box stands on.
+    inline float3 room(float3 p, float3 d, constant Uniforms &u) {
         float3 dark = float3(0.002, 0.001, 0.006);
-        if (d.y <= 0.0001) return dark;
-        float t = (0.55 - p.y) / d.y;
-        float3 h = p + d * t;
-        // A small lamp with a soft edge, as a shaded bulb or a window looks in a glossy surface.
-        float lx = smoothstep(0.0, 0.035, 0.045 - abs(h.x - 0.03));
-        float lz = smoothstep(0.0, 0.035, 0.045 - abs(h.z + 0.30));
-        return dark + float3(7.0, 6.6, 6.0) * lx * lz;
+        if (d.y > 0.0001) {
+            float t = (LAMP.y - p.y) / d.y;
+            float3 h = p + d * t;
+            // A round lamp, soft towards its rim, so its reflection in the wet
+            // top is one soft blob however the surface undulates.
+            float r = length(h.xz - LAMP.xz) / u.tune0.z;
+            if (r < 1.0) return dark + LAMP_COLOUR * u.tune0.y * smoothstep(1.0, 0.25, r);
+        }
+        if (d.z < -0.0001) {
+            // The wall behind, 60 cm back: a matte grey the spotlight washes.
+            float t = (-0.6 - p.z) / d.z;
+            float3 w = p + d * t;
+            if (w.y > -0.2) return dark + spot(w, float3(0.0, 0.0, 1.0), u) * float3(0.32, 0.30, 0.28);
+        }
+        return dark;
     }
 
     // The wet top isn't quite smooth: a fine ripple tilts its reflections.
@@ -669,7 +817,7 @@ final class Gel3DView: NSView, MTKViewDelegate {
         float2 q = x.xz * 160.0;
         float dx = vnoise(q + float2(0.7, 0.0)) - vnoise(q - float2(0.7, 0.0));
         float dz = vnoise(q + float2(0.0, 0.7)) - vnoise(q - float2(0.0, 0.7));
-        return normalize(n + float3(dx, 0.0, dz) * 0.035);
+        return normalize(n + float3(dx, 0.0, dz) * 0.02);
     }
 
     // The slab's shape. A cast gel isn't a box: its top sags a little and
@@ -683,7 +831,7 @@ final class Gel3DView: NSView, MTKViewDelegate {
         float well = bands.sample(s, uv).b;
         float inset = min(hw - abs(xz.x), hd - abs(xz.y));
         float lip = exp(-max(inset, 0.0) / 0.0015) * 0.00055;
-        float sag = (vnoise(xz * 120.0) - 0.5) * 0.00014 + (vnoise(xz * 23.0 + 7.0) - 0.5) * 0.0003;
+        float sag = (vnoise(xz * 120.0) - 0.5) * 0.00007 + (vnoise(xz * 23.0 + 7.0) - 0.5) * 0.00015;
         float cut = smoothstep(0.55, 0.85, well) * u.slab.w * thick;
         return thick + lip + sag - cut;
     }
@@ -753,7 +901,7 @@ final class Gel3DView: NSView, MTKViewDelegate {
     // What a ray sees once it's clear of the slab: the plate, wet around the
     // gel where buffer spilt (a film that mirrors the room), or the room.
     inline float3 outside(float3 p, float3 d, constant Uniforms &u) {
-        if (d.y >= -0.0001) return room(p, d);
+        if (d.y >= -0.0001) return room(p, d, u);
         float t = -p.y / d.y;
         float3 h = p + d * t;
         float3 c = plate(h.xz, u);
@@ -769,7 +917,7 @@ final class Gel3DView: NSView, MTKViewDelegate {
             float eta = 1.0 / 1.33;
             float cost = sqrt(max(0.0, 1.0 - eta * eta * (1.0 - cosi * cosi)));
             float F = fresnel(cosi, cost, eta);
-            c = mix(c, c * (1.0 - F) + room(h, reflect(d, n)) * F, wet);
+            c = mix(c, c * (1.0 - F) + room(h, reflect(d, n), u) * F, wet);
         }
         return c;
     }
@@ -787,7 +935,7 @@ final class Gel3DView: NSView, MTKViewDelegate {
         float wall = (m.b > 0.2 && m.b <= 0.8 && yf > 1.0 - u.slab.w) ? 1.0 : 0.0;
         // The stain is never quite even.
         float uneven = 0.72 + 0.36 * vnoise(uv * float2(9.0, 5.0) + 1.0) + 0.12 * vnoise(uv * float2(60.0, 33.0));
-        float3 stain = u.stain.xyz * u.stain.w, band = u.band.xyz * u.band.w;
+        float3 stain = u.stain.xyz * u.stain.w * u.tune1.z, band = u.band.xyz * u.band.w * u.tune1.w;
         Medium md;
         md.emit = (stain * uneven * (1.0 + 6.0 * wall) + band * m.r * prof) * u.look.z;
         md.absorb = u.sigma.xyz + float3(0.6, 0.9, 0.15) * 260.0 * m.g;
@@ -905,8 +1053,10 @@ final class Gel3DView: NSView, MTKViewDelegate {
             float cost = sqrt(1.0 - sin2t);
             float F = fresnel(cosi, cost, eta);
             float3 away = normalize(eta * d - (eta * cosi - cost) * n);
-            // The bottom face lies on the plate.
-            if (ng.y < -0.5) { L += T * (1.0 - F) * plate(x.xz, u); T *= F; d = reflect(d, n); p = x - ng * EPS; continue; }
+            // The bottom face lies wet on the glass, near enough index matched:
+            // the plate's light comes through whole and nothing mirrors back
+            // (a second, dimmer lamp off the bottom would read as a stray blob).
+            if (ng.y < -0.5) { L += T * plate(x.xz, u); break; }
             // Out through the top or a side: what's there is taken outright,
             // and the ray goes on inside with what the face reflected (a small share).
             L += T * (1.0 - F) * outside(x + ng * EPS, away, u);
@@ -957,9 +1107,12 @@ final class Gel3DView: NSView, MTKViewDelegate {
                 wsum += w;
             }
         }
-        c = (c + bloom / wsum * 0.25) * u.look.x;
+        c = (c + bloom / wsum * u.tune1.x) * u.look.x;
         float2 uv = float2(gid) / float2(W, H) - 0.5;
-        c *= 1.0 - 0.6 * dot(uv, uv);
+        c *= 1.0 - u.tune1.y * dot(uv, uv);
+        // Contrast, about mid grey: the plate's dark corners sink and the bands
+        // stand out, as a phone's camera would push the picture.
+        c = max(0.18 + (c - 0.18) * u.tune0.x, 0.0);
         // Shot noise: more where there's more light, none in the black.
         float g = (hashf(float2(gid) + float2(float(u.counts.x % 977u), 0.0)) - 0.5) * u.look.y;
         c += g * 2.5 * sqrt(max(c, float3(0.0)));

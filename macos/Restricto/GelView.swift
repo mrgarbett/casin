@@ -103,7 +103,7 @@ final class GelView: NSView {
     override var isFlipped: Bool { true }
 
     var stain: GelStain = .ethidiumUV { didSet { needsDisplay = true } }
-    /// The comb: every well it cast is on the gel, loaded or not.
+    /// The comb that cast the wells: how thick they are, and so the bands.
     var comb: GelComb = .standard { didSet { needsDisplay = true } }
     /// How long the gel ran, as a fraction of a full run.
     var runLevel: Double = 1 { didSet { needsDisplay = true } }
@@ -219,7 +219,7 @@ final class GelView: NSView {
                           height: max(120, bounds.height - 54 - bottomInset))
         // Lanes grow to fill the pane (a few lanes make a wide gel, not a
         // narrow strip), with the gaps and the size labels growing with them.
-        let n = CGFloat(max(1, lanes.count, comb.teeth))
+        let n = CGFloat(max(1, lanes.count))
         let unit = (area.width - 60) / (n * 1.25 + 0.25)
         let laneW = min(120, max(26, unit))
         let scale = max(1, laneW / 64)
@@ -259,9 +259,9 @@ final class GelView: NSView {
         let g = geometry
         drawSlab(g)
 
-        // Every well the comb cast, the empty ones too.
+        // A well for each lane loaded (the imager crops to what was loaded).
         let wellH = (5 + 3 * CGFloat(comb.thickness)) * min(1.5, g.scale)
-        for i in 0..<max(lanes.count, comb.teeth) {
+        for i in 0..<lanes.count {
             let x = g.laneX(i)
             drawWell(NSRect(x: x + 2, y: g.slab.minY + 14 * g.scale, width: g.laneW - 4, height: wellH))
         }

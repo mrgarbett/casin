@@ -137,6 +137,31 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
     private let runSlider = NSSlider(value: 1, minValue: 0.1, maxValue: 1, target: nil, action: nil)
     private let runLabel = NSTextField(labelWithString: "Full run")
     private let copyButton = NSButton()
+    /// EXPERIMENTAL: the 3D picture's knobs, as sliders in a popover, and
+    /// their values kept while the app runs (to settle on the shipped ones).
+    private let tuneButton = NSButton()
+    private var tunePopover: NSPopover?
+    private var tuneValueLabels: [NSTextField] = []
+    private static var look3D = Gel3DLook()
+    private struct Knob {
+        let name: String
+        let value: WritableKeyPath<Gel3DLook, Float>
+        let lo: Double
+        let hi: Double
+    }
+    private static let knobs: [Knob] = [
+        Knob(name: "Exposure", value: \.exposure, lo: 0.2, hi: 2.0),
+        Knob(name: "Contrast", value: \.contrast, lo: 0.6, hi: 2.5),
+        Knob(name: "Stain glow", value: \.stain, lo: 0.0, hi: 3.0),
+        Knob(name: "Band glow", value: \.band, lo: 0.0, hi: 3.0),
+        Knob(name: "Scatter", value: \.scatter, lo: 0.0, hi: 60.0),
+        Knob(name: "Lamp", value: \.lamp, lo: 0.0, hi: 30.0),
+        Knob(name: "Lamp size", value: \.lampSize, lo: 0.01, hi: 0.2),
+        Knob(name: "Spot cone", value: \.spot, lo: 0.1, hi: 1.2),
+        Knob(name: "Bloom", value: \.bloom, lo: 0.0, hi: 1.0),
+        Knob(name: "Vignette", value: \.vignette, lo: 0.0, hi: 1.0),
+        Knob(name: "Grain", value: \.grain, lo: 0.0, hi: 0.1),
+    ]
     private var chrome: WizardChrome?
     /// Sequences listed in the sequence popup, in its order.
     private var openDocs: [CoreDocument] = []
@@ -373,7 +398,15 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         copyButton.target = self
         copyButton.action = #selector(copyImage(_:))
         copyButton.toolTip = "Copy the gel as a picture"
-        let pillContent = NSStackView(views: [stainPopup, runIcon, runSlider, runLabel, copyButton])
+        tuneButton.image = NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: "Tune")
+        tuneButton.title = "Tune"
+        tuneButton.imagePosition = .imageOnly
+        tuneButton.bezelStyle = .accessoryBarAction
+        tuneButton.target = self
+        tuneButton.action = #selector(tuneClicked(_:))
+        tuneButton.toolTip = "Tune the 3D picture"
+        tuneButton.isHidden = true
+        let pillContent = NSStackView(views: [stainPopup, runIcon, runSlider, runLabel, copyButton, tuneButton])
         pillContent.setCustomSpacing(18, after: stainPopup)
         pillContent.setCustomSpacing(18, after: runLabel)
         pillContent.spacing = 10
@@ -731,6 +764,8 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         fillStainPopup()
         // Copy Image takes the 2D gel; the 3D scene isn't copied yet.
         copyButton.isEnabled = look != 1
+        tuneButton.isHidden = look != 1
+        if look != 1 { tunePopover?.close() }
         if look == 1 && gel3D == nil {
             let view = Gel3DView(frame: stage.bounds)
             view.translatesAutoresizingMaskIntoConstraints = false
@@ -744,11 +779,76 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
             view.ignoredViews = pills
             view.scene = scene3D
             view.comb = comb
+            view.look = Self.look3D
             gel3D = view
             view.show(models, runLevel: runSlider.doubleValue, dyeRuns: gelView.dyeRuns)
         }
         gel3D?.isHidden = look != 1
         gelView.isHidden = look == 1
+    }
+
+    /// Sliders for the 3D picture's knobs, with their values, and a button
+    /// that copies them all as text (to settle on the shipped values).
+    @objc private func tuneClicked(_ sender: Any?) {
+        if let popover = tunePopover {
+            if popover.isShown { popover.close() } else { popover.show(relativeTo: tuneButton.bounds, of: tuneButton, preferredEdge: .maxY) }
+            return
+        }
+        let grid = NSGridView()
+        grid.rowSpacing = 4
+        grid.columnSpacing = 10
+        tuneValueLabels = []
+        for (i, knob) in Self.knobs.enumerated() {
+            let name = NSTextField(labelWithString: knob.name)
+            let slider = NSSlider(value: Double(Self.look3D[keyPath: knob.value]), minValue: knob.lo, maxValue: knob.hi,
+                                  target: self, action: #selector(tuneChanged(_:)))
+            slider.isContinuous = true
+            slider.controlSize = .small
+            slider.tag = i
+            slider.widthAnchor.constraint(equalToConstant: 160).isActive = true
+            let value = NSTextField(labelWithString: Self.knobText(Double(Self.look3D[keyPath: knob.value])))
+            value.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+            value.textColor = .secondaryLabelColor
+            value.alignment = .right
+            value.widthAnchor.constraint(equalToConstant: 48).isActive = true
+            tuneValueLabels.append(value)
+            grid.addRow(with: [name, slider, value])
+        }
+        let copy = NSButton(title: "Copy Values", target: self, action: #selector(copyLook(_:)))
+        copy.toolTip = "Put every value on the clipboard, to send"
+        let box = NSStackView(views: [grid, copy])
+        box.orientation = .vertical
+        box.alignment = .trailing
+        box.spacing = 8
+        box.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
+        let controller = NSViewController()
+        controller.view = box
+        let popover = NSPopover()
+        popover.contentViewController = controller
+        popover.behavior = .transient
+        tunePopover = popover
+        popover.show(relativeTo: tuneButton.bounds, of: tuneButton, preferredEdge: .maxY)
+    }
+
+    private static func knobText(_ v: Double) -> String {
+        String(format: v >= 10 ? "%.0f" : v >= 1 ? "%.2f" : "%.3f", v)
+    }
+
+    @objc private func tuneChanged(_ sender: NSSlider) {
+        let i = sender.tag
+        guard i >= 0 && i < Self.knobs.count else { return }
+        Self.look3D[keyPath: Self.knobs[i].value] = Float(sender.doubleValue)
+        if i < tuneValueLabels.count { tuneValueLabels[i].stringValue = Self.knobText(sender.doubleValue) }
+        gel3D?.look = Self.look3D
+    }
+
+    @objc private func copyLook(_ sender: Any?) {
+        var text = "3D gel look (\(scene3D.title))\n"
+        for knob in Self.knobs {
+            text += "\(knob.name): \(String(format: "%g", Double(Self.look3D[keyPath: knob.value])))\n"
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     @objc private func combChanged(_ sender: Any?) {
