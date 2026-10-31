@@ -1310,6 +1310,12 @@ static void testGateway()
     donor.circular = true;
     donor.bases = kan + core1 + ccdb + core2 + ori;
 
+    // Every core is written in the same sense, so they share their first
+    // bases. A core stored the other way round would be found on the wrong
+    // strand, and every real plasmid's two sites would look parallel.
+    for (int n = 1; n <= 4; ++n)
+        CHECK_EQ(attCore(n).substr(0, 6), attCore(1).substr(0, 6));
+
     GatewayResult bp;
     std::string err;
     CHECK(gatewayRecombine(product, donor, GatewayReaction::BP, &bp, &err));

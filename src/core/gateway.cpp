@@ -8,14 +8,14 @@
 namespace oc {
 namespace {
 
-// The core of each att number, read 5'->3' the way that site's own attB
-// primer tail reads it. Two sites flanking an insert therefore point at
-// each other: the one at the left reads on the top strand, the one at the
-// right on the bottom. Taken from the att sites in Invitrogen's Gateway and
-// MultiSite Gateway manuals (see docs/KNOWN-RESULTS.md).
+// The core of each att number, every one written in the same 5'->3' sense,
+// so they all share the same first bases (testGateway checks that). The two
+// sites flanking an insert face each other, so one is found on the top
+// strand and the other reversed; which of the two is which depends on the
+// molecule, not on the number. Sources in docs/KNOWN-RESULTS.md.
 const char *const kCores[] = {
     "TTTGTACAAAAAAGC",   // att1
-    "GCTTTCTTGTACAAA",   // att2
+    "TTTGTACAAGAAAGC",   // att2
     "TTTGTATAATAAAGT",   // att3
     "TTTGTATAGAAAAGT",   // att4
 };
