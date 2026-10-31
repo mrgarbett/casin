@@ -179,7 +179,7 @@ GelView::GelView()
     m_area = GTK_WIDGET(g_object_ref_sink(gtk_drawing_area_new()));
     gtk_widget_set_hexpand(m_area, TRUE);
     gtk_widget_set_vexpand(m_area, TRUE);
-    gtk_widget_set_size_request(m_area, 380, 360);
+    gtk_widget_set_size_request(m_area, 320, 240);   // small enough for a short window
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(m_area), &GelView::draw, this, nullptr);
     GtkEventController *move = gtk_event_controller_motion_new();
     g_signal_connect(move, "motion", G_CALLBACK(&GelView::motion), this);
