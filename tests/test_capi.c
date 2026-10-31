@@ -57,12 +57,16 @@ int main(int argc, char **argv)
     oc_document_set_max_cuts(doc, 1);
     oc_document_set_enzyme_hidden(doc, "EcoRI", true);
     CHECK(oc_document_visible_site_count(doc) == unique - 1);
+    bool sawEcoRI = false;
     for (int i = 0; i < oc_document_enzyme_count(doc); ++i) {
         OCEnzymeInfo e;
         oc_document_enzyme(doc, i, &e);
-        if (strcmp(e.name, "EcoRI") == 0)
+        if (strcmp(e.name, "EcoRI") == 0) {
+            sawEcoRI = true;
             CHECK(e.hidden && e.cuts == 1);
+        }
     }
+    CHECK(sawEcoRI);
 
     /* Find on both strands. */
     int count = 0;
@@ -334,7 +338,7 @@ int main(int argc, char **argv)
         CHECK(oc_pcr_product_length(doc, &sites[0], 0, &sites[0], 0) == -1);
         OCFrameCheck frame;
         oc_primer_part_frame(doc, &sites[0], 6, 0, 3, true, &frame);
-        CHECK(!frame.applies || frame.cds[0] != '\0');
+        CHECK(frame.applies && frame.cds[0] != '\0');   /* a CDS meets this primer's junction */
     }
 
     /* A pending primer is drawn but isn't part of the document. */

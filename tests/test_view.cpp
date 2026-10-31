@@ -157,7 +157,7 @@ int main(int argc, char **argv)
             for (size_t j = i + 1; j < labels.size(); ++j)
                 CHECK(!labels[i].intersects(labels[j]));
         }
-        // Clicking the middle of the map's right edge region hits the sequence.
+        // Clicking the middle of the map (inside the circle) hits the sequence.
         MapHit h = map.hitTest({size.first / 2, size.second / 2});
         CHECK(h.kind == MapHit::Sequence);
     }
