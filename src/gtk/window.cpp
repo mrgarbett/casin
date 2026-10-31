@@ -2227,7 +2227,21 @@ void Window::actSetOrigin(GSimpleAction *, GVariant *, gpointer p)
 
 void Window::actCircular(GSimpleAction *, GVariant *state, gpointer p)
 {
-    static_cast<Window *>(p)->m_doc.setCircular(g_variant_get_boolean(state));
+    auto *self = static_cast<Window *>(p);
+    const bool circular = g_variant_get_boolean(state);
+    // A primer across the origin goes with the circle: say so, since Undo
+    // is the only way back.
+    std::vector<std::string> dropped;
+    const Sequence &seq = self->m_doc.sequence();
+    if (!circular && seq.circular)
+        for (const Primer &pr : seq.primers)
+            if (pr.binding.end > seq.length())
+                dropped.push_back(pr.name.empty() ? "a primer" : pr.name);
+    self->m_doc.setCircular(circular);
+    if (dropped.size() == 1)
+        self->toast(dropped[0] + " removed: it ran across the origin");
+    else if (!dropped.empty())
+        self->toast(std::to_string(dropped.size()) + " primers removed: they ran across the origin");
 }
 
 void Window::actAddFeature(GSimpleAction *, GVariant *, gpointer p)
