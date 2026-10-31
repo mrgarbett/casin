@@ -46,13 +46,15 @@ struct GatewayResult {
     Sequence byproduct;    // the other circle, or empty when there isn't one
     int firstSite = 0;     // the att numbers the two molecules crossed at
     int secondSite = 0;
+    bool insertFlipped = false;   // the insert only fitted read from its other strand
 };
 
 // Recombines `insert` (the attB-flanked fragment, or the entry clone) with
 // `vector` (the donor, or the destination vector). Both must carry two att
 // cores of the same two numbers, pointing the same way; the piece of
-// `insert` between its cores ends up between the vector's. Fails, with
-// *error, when the sites don't match or don't line up.
+// `insert` between its cores ends up between the vector's. An insert whose
+// sites face the other way is read from its other strand, and the result
+// says so. Fails, with *error, when the sites don't match or don't line up.
 bool gatewayRecombine(const Sequence &insert, const Sequence &vector, GatewayReaction reaction, GatewayResult *out,
                       std::string *error = nullptr);
 

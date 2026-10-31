@@ -114,8 +114,8 @@ bool gatewayRecombine(const Sequence &insert, const Sequence &vector, GatewayRea
     // One molecule's pair of sites: one reading on each strand (they point at
     // each other across the insert). A linear molecule whose sites lie the
     // other way round is read from its other end.
-    auto pairOf = [&fail](const Sequence &seq, const std::string &what, Sequence *oriented,
-                          SitePair *pair) -> bool {
+    auto pairOf = [&fail](const Sequence &seq, const std::string &what, Sequence *oriented, SitePair *pair,
+                          bool *turnedOver) -> bool {
         Sequence s = seq;
         for (int attempt = 0; attempt < 2; ++attempt) {
             const std::vector<AttSite> sites = findAttSites(s);
@@ -133,22 +133,27 @@ bool gatewayRecombine(const Sequence &insert, const Sequence &vector, GatewayRea
                 return true;
             }
             reverseComplementSequence(s);   // linear, the other way round
+            *turnedOver = !*turnedOver;
         }
         return fail(what + "'s att sites don't line up");
     };
 
     Sequence a, b;
     SitePair as{}, bs{};
-    if (!pairOf(insert, reaction == GatewayReaction::BP ? "the attB fragment" : "the entry clone", &a, &as))
+    bool insertFlipped = false, vectorFlipped = false;
+    if (!pairOf(insert, reaction == GatewayReaction::BP ? "the attB fragment" : "the entry clone", &a, &as,
+                &insertFlipped))
         return false;
-    if (!pairOf(vector, reaction == GatewayReaction::BP ? "the donor vector" : "the destination vector", &b, &bs))
+    if (!pairOf(vector, reaction == GatewayReaction::BP ? "the donor vector" : "the destination vector", &b, &bs,
+                &vectorFlipped))
         return false;
     // The same molecule read from its other end has its two sites the other
     // way round: turn it over rather than refuse it.
     if (as.forward.number == bs.reverse.number && as.reverse.number == bs.forward.number) {
         Sequence turned = a;
         reverseComplementSequence(turned);
-        if (!pairOf(turned, "the insert", &a, &as))
+        insertFlipped = !insertFlipped;
+        if (!pairOf(turned, "the insert", &a, &as, &insertFlipped))
             return false;
     }
     if (as.forward.number != bs.forward.number || as.reverse.number != bs.reverse.number)
@@ -192,6 +197,7 @@ bool gatewayRecombine(const Sequence &insert, const Sequence &vector, GatewayRea
     result.clone = clone;
     result.firstSite = as.forward.number;
     result.secondSite = as.reverse.number;
+    result.insertFlipped = insertFlipped;
     // The other circle (the ccdB piece joined to what was left of the
     // insert's molecule) only closes when the insert was a circle too: an
     // attB PCR product leaves loose ends instead.
