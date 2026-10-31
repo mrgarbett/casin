@@ -271,8 +271,12 @@ void insertBases(Sequence &seq, int pos, const std::string &bases)
     for (Feature &f : seq.features) {
         const bool wraps = seq.circular && crossesOrigin(f, n);
         for (Range &r : f.ranges) {
+            // Bases at the origin (position 0 or n, the same place on a
+            // circle) land inside a feature that runs across it.
             if (wraps && pos == 0 && r.start == 0)
-                r.end += k;   // bases at the origin land inside the feature
+                r.end += k;
+            else if (wraps && pos == n && r.end == n)
+                r.end += k;
             else if (pos <= r.start)
                 r = {r.start + k, r.end + k};
             else if (pos < r.end)

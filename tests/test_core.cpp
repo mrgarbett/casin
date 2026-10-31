@@ -912,6 +912,37 @@ static void testEditing()
     CHECK_EQ(frag.features[0].qualifier("codon_start"), std::string("3"));
 }
 
+// Typing or pasting over a selection that runs across the origin of a
+// circle: the feature across it grows by what went in, whichever side of
+// the origin the new bases are counted on.
+static void testEditingAcrossOrigin()
+{
+    Sequence s;
+    s.circular = true;
+    s.bases = std::string(50, 'A') + std::string(50, 'C');   // 100
+    s.features = {feat("wrap", {{90, 100}, {0, 10}})};
+    Sequence t = s;
+    insertBases(t, 100, "GGG");   // at the end, which is the origin
+    CHECK(sameRanges(t.features[0].ranges, {{90, 103}, {0, 10}}));
+    t = s;
+    insertBases(t, 0, "GGG");
+    CHECK(sameRanges(t.features[0].ranges, {{93, 103}, {0, 13}}));   // the tail shifts along
+    t = s;
+    replaceBases(t, {95, 10}, "TTTTTTTTTT");   // five bases each side of the origin
+    CHECK_EQ(t.bases.size(), size_t(100));
+    CHECK_EQ(t.features.size(), size_t(1));
+    int total = 0;
+    for (const Range &r : t.features[0].ranges)
+        total += r.length();
+    CHECK_EQ(total, 20);
+    t = s;
+    replaceBases(t, {100, 0}, "GGG");   // the cursor at the very end
+    total = 0;
+    for (const Range &r : t.features[0].ranges)
+        total += r.length();
+    CHECK_EQ(total, 23);
+}
+
 static void testSnapGeneWriter()
 {
     Sequence s;
@@ -1696,6 +1727,7 @@ int main(int argc, char **argv)
     testPcrProgram();
     testFastaAndIO();
     testEditing();
+    testEditingAcrossOrigin();
     testSnapGeneWriter();
     testDigest();
     testPrimerChecks();
