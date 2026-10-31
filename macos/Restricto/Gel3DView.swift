@@ -787,7 +787,17 @@ final class Gel3DView: NSView, MTKViewDelegate {
         float speck = dust(q * 500.0, 0.06) * dust(q * 1500.0 + 5.0, 0.03);
         float grain = 0.95 + 0.10 * vnoise(q * 900.0);
         float3 lit = u.plate.xyz * u.emitter.w;
-        return mix(dark, lit * fall * mott * blot * speck * grain, edge);
+        float3 c = mix(dark, lit * fall * mott * blot * speck * grain, edge);
+        // The casting tray the gel sits in: a clear acrylic rim 4 mm wide round
+        // the slab, lit from below through its frosted cut edge, with the
+        // shadow of its outer wall beyond.
+        float2 rel2 = abs(q) - float2(u.slab.x * 0.5, u.slab.y * 0.5);
+        float out_ = length(max(rel2, 0.0));
+        float rim = smoothstep(0.0, 0.0006, out_) * smoothstep(0.0046, 0.0038, out_);
+        float wallShadow = smoothstep(0.0040, 0.0046, out_) * smoothstep(0.0075, 0.0050, out_);
+        c = mix(c, c * 1.35 + lit * 0.10, rim * edge);
+        c *= 1.0 - 0.35 * wallShadow * edge;
+        return c;
     }
 
     // The room: dark, with the spotlight itself where a ray meets it, a wall
