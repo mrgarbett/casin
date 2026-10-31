@@ -456,9 +456,14 @@ GtkWidget *GelWizard::buildSidebar()
     adw_entry_row_add_suffix(ADW_ENTRY_ROW(m_enzymeEntry), m_enzymeMenu);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(m_laneGroup), m_enzymeEntry);
     // The lane's enzymes as chips; clicking one takes it out.
+    // Three to a row, each the same width: the box then knows how many
+    // rows it has before it's given its width, so the heading below never
+    // lands on a second row it didn't ask room for.
     m_chips = gtk_flow_box_new();
     gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(m_chips), GTK_SELECTION_NONE);
-    gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(m_chips), 8);
+    gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(m_chips), TRUE);
+    gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(m_chips), 3);
+    gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(m_chips), 3);
     gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(m_chips), 6);
     gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(m_chips), 6);
     gtk_widget_set_margin_top(m_chips, 8);
