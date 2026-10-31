@@ -34,7 +34,7 @@ void mergeTouching(std::vector<Range> &ranges)
 // Deletes [d0, d1) from a sequence that doesn't wrap.
 void deleteRange(Sequence &seq, int d0, int d1)
 {
-    const int len = d1 - d0;
+    const int len = d1 - d0, n = seq.length();
     if (len <= 0)
         return;
     auto map = [&](int p) { return p <= d0 ? p : p >= d1 ? p - len : d0; };
@@ -56,9 +56,11 @@ void deleteRange(Sequence &seq, int d0, int d1)
                        seq.features.end());
     std::vector<Primer> primers;
     for (Primer p : seq.primers) {
-        if (p.binding.start < d1 && d0 < p.binding.end)
+        // A site across the origin goes on from base 0, up to end - n.
+        const bool wraps = p.binding.end > n;
+        if ((p.binding.start < d1 && d0 < p.binding.end) || (wraps && d0 < p.binding.end - n))
             continue;
-        p.binding = {map(p.binding.start), map(p.binding.end)};
+        p.binding = {map(p.binding.start), wraps ? map(p.binding.end - n) + n - len : map(p.binding.end)};
         primers.push_back(p);
     }
     seq.primers = primers;
@@ -170,13 +172,15 @@ Sequence extractFragment(const Sequence &seq, Span span)
                                                       : std::vector<Range>{pieces[0].r});
         frag.features.push_back(g);
     }
-    for (const Primer &pr : seq.primers)
-        for (const Piece &p : pieces)
-            if (pr.binding.start >= p.r.start && pr.binding.end <= p.r.end && pr.binding.length() > 0) {
-                Primer q = pr;
-                q.binding = {pr.binding.start - p.r.start + p.offset, pr.binding.end - p.r.start + p.offset};
-                frag.primers.push_back(q);
-            }
+    // Primers the fragment holds whole, across the origin or not.
+    for (const Primer &pr : seq.primers) {
+        const int at = seq.circular ? ((pr.binding.start - span.start) % n + n) % n : pr.binding.start - span.start;
+        if (pr.binding.length() > 0 && at >= 0 && at + pr.binding.length() <= len) {
+            Primer q = pr;
+            q.binding = {at, at + pr.binding.length()};
+            frag.primers.push_back(q);
+        }
+    }
     return frag;
 }
 
@@ -208,9 +212,12 @@ bool pcrProduct(const Sequence &templ, const Primer &fwd, const Primer &rev, Seq
     if (fwd.binding.length() <= 0 || rev.binding.length() <= 0)
         return fail("both primers need a binding site on this sequence");
     int len = rev.binding.end - fwd.binding.start;
-    // On a circle, back-to-back primers (as for mutagenesis) copy the whole molecule.
+    // On a circle, back-to-back primers (as for mutagenesis) copy the whole
+    // molecule; a reverse primer across the origin can put its end past n.
     if (len <= 0 && templ.circular)
         len += n;
+    else if (len > n && templ.circular)
+        len -= n;
     if (len < std::max(fwd.binding.length(), rev.binding.length()))
         return fail("the primers don't face each other; the reverse primer must bind downstream");
     const int fwdTailLen = std::max(0, int(fwd.bases.size()) - fwd.binding.length());
@@ -271,8 +278,12 @@ void insertBases(Sequence &seq, int pos, const std::string &bases)
     for (Feature &f : seq.features) {
         const bool wraps = seq.circular && crossesOrigin(f, n);
         for (Range &r : f.ranges) {
+            // Bases at the origin (position 0 or n, the same place on a
+            // circle) land inside a feature that runs across it.
             if (wraps && pos == 0 && r.start == 0)
-                r.end += k;   // bases at the origin land inside the feature
+                r.end += k;
+            else if (wraps && pos == n && r.end == n)
+                r.end += k;
             else if (pos <= r.start)
                 r = {r.start + k, r.end + k};
             else if (pos < r.end)
@@ -281,7 +292,8 @@ void insertBases(Sequence &seq, int pos, const std::string &bases)
     }
     std::vector<Primer> primers;
     for (Primer p : seq.primers) {
-        if (pos > p.binding.start && pos < p.binding.end)
+        // Bases inside a site (across the origin, from base 0 on) split it.
+        if ((pos > p.binding.start && pos < p.binding.end) || (p.binding.end > n && pos < p.binding.end - n))
             continue;
         if (pos <= p.binding.start)
             p.binding = {p.binding.start + k, p.binding.end + k};
@@ -339,6 +351,8 @@ void reverseComplementSequence(Sequence &seq)
     }
     for (Primer &p : seq.primers) {
         p.binding = {n - p.binding.end, n - p.binding.start};
+        if (p.binding.start < 0)   // across the origin
+            p.binding = {p.binding.start + n, p.binding.end + n};
         p.strand = flip(p.strand);
     }
 }
@@ -372,7 +386,7 @@ void rotateOrigin(Sequence &seq, int origin)
     }
     for (Primer &p : seq.primers) {
         const int s = ((p.binding.start - origin) % n + n) % n;
-        p.binding = {s, std::min(n, s + p.binding.length())};
+        p.binding = {s, s + p.binding.length()};   // across the new origin, maybe
     }
 }
 

@@ -7,6 +7,7 @@
 //   restricto --screenshot out.png <file>      (needs a display, e.g. xvfb-run)
 //   restricto --version
 // Options for both: --size WxH  --enzymes 1|2|3|all  --select A-B (1-based)  --dark
+#include "shell.h"
 #include "window.h"
 
 #include "core/seqio.h"
@@ -163,9 +164,28 @@ void actNew(GSimpleAction *, GVariant *, gpointer app)
     gtk::showNewSequenceDialog(GTK_APPLICATION(app), parent);
 }
 
+// Closes the windows one by one, as their close buttons would, so unsaved
+// documents are asked about. Stops at a window that asks; the app quits once
+// the last window closes.
 void actQuit(GSimpleAction *, GVariant *, gpointer app)
 {
-    g_application_quit(G_APPLICATION(app));
+    GList *windows = g_list_copy_deep(gtk_application_get_windows(GTK_APPLICATION(app)),
+                                      [](gconstpointer w, gpointer) -> gpointer { return g_object_ref(G_OBJECT(w)); },
+                                      nullptr);
+    bool asking = false;
+    for (GList *l = windows; l && !asking; l = l->next) {
+        // A window already asking about a tab (Ctrl+Q over its Save/Discard/
+        // Cancel): closing it would only dismiss that alert, so its question
+        // is put to the window's closing instead and the answer carries on.
+        gtk::Shell *shell = gtk::Shell::fromWindow(GTK_WINDOW(l->data));
+        if (shell && shell->askingClose()) {
+            asking = true;
+            break;
+        }
+        gtk_window_close(GTK_WINDOW(l->data));
+        asking = g_list_find(gtk_application_get_windows(GTK_APPLICATION(app)), l->data) != nullptr;
+    }
+    g_list_free_full(windows, g_object_unref);
 }
 
 void actAbout(GSimpleAction *, GVariant *, gpointer app)
@@ -203,7 +223,7 @@ void onStartup(GApplication *app, gpointer)
     g_action_map_add_action_entries(G_ACTION_MAP(app), entries, G_N_ELEMENTS(entries), app);
     g_simple_action_set_state(G_SIMPLE_ACTION(g_action_map_lookup_action(G_ACTION_MAP(app), "experimental")),
                               g_variant_new_boolean(gtk::Window::experimentalTools()));
-    struct Accel { const char *action; const char *keys[3]; };
+    struct Accel { const char *action; const char *keys[4]; };
     static const Accel accels[] = {
         {"app.open", {"<Control>o", nullptr}},
         {"app.quit", {"<Control>q", nullptr}},
@@ -216,16 +236,26 @@ void onStartup(GApplication *app, gpointer)
         {"win.paste", {"<Control>v", nullptr}},
         {"win.select-all", {"<Control>a", nullptr}},
         {"win.add-feature", {"<Control>k", nullptr}},
-        {"win.digest", {"<Control>d", nullptr}},
+        {"win.edit-feature", {"<Control><Shift>k", nullptr}},
+        {"win.digest", {"<Control><Shift>g", "<Control>d", nullptr}},
+        {"win.go-to", {"<Control>l", nullptr}},
+        {"win.copy-map", {"<Control><Alt>c", nullptr}},
         {"win.export-map", {"<Control>e", nullptr}},
         {"win.print", {"<Control>p", nullptr}},
         {"win.copy", {"<Control>c", nullptr}},
         {"win.copy-rc", {"<Control><Shift>c", nullptr}},
         {"win.find", {"<Control>f", nullptr}},
         {"win.close", {"<Control>w", nullptr}},
+        {"win.sidebar", {"F9", nullptr}},
+        {"win.show-panel", {"<Control><Alt>i", nullptr}},
+        {"win.fullscreen", {"F11", nullptr}},
+        {"win.zoom-in", {"<Control>plus", "<Control>equal", "<Control>KP_Add", nullptr}},
+        {"win.zoom-out", {"<Control>minus", "<Control>KP_Subtract", nullptr}},
+        {"win.zoom-reset", {"<Control>0", "<Control>KP_0", nullptr}},
     };
     for (const Accel &a : accels)
         gtk_application_set_accels_for_action(GTK_APPLICATION(app), a.action, a.keys);
+    gtk::Shell::loadStyles();
     if (g_options.dark)
         adw_style_manager_set_color_scheme(adw_style_manager_get_default(), ADW_COLOR_SCHEME_FORCE_DARK);
 }
@@ -251,6 +281,12 @@ void startScreenshot(GtkApplication *app, gtk::Window *w)
 
 void onActivate(GApplication *app, gpointer)
 {
+    if (g_options.screenshot.empty())
+        if (gtk::Shell *shell = gtk::Shell::active(GTK_APPLICATION(app)))
+            if (gtk::Window *current = shell->current()) {
+                current->present();
+                return;
+            }
     gtk::Window *w = gtk::Window::create(GTK_APPLICATION(app));
     if (!g_options.screenshot.empty()) {
         startScreenshot(GTK_APPLICATION(app), w);

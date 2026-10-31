@@ -121,7 +121,7 @@ void parsePrimers(const std::string &xmlText, Sequence &seq)
         if (a <= b)
             p.binding = {a, b + 1};
         else
-            p.binding = {a, n};   // Range can't wrap; keep the part before the origin
+            p.binding = {a, b + 1 + n};   // across the origin: it runs past the end
         p.strand = site->attr("boundStrand") == "1" ? Strand::Reverse : Strand::Forward;
         seq.primers.push_back(p);
     }
@@ -202,7 +202,12 @@ std::string featuresXml(const Sequence &seq)
         for (size_t i = 0; i < f.ranges.size(); ++i) {
             const Range &r = f.ranges[i];
             int a = r.start + 1, b = r.end;
-            if (seq.circular && r.end == n && i + 1 < f.ranges.size() && f.ranges[i + 1].start == 0)
+            // SnapGene's ranges are inclusive, so a site between two bases
+            // (a = b + 1, which it would read as the whole circle) becomes
+            // the base after it.
+            if (r.length() == 0)
+                b = a = std::min(a, n);
+            else if (seq.circular && r.end == n && i + 1 < f.ranges.size() && f.ranges[i + 1].start == 0)
                 b = f.ranges[++i].end;
             x += "<Segment range=\"" + std::to_string(a) + "-" + std::to_string(b) + "\"";
             if (!f.color.empty())
@@ -239,7 +244,7 @@ std::string primersXml(const Sequence &seq)
                   : " description=\"" + escapeXml("<html><body>" + escapeXml(p.description) + "</body></html>") + "\"")
            + ">";
         if (p.binding.length() > 0)
-            x += "<BindingSite location=\"" + std::to_string(p.binding.start) + "-" + std::to_string(p.binding.end - 1)
+            x += "<BindingSite location=\"" + std::to_string(p.binding.start) + "-" + std::to_string((p.binding.end - 1) % std::max(1, seq.length()))
                + "\" boundStrand=\"" + (p.strand == Strand::Reverse ? "1" : "0") + "\"/>";
         x += "</Primer>";
     }

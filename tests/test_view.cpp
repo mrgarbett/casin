@@ -3,7 +3,9 @@
 // Usage: view_tests <samples-dir>
 #include "core/abif.h"
 #include "core/enzymes.h"
+#include "core/genbank.h"
 #include "core/seqio.h"
+#include "core/snapgene.h"
 #include "view/document.h"
 #include "view/gellayout.h"
 #include "view/maplayout.h"
@@ -89,6 +91,36 @@ static void testUndo(const Sequence &seq)
     CHECK(histories > 8);
 }
 
+// The Edit Feature dialog sets a colour with replaceFeature: one undo step,
+// kept by GenBank and .dna.
+static void testFeatureColor(const Sequence &seq)
+{
+    Document doc;
+    doc.setSequence(seq);
+    CHECK(!doc.sequence().features.empty());
+    if (doc.sequence().features.empty())
+        return;
+    Feature f = doc.sequence().features[0];
+    const std::string before = f.color;
+    f.color = "#813d9c";
+    doc.replaceFeature(0, f);
+    CHECK_EQ(doc.sequence().features[0].color, std::string("#813d9c"));
+    for (const std::string &file : {writeGenBank(doc.sequence()), writeSnapGene(doc.sequence())}) {
+        Sequence r;
+        CHECK(readGenBank(file, &r) || readSnapGene(file, &r));
+        CHECK(!r.features.empty() && r.features[0].color == "#813d9c");
+    }
+    doc.undo();
+    CHECK_EQ(doc.sequence().features[0].color, before);
+    CHECK(!doc.canUndo());
+    // Back to the type's default.
+    f.color.clear();
+    doc.replaceFeature(0, f);
+    Sequence r;
+    CHECK(readGenBank(writeGenBank(doc.sequence()), &r));
+    CHECK(!r.features.empty() && r.features[0].color.empty());
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2) {
@@ -125,7 +157,7 @@ int main(int argc, char **argv)
             for (size_t j = i + 1; j < labels.size(); ++j)
                 CHECK(!labels[i].intersects(labels[j]));
         }
-        // Clicking the middle of the map's right edge region hits the sequence.
+        // Clicking the middle of the map (inside the circle) hits the sequence.
         MapHit h = map.hitTest({size.first / 2, size.second / 2});
         CHECK(h.kind == MapHit::Sequence);
     }
@@ -289,8 +321,9 @@ int main(int argc, char **argv)
         CHECK_EQ(printPages(seq, sites, {}, tm, ps).size(), pages.size() - 1);
     }
     testUndo(seq);
+    testFeatureColor(seq);
     {
-        GelLayout gel({{"Ladder", {10000, 1000, 100}, {1000}, true, false}, {"Cut", {3000, 500}, {}, false, false}},
+        GelLayout gel({{"Ladder", {10000, 1000, 100}, {1000}, true, false, {}}, {"Cut", {3000, 500}, {}, false, false, {}}},
                       theme, tm, 500, 400);
         CHECK(gel.yOfSize(10000) < gel.yOfSize(1000) && gel.yOfSize(1000) < gel.yOfSize(100));
         CHECK(!gel.render().items.empty());
@@ -305,6 +338,86 @@ int main(int argc, char **argv)
         CHECK(tl.baseAt(-50) == 0 && tl.baseAt(1e9) == int(tr.bases.size()) - 1);
         Scene ts = tl.render(tl.xOfBase(300) - 200, 400, {300, 1});
         CHECK(ts.items.size() > 30 && ts.width == 400);
+        // A selection off the ends, and a zero scale, draw without reading
+        // past the peaks or dividing by zero.
+        CHECK(!tl.render(0, 400, {-20, 10}).items.empty());
+        CHECK(!tl.render(0, 400, {-20, 5}).items.empty());
+        CHECK(!tl.render(0, 400, {int(tr.bases.size()) - 2, 50}).items.empty());
+        TraceLayout flat(tr, theme, 190, 0);
+        CHECK(flat.totalWidth() > 0 && !flat.render(0, 400, {0, 0}).items.empty());
+    }
+
+    // A file can put a feature before base 1, or give it no length at all:
+    // the sequence and the linear map draw the rest without going out of
+    // bounds, and a feature with no length (a site between two bases) is
+    // drawn as a tick, with its name.
+    {
+        Sequence odd = seq;
+        odd.circular = false;
+        Feature early = odd.features.front();
+        early.ranges = {{-500, 20}};
+        Feature nothing = odd.features.front();
+        nothing.name = "nothing-here";
+        nothing.type = "misc_feature";   // (the front feature is the undrawn source)
+        nothing.ranges = {{40, 40}};
+        odd.features = {early, nothing};
+        SequenceLayout sl(odd, {}, theme, tm, 900, true, SeqOptions{});
+        CHECK(!sl.render(0, 400, {}).items.empty());
+        MapLayout lin(odd, {}, theme, tm, 900, 700);
+        bool labelled = false;
+        for (const Item &it : lin.render({}).items)
+            if (auto *t = std::get_if<TextItem>(&it))
+                if (t->text.find("nothing-here") != std::string::npos)
+                    labelled = true;
+        CHECK(labelled);
+        // The tick: a filled shape under the label.
+        bool tick = false;
+        for (const Item &it : lin.render({}).items)
+            if (auto *pth = std::get_if<PathItem>(&it))
+                if (pth->closed && pth->fill.a > 0 && pth->points.size() >= 4
+                    && pth->points[1].x - pth->points[0].x <= 2.5 && pth->points[0].x > 0)
+                    tick = true;
+        CHECK(tick);
+    }
+
+    // A primer across the origin: drawn on the circular map and in the
+    // sequence, dropped by Make Linear (a line has no place for it).
+    {
+        Sequence ring = seq;
+        const int n = ring.length();
+        ring.primers.push_back({"wrap", ring.bases.substr(size_t(n - 12)) + ring.bases.substr(0, 10),
+                                {n - 12, n + 10}, Strand::Forward});
+        MapLayout map(ring, {}, theme, tm, 900, 700);
+        bool labelled = false;
+        for (const Item &it : map.render({}).items)
+            if (auto *t = std::get_if<TextItem>(&it))
+                if (t->text == "wrap")
+                    labelled = true;
+        CHECK(labelled);
+        SequenceLayout sl(ring, {}, theme, tm, 900, true, SeqOptions{});
+        CHECK(!sl.render(0, 400, {}).items.empty());
+        Document d;
+        d.setSequence(ring, "");
+        CHECK(d.sequence().primers.size() == seq.primers.size() + 1);
+        d.setCircular(false);
+        CHECK(d.sequence().primers.size() == seq.primers.size());
+        d.undo();
+        CHECK(d.sequence().primers.size() == seq.primers.size() + 1);
+    }
+
+    // The caret after a reverse complement: the same place read from the
+    // other end, which on a linear sequence can be the very end.
+    {
+        Sequence lin = seq;
+        lin.circular = false;
+        Document d;
+        d.setSequence(lin, "");
+        d.setSelection({0, 0});
+        d.reverseComplementAll();
+        CHECK(d.selection().start == lin.length() && d.selection().length == 0);
+        d.setSelection({10, 5});
+        d.reverseComplementAll();
+        CHECK(d.selection().start == lin.length() - 15 && d.selection().length == 5);
     }
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

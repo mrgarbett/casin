@@ -25,7 +25,7 @@ Color TraceLayout::channelColor(int channel, bool dark)
 }
 
 TraceLayout::TraceLayout(const Trace &trace, const Theme &theme, double height, double pixelsPerScan)
-    : m_trace(trace), m_theme(theme), m_h(height), m_px(pixelsPerScan)
+    : m_trace(trace), m_theme(theme), m_h(height), m_px(std::max(pixelsPerScan, 0.01))
 {
     // Scale to a high percentile of the peak heights so one huge peak
     // doesn't flatten the rest.
@@ -98,8 +98,10 @@ Scene TraceLayout::render(double scrollX, double viewWidth, Span selection) cons
             auto [a, b] = spanX(m_good.start + m_good.length, int(peaks.size()));
             s.rect({a, 0, b - a, m_h}, dim);
         }
-        if (selection.length > 0 && selection.start < int(peaks.size())) {
-            auto [a, b] = spanX(selection.start, std::min<int>(int(peaks.size()), selection.start + selection.length));
+        const int selA = std::max(0, selection.start);
+        const int selB = std::min<int>(int(peaks.size()), selection.start + std::max(0, selection.length));
+        if (selB > selA) {
+            auto [a, b] = spanX(selA, selB);
             s.rect({a, 0, b - a, m_h}, m_theme.selection);
         }
     }

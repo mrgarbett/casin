@@ -205,8 +205,14 @@ std::string formatLocation(const std::vector<Range> &ranges, Strand strand, int 
     std::vector<std::string> parts;
     for (const Range &r : ranges) {
         if (r.length() == 0) {
-            if (circular && r.start >= seqLength)
+            // A site between bases. Both ends of a circle are the one
+            // boundary, written n^1 (0^1 isn't a location); a linear
+            // sequence has nothing before base 1, so a site there is
+            // written as base 1.
+            if (circular && (r.start >= seqLength || r.start <= 0))
                 parts.push_back(std::to_string(seqLength) + "^1");
+            else if (r.start <= 0)
+                parts.push_back("1");
             else
                 parts.push_back(std::to_string(r.start) + "^" + std::to_string(r.start + 1));
         } else if (r.length() == 1) {
@@ -263,6 +269,48 @@ std::string unquote(std::string v)
     return out;
 }
 
+// The /note that marks a primer_bind as one of the document's primers.
+const char *const kPrimerNote = "sequence: ";
+
+// A primer_bind whose note gives the primer's bases (see writeGenBank) is a
+// primer, not a feature. The location is the binding site; the note has the
+// whole primer, 5' tail included. "color: black; sequence: ..." reads too.
+bool readPrimer(const RawFeature &rf, const Location &loc, int n, Primer *out)
+{
+    if (rf.type != "primer_bind")
+        return false;
+    std::string bases, label;
+    for (const Qualifier &q : rf.qualifiers) {
+        if (q.key == "label" && label.empty())
+            label = trim(q.value);
+        if (q.key != "note" || !bases.empty())
+            continue;
+        size_t at = q.value.find("sequence:");
+        if (at == std::string::npos || (at > 0 && (at < 2 || q.value.compare(at - 2, 2, "; ") != 0)))
+            continue;
+        std::string v = q.value.substr(at + 9);
+        v = v.substr(0, v.find(';'));
+        // Only bases, and the spaces of wrapped lines.
+        const size_t letters = size_t(std::count_if(v.begin(), v.end(), [](char c) {
+            return !std::isspace(static_cast<unsigned char>(c));
+        }));
+        bases = cleanPrimerBases(v);
+        if (bases.size() != letters)
+            bases.clear();
+    }
+    if (bases.empty())
+        return false;
+    // One binding site, maybe across the origin (then it runs past the end).
+    const bool wraps = loc.ranges.size() == 2 && loc.ranges[0].end == n && loc.ranges[1].start == 0;
+    if (loc.ranges.size() != 1 && !wraps)
+        return false;
+    out->name = label.empty() ? "primer" : label;
+    out->bases = bases;
+    out->binding = wraps ? Range{loc.ranges[0].start, n + loc.ranges[1].end} : loc.ranges[0];
+    out->strand = loc.strand == Strand::Reverse ? Strand::Reverse : Strand::Forward;
+    return true;
+}
+
 std::string firstWord(const std::string &line)
 {
     size_t sp = line.find_first_of(" \t");
@@ -280,6 +328,7 @@ bool readGenBank(const std::string &data, Sequence *out, std::string *error)
     std::vector<RawFeature> raw;
     std::string bases;
     bool sawLocus = false;
+    int locusLength = 0;   // what the LOCUS line says the sequence holds
     std::string openRaw;     // raw value of a qualifier still being read
     bool inQualifier = false;
 
@@ -316,9 +365,15 @@ bool readGenBank(const std::string &data, Sequence *out, std::string *error)
                 std::vector<std::string> tok = splitWhitespace(line);
                 if (tok.size() > 1)
                     seq.name = tok[1];
-                for (const std::string &t : tok)
-                    if (toLower(t) == "circular")
+                for (size_t i = 0; i < tok.size(); ++i) {
+                    if (toLower(tok[i]) == "circular")
                         seq.circular = true;
+                    if (i + 1 < tok.size() && toLower(tok[i + 1]) == "bp" && !tok[i].empty()
+                        && std::all_of(tok[i].begin(), tok[i].end(),
+                                       [](unsigned char c) { return std::isdigit(c); })
+                        && tok[i].size() < 10)
+                        locusLength = std::stoi(tok[i]);
+                }
                 mode = Mode::Header;
             } else if (keyword == "DEFINITION") {
                 definition = trim(line.substr(10));
@@ -397,6 +452,19 @@ bool readGenBank(const std::string &data, Sequence *out, std::string *error)
     }
 
     seq.setBasesFromText(bases);   // GenBank is usually all lowercase: that means none marked
+    // A file cut short, or one with no ORIGIN, would open as a shorter
+    // sequence with its features past the end: refused instead.
+    if (seq.bases.empty()) {
+        if (error)
+            *error = "no bases: the file has no ORIGIN section";
+        return false;
+    }
+    if (locusLength > 0 && seq.length() != locusLength) {
+        if (error)
+            *error = "the LOCUS line says " + std::to_string(locusLength) + " bp but the file holds "
+                   + std::to_string(seq.length()) + " (is it cut short?)";
+        return false;
+    }
     definition = trim(definition);
     if (definition == ".")
         definition.clear();
@@ -407,6 +475,11 @@ bool readGenBank(const std::string &data, Sequence *out, std::string *error)
         Location loc = parseLocation(rf.location, n, seq.circular);
         if (!loc.ok)
             continue;
+        Primer p;
+        if (readPrimer(rf, loc, n, &p)) {
+            seq.primers.push_back(p);
+            continue;
+        }
         Feature f;
         f.type = rf.type;
         f.strand = loc.strand;
@@ -527,9 +600,30 @@ std::string writeGenBank(const Sequence &seq)
         out += (i == 0 ? "COMMENT     " : std::string(12, ' ')) + "History: " + seq.history[i] + "\n";
     out += "FEATURES             Location/Qualifiers\n";
 
+    // Primers go after the features as primer_bind entries: the location is
+    // the binding site, and a note holds the whole primer (see readPrimer).
+    std::vector<Feature> features = seq.features;
+    for (const Primer &p : seq.primers) {
+        if (p.binding.length() <= 0 || p.bases.empty())
+            continue;
+        Feature f;
+        f.type = "primer_bind";
+        f.name = p.name;
+        f.strand = p.strand == Strand::Reverse ? Strand::Reverse : Strand::Forward;
+        f.ranges = {p.binding};
+        if (p.binding.end > seq.length())   // across the origin
+            f.ranges = {{p.binding.start, seq.length()}, {0, p.binding.end - seq.length()}};
+        if (!p.name.empty())
+            f.qualifiers.push_back({"label", p.name});
+        f.qualifiers.push_back({"note", kPrimerNote + p.bases});
+        features.push_back(f);
+    }
+
     const std::string indent(kQualIndent, ' ');
-    for (const Feature &f : seq.features) {
-        const std::string head = "     " + pad(f.type, 15) + " ";
+    for (const Feature &f : features) {
+        // A feature with no type would be written as bare spaces and lost on
+        // the way back in.
+        const std::string head = "     " + pad(f.type.empty() ? "misc_feature" : f.type, 15) + " ";
         const std::string loc = formatLocation(f.ranges, f.strand, n, seq.circular);
         const std::vector<std::string> locLines = wrapText(loc, kLineWidth - kQualIndent, false, ',');
         for (size_t i = 0; i < locLines.size(); ++i)
@@ -563,7 +657,9 @@ std::string writeGenBank(const Sequence &seq)
                 }
                 text = "/" + q.key + "=\"" + v + "\"";
             }
-            for (const std::string &l : wrapText(text, kLineWidth - kQualIndent, q.key == "translation"))
+            // Bases may break anywhere: the reader drops the joining space.
+            const bool hard = q.key == "translation" || (q.key == "note" && startsWith(q.value, kPrimerNote));
+            for (const std::string &l : wrapText(text, kLineWidth - kQualIndent, hard))
                 out += indent + l + "\n";
         }
     }

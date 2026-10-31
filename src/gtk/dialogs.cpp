@@ -13,9 +13,12 @@
 #include "view/style.h"
 
 #include <algorithm>
+#include <cctype>
 #include <climits>
+#include <cmath>
 #include <filesystem>
 #include <cstdio>
+#include <cstdlib>
 #include <map>
 
 namespace oc::gtk {
@@ -121,8 +124,31 @@ struct FeatureForm {
     Feature original;
     bool multiPart;
     GtkWidget *name, *type, *strand, *start, *end, *note;
+    GtkWidget *colorRow, *colorButton, *colorReset;
+    std::string color;   // "#rrggbb"; empty = the type's default
+    bool settingColor = false;
     AdwDialog *dialog;
 };
+
+std::string hexColor(const GdkRGBA &c)
+{
+    auto byte = [](float v) { return int(std::lround(std::clamp(v, 0.0f, 1.0f) * 255)); };
+    char buf[8];
+    std::snprintf(buf, sizeof buf, "#%02x%02x%02x", byte(c.red), byte(c.green), byte(c.blue));
+    return buf;
+}
+
+// Shows the chosen colour, or the type's default when none is set.
+void showFeatureColor(FeatureForm *st)
+{
+    const view::Color c = view::FeatureStyle::fill(comboText(st->type), st->color);
+    const GdkRGBA rgba{float(c.r), float(c.g), float(c.b), 1.0f};
+    st->settingColor = true;
+    gtk_color_dialog_button_set_rgba(GTK_COLOR_DIALOG_BUTTON(st->colorButton), &rgba);
+    st->settingColor = false;
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->colorRow), st->color.empty() ? "Type default" : st->color.c_str());
+    gtk_widget_set_sensitive(st->colorReset, !st->color.empty());
+}
 
 } // namespace
 
@@ -190,6 +216,41 @@ void Window::featureDialog(int index)
     GtkWidget *notes = addGroup(f);
     st->note = entryRow(notes, "Note", st->original.qualifier("note"));
 
+    st->color = st->original.color;
+    st->colorRow = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->colorRow), "Colour");
+    st->colorReset = gtk_button_new_with_label("Default");
+    gtk_widget_add_css_class(st->colorReset, "flat");
+    gtk_widget_set_valign(st->colorReset, GTK_ALIGN_CENTER);
+    gtk_widget_set_tooltip_text(st->colorReset, "Use the colour of the feature's type");
+    GtkColorDialog *picker = gtk_color_dialog_new();
+    gtk_color_dialog_set_with_alpha(picker, FALSE);
+    st->colorButton = gtk_color_dialog_button_new(picker);   // takes the dialog
+    gtk_widget_set_valign(st->colorButton, GTK_ALIGN_CENTER);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(st->colorRow), st->colorReset);
+    adw_action_row_add_suffix(ADW_ACTION_ROW(st->colorRow), st->colorButton);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(notes), st->colorRow);
+    showFeatureColor(st);
+    g_signal_connect(st->colorButton, "notify::rgba", G_CALLBACK((+[](GObject *b, GParamSpec *, gpointer p) {
+                         auto *st = static_cast<FeatureForm *>(p);
+                         if (st->settingColor)
+                             return;
+                         st->color = hexColor(*gtk_color_dialog_button_get_rgba(GTK_COLOR_DIALOG_BUTTON(b)));
+                         showFeatureColor(st);
+                     })),
+                     st);
+    g_signal_connect(st->colorReset, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<FeatureForm *>(p);
+                         st->color.clear();
+                         showFeatureColor(st);
+                     })),
+                     st);
+    // While no colour is set, the swatch follows the chosen type.
+    g_signal_connect(st->type, "notify::selected", G_CALLBACK((+[](GObject *, GParamSpec *, gpointer p) {
+                         showFeatureColor(static_cast<FeatureForm *>(p));
+                     })),
+                     st);
+
     if (st->index >= 0) {
         GtkWidget *dg = addGroup(f);
         GtkWidget *del = gtk_button_new_with_label("Delete Feature");
@@ -211,6 +272,7 @@ void Window::featureDialog(int index)
                          const int n = seq.length();
                          Feature out = st->original;
                          out.type = comboText(st->type);
+                         out.color = st->color;
                          const std::string strand = comboText(st->strand);
                          out.strand = strand == "Reverse" ? Strand::Reverse
                                     : strand == "None"    ? Strand::None
@@ -257,129 +319,8 @@ void Window::featureDialog(int index)
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<FeatureForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
     gtk_widget_grab_focus(st->name);
-}
-
-namespace {
-struct PrimerForm {
-    Document *doc;
-    GtkWidget *name, *strand;
-    AdwDialog *dialog;
-};
-} // namespace
-
-void Window::primerDialog()
-{
-    if (!m_doc.hasSelection() || m_doc.selection().length <= 0) {
-        toast("Select the primer's binding site first");
-        return;
-    }
-    if (m_doc.selection().wraps(m_doc.sequence().length())) {
-        toast("Primers can't cross the origin yet");
-        return;
-    }
-    auto *st = new PrimerForm{&m_doc, nullptr, nullptr, nullptr};
-    Form f = makeForm("Add Primer", "Add");
-    st->dialog = f.dialog;
-    GtkWidget *g = addGroup(f);
-    adw_preferences_group_set_description(
-        ADW_PREFERENCES_GROUP(g),
-        ("Binds the selected " + view::formatBp(m_doc.selection().length) + ". A reverse primer reads the bottom strand.")
-            .c_str());
-    st->name = entryRow(g, "Name", "Primer " + std::to_string(m_doc.sequence().primers.size() + 1));
-    static const char *const strands[] = {"Forward", "Reverse", nullptr};
-    st->strand = comboRow(g, "Direction", strands, 0);
-    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
-                         auto *st = static_cast<PrimerForm *>(p);
-                         st->doc->addPrimerFromSelection(text(st->name), comboText(st->strand) == "Reverse"
-                                                                             ? Strand::Reverse
-                                                                             : Strand::Forward);
-                         adw_dialog_close(st->dialog);
-                     })),
-                     st);
-    g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<PrimerForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
-}
-
-namespace {
-struct PcrForm {
-    Window *window;
-    Sequence templ;
-    std::vector<Primer> forward, reverse;
-    GtkWidget *fwd, *rev, *result;
-    AdwDialog *dialog;
-    Sequence product;
-    bool ok = false;
-};
-
-void updatePcr(PcrForm *st)
-{
-    const guint f = adw_combo_row_get_selected(ADW_COMBO_ROW(st->fwd));
-    const guint r = adw_combo_row_get_selected(ADW_COMBO_ROW(st->rev));
-    std::string err;
-    st->ok = f < st->forward.size() && r < st->reverse.size()
-          && pcrProduct(st->templ, st->forward[f], st->reverse[r], &st->product, &err);
-    std::string text = st->ok ? view::formatBp(st->product.length()) + " product, "
-                                    + std::to_string(st->product.features.size()) + " features carried over"
-                              : "No product: " + err;
-    if (st->ok)
-        for (const std::string &w : checkPrimerPair(st->forward[f].bases, st->reverse[r].bases).warnings)
-            text += "\n" + w;
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->result), text.c_str());
-}
-} // namespace
-
-void Window::pcrDialog()
-{
-    auto *st = new PcrForm{};
-    st->window = this;
-    st->templ = m_doc.sequence();
-    std::vector<std::string> fnames, rnames;
-    for (const Primer &p : st->templ.primers) {
-        if (p.binding.length() <= 0)
-            continue;
-        (p.strand == Strand::Reverse ? st->reverse : st->forward).push_back(p);
-        (p.strand == Strand::Reverse ? rnames : fnames).push_back(p.name);
-    }
-    if (st->forward.empty() || st->reverse.empty()) {
-        toast("PCR needs a forward and a reverse primer that bind this sequence");
-        delete st;
-        return;
-    }
-    Form f = makeForm("PCR Product", "Open Product");
-    st->dialog = f.dialog;
-    GtkWidget *g = addGroup(f);
-    auto names = [](const std::vector<std::string> &v) {
-        std::vector<const char *> out;
-        for (const std::string &s : v)
-            out.push_back(s.c_str());
-        out.push_back(nullptr);
-        return out;
-    };
-    st->fwd = comboRow(g, "Forward primer", names(fnames).data(), 0);
-    st->rev = comboRow(g, "Reverse primer", names(rnames).data(), 0);
-    st->result = adw_action_row_new();
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->result), "Result");
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(g), st->result);
-    auto changed = +[](GObject *, GParamSpec *, gpointer p) { updatePcr(static_cast<PcrForm *>(p)); };
-    g_signal_connect(st->fwd, "notify::selected", G_CALLBACK(changed), st);
-    g_signal_connect(st->rev, "notify::selected", G_CALLBACK(changed), st);
-    updatePcr(st);
-    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
-                         auto *st = static_cast<PcrForm *>(p);
-                         if (!st->ok)
-                             return;
-                         GtkApplication *app = gtk_window_get_application(st->window->gtkWindow());
-                         Window *w = Window::create(app);
-                         w->document().setSequence(st->product);
-                         w->document().markUnsaved();
-                         w->present();
-                         adw_dialog_close(st->dialog);
-                     })),
-                     st);
-    g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<PcrForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
 }
 
 namespace {
@@ -509,8 +450,7 @@ void Window::cloningDialog()
     // Insert sources: other windows first, then this one.
     std::vector<std::string> sourceNames;
     GtkApplication *app = gtk_window_get_application(gtkWindow());
-    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
-        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+    for (Window *w : Window::all(app)) {
         if (!w || w == this || w->isEmpty())
             continue;
         st->sources.push_back(w->document().sequence());
@@ -588,7 +528,7 @@ void Window::cloningDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<CloneForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -646,8 +586,7 @@ void Window::goldenGateDialog()
         if (e.cutsOutsideSite() && !e.cutsTwice && e.overhang() != 0)
             st->enzymes.push_back(e);
     GtkApplication *app = gtk_window_get_application(gtkWindow());
-    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
-        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+    for (Window *w : Window::all(app)) {
         if (w && w != this && !w->isEmpty())
             st->parts.push_back(w->document().sequence());
     }
@@ -727,7 +666,7 @@ void Window::goldenGateDialog()
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st,
                            [](gpointer p) { delete static_cast<GoldenGateForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -820,8 +759,7 @@ void Window::gibsonDialog()
         return;
     }
     GtkApplication *app = gtk_window_get_application(gtkWindow());
-    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
-        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+    for (Window *w : Window::all(app)) {
         if (w && w != this && !w->isEmpty() && !w->document().sequence().circular)
             st->parts.push_back(w->document().sequence());
     }
@@ -902,7 +840,7 @@ void Window::gibsonDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<GibsonForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -1004,87 +942,7 @@ void Window::designPrimersDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<DesignForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
-}
-
-namespace {
-struct PrimerSeqForm {
-    Window *window;
-    Sequence seq;
-    GtkWidget *name, *bases, *result, *okButton;
-    AdwDialog *dialog;
-    Primer primer;
-};
-
-void updatePrimerSeq(PrimerSeqForm *st)
-{
-    const std::string bases = cleanBases(text(st->bases));
-    st->primer = {trim(text(st->name)), bases, {0, 0}, Strand::Forward};
-    std::string msg;
-    if (bases.size() < 15) {
-        msg = "Enter at least 15 bases";
-    } else {
-        const std::vector<PrimerSite> sites = findPrimerSites(st->seq, bases);
-        if (sites.empty()) {
-            msg = "Doesn't bind this sequence (up to 2 mismatches); it is added without a site";
-        } else {
-            const PrimerSite &best = sites.front();
-            st->primer.binding = best.binding;
-            st->primer.strand = best.strand;
-            msg = std::string(best.strand == Strand::Reverse ? "Binds the bottom strand at " : "Binds the top strand at ")
-                + view::withThousands(best.binding.start + 1) + "–" + view::withThousands(best.binding.end) + " ("
-                + std::to_string(best.binding.length()) + " nt"
-                + (best.mismatches ? ", " + std::to_string(best.mismatches) + " mismatched" : "") + ")";
-            if (int(bases.size()) > best.binding.length())
-                msg += "\n" + std::to_string(int(bases.size()) - best.binding.length()) + " nt 5′ tail";
-            if (sites.size() > 1)
-                msg += "\nAlso binds " + std::to_string(sites.size() - 1) + " other place"
-                     + (sites.size() == 2 ? "" : "s");
-        }
-        const PrimerCheck c = checkPrimer(bases);
-        for (const std::string &w : c.warnings)
-            msg += "\n" + w;
-    }
-    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->result), msg.c_str());
-    gtk_widget_set_sensitive(st->okButton, bases.size() >= 15);
-}
-} // namespace
-
-void Window::primerBySequenceDialog()
-{
-    if (m_doc.isEmpty())
-        return;
-    auto *st = new PrimerSeqForm{};
-    st->window = this;
-    st->seq = m_doc.sequence();
-    Form f = makeForm("Add Primer by Sequence", "Add");
-    adw_dialog_set_content_height(f.dialog, 430);
-    st->dialog = f.dialog;
-    st->okButton = f.ok;
-    GtkWidget *g = addGroup(f);
-    st->name = entryRow(g, "Name", "Primer " + std::to_string(st->seq.primers.size() + 1));
-    st->bases = entryRow(g, "Bases, 5′ to 3′", "");
-    GtkWidget *gr = addGroup(f);
-    st->result = adw_action_row_new();
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->result), "Binding site");
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(gr), st->result);
-    auto changed = +[](GtkEditable *, gpointer p) { updatePrimerSeq(static_cast<PrimerSeqForm *>(p)); };
-    g_signal_connect(st->bases, "changed", G_CALLBACK(changed), st);
-    g_signal_connect(st->name, "changed", G_CALLBACK(changed), st);
-    updatePrimerSeq(st);
-    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
-                         auto *st = static_cast<PrimerSeqForm *>(p);
-                         if (st->primer.bases.size() < 15)
-                             return;
-                         if (st->primer.name.empty())
-                             st->primer.name = "Primer";
-                         st->window->document().addPrimers({st->primer}, "Add Primer");
-                         adw_dialog_close(st->dialog);
-                     })),
-                     st);
-    g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<PrimerSeqForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
-    gtk_widget_grab_focus(st->bases);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -1189,7 +1047,7 @@ void Window::mutagenesisDialog()
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st,
                            [](gpointer p) { delete static_cast<MutagenesisForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
     gtk_widget_grab_focus(st->bases);
 }
 
@@ -1214,7 +1072,7 @@ void Window::historyDialog()
             adw_action_row_set_subtitle(ADW_ACTION_ROW(row), h.substr(0, 10).c_str());
         adw_preferences_group_add(ADW_PREFERENCES_GROUP(g), row);
     }
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 void Window::mapOptionsDialog()
@@ -1259,7 +1117,7 @@ void Window::mapOptionsDialog()
         for (const auto &kv : types)
             addSwitch(tg, kv.first + " (" + std::to_string(kv.second) + ")", kv.first, !opt.hiddenTypes.count(kv.first));
     }
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -1331,8 +1189,7 @@ void Window::taCloningDialog()
     st->vector = m_doc.sequence();
     std::vector<std::string> names;
     GtkApplication *app = gtk_window_get_application(gtkWindow());
-    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
-        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+    for (Window *w : Window::all(app)) {
         if (w && w != this && !w->isEmpty() && !w->document().sequence().circular) {
             st->inserts.push_back(w->document().sequence());
             names.push_back(st->inserts.back().name);
@@ -1380,7 +1237,7 @@ void Window::taCloningDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<TaForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -1425,8 +1282,7 @@ void Window::overlapExtensionDialog()
     st->window = this;
     st->parts.push_back(m_doc.sequence());
     GtkApplication *app = gtk_window_get_application(gtkWindow());
-    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
-        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+    for (Window *w : Window::all(app)) {
         if (w && w != this && !w->isEmpty() && !w->document().sequence().circular)
             st->parts.push_back(w->document().sequence());
     }
@@ -1487,7 +1343,7 @@ void Window::overlapExtensionDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<SoeForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -1593,7 +1449,7 @@ void Window::proteinDialog()
                      })),
                      f.dialog);
     gtk_widget_set_sensitive(f.ok, !shown.empty());
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -1673,8 +1529,7 @@ void Window::insertionDialog()
     st->site = m_doc.selection();
     std::vector<std::string> names;
     GtkApplication *app = gtk_window_get_application(gtkWindow());
-    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
-        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+    for (Window *w : Window::all(app)) {
         if (w && w != this && !w->isEmpty()) {
             const Sequence &s = w->document().sequence();
             const Span sel = w->document().selection();
@@ -1731,7 +1586,7 @@ void Window::insertionDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<InsertionForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 void Window::searchFolderDialog()
@@ -1792,7 +1647,7 @@ void Window::searchFolderDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<SearchForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
     adw_dialog_set_focus(f.dialog, st->query);
 }
 
@@ -1862,8 +1717,7 @@ void Window::alignDialog(bool compare)
     st->reference = m_doc.sequence();
     std::vector<std::string> names;
     GtkApplication *app = gtk_window_get_application(gtkWindow());
-    for (GList *l = gtk_application_get_windows(app); l; l = l->next) {
-        Window *w = Window::fromWidget(GTK_WIDGET(l->data));
+    for (Window *w : Window::all(app)) {
         if (w && w != this && !w->isEmpty() && (compare || !w->document().sequence().circular)) {
             st->reads.push_back(w->document().sequence());
             names.push_back(st->reads.back().name);
@@ -1971,7 +1825,7 @@ void Window::alignDialog(bool compare)
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<AlignForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -2076,7 +1930,7 @@ void Window::orfDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<OrfForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -2144,6 +1998,180 @@ void showNewSequenceDialog(GtkApplication *app, GtkWindow *parent)
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<NewForm *>(p); });
     adw_dialog_present(f.dialog, GTK_WIDGET(parent));
+    gtk_widget_grab_focus(st->bases);
+}
+
+// ---- the Mac's Sequence and Edit menu items ---------------------------------------
+
+namespace {
+struct TextForm {
+    Window *window;
+    Document *doc;
+    GtkWidget *entry;
+    AdwDialog *dialog;
+};
+} // namespace
+
+void Window::renameDialog()
+{
+    if (m_doc.isEmpty())
+        return;
+    auto *st = new TextForm{this, &m_doc, nullptr, nullptr};
+    Form f = makeForm("Rename Sequence", "Rename");
+    st->dialog = f.dialog;
+    st->entry = entryRow(addGroup(f), "Name", m_doc.sequence().name);
+    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<TextForm *>(p);
+                         const std::string name = trim(text(st->entry));
+                         if (!name.empty() && name != st->doc->sequence().name)
+                             st->doc->rename(name);
+                         adw_dialog_close(st->dialog);
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<TextForm *>(p); });
+    presentDialog(f.dialog);
+    gtk_widget_grab_focus(st->entry);
+}
+
+void Window::goToDialog()
+{
+    const int n = m_doc.sequence().length();
+    if (n == 0)
+        return;
+    auto *st = new TextForm{this, &m_doc, nullptr, nullptr};
+    Form f = makeForm("Go to Position", "Go");
+    st->dialog = f.dialog;
+    GtkWidget *g = addGroup(f);
+    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(g),
+                                          ("A base number from 1 to " + view::withThousands(n) + ".").c_str());
+    st->entry = entryRow(g, "Base", std::to_string(m_doc.hasSelection() ? m_doc.selection().start + 1 : 1));
+    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<TextForm *>(p);
+                         std::string digits;
+                         for (char c : text(st->entry))
+                             if (std::isdigit(static_cast<unsigned char>(c)))
+                                 digits.push_back(c);
+                         const long base = digits.empty() || digits.size() > 9 ? 0 : std::atol(digits.c_str());
+                         if (base < 1 || base > st->doc->sequence().length()) {
+                             st->window->toast("Type a base number from 1 to "
+                                               + view::withThousands(st->doc->sequence().length()));
+                             return;
+                         }
+                         st->doc->setSelection({int(base) - 1, 0});
+                         adw_dialog_close(st->dialog);
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<TextForm *>(p); });
+    presentDialog(f.dialog);
+    gtk_widget_grab_focus(st->entry);
+}
+
+namespace {
+struct DeletePrimerForm {
+    Document *doc;
+    GtkWidget *pick;
+    AdwDialog *dialog;
+};
+} // namespace
+
+void Window::deletePrimerDialog()
+{
+    const Sequence &seq = m_doc.sequence();
+    if (seq.primers.empty()) {
+        toast("This sequence has no primers");
+        return;
+    }
+    std::vector<std::string> labels;
+    for (const Primer &pr : seq.primers) {
+        std::string site = "doesn't bind";
+        if (pr.binding.length() > 0)
+            site = view::siteText(pr.binding, seq.length())
+                 + (pr.strand == Strand::Reverse ? " ←" : " →");
+        labels.push_back(pr.name + " · " + site);
+    }
+    std::vector<const char *> items;
+    for (const std::string &l : labels)
+        items.push_back(l.c_str());
+    items.push_back(nullptr);
+    auto *st = new DeletePrimerForm{&m_doc, nullptr, nullptr};
+    Form f = makeForm("Delete Primer", "Delete");
+    gtk_widget_remove_css_class(f.ok, "suggested-action");
+    gtk_widget_add_css_class(f.ok, "destructive-action");
+    st->dialog = f.dialog;
+    st->pick = comboRow(addGroup(f), "Primer", items.data(), 0);
+    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *st = static_cast<DeletePrimerForm *>(p);
+                         const guint i = adw_combo_row_get_selected(ADW_COMBO_ROW(st->pick));
+                         if (i < st->doc->sequence().primers.size())
+                             st->doc->removePrimer(int(i));
+                         adw_dialog_close(st->dialog);
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st,
+                           [](gpointer p) { delete static_cast<DeletePrimerForm *>(p); });
+    presentDialog(f.dialog);
+}
+
+namespace {
+struct CheckPrimerForm {
+    GtkWidget *bases;
+    GtkWidget *summary;
+    std::vector<GtkWidget *> rows;   // length, GC, Tm, clamp, run, self-dimer, hairpin
+};
+
+void showPrimerCheck(CheckPrimerForm *st)
+{
+    const std::string bases = cleanBases(text(st->bases));
+    const PrimerCheck c = checkPrimer(bases);
+    char buf[64];
+    std::vector<std::string> values;
+    values.push_back(std::to_string(c.length) + " nt");
+    std::snprintf(buf, sizeof buf, "%.0f%%", c.gc * 100);
+    values.push_back(bases.empty() ? "—" : buf);
+    std::snprintf(buf, sizeof buf, "%.1f °C", c.tm);
+    values.push_back(std::isnan(c.tm) || bases.empty() ? "—" : buf);
+    values.push_back(std::to_string(c.clampGC) + " of the last 5");
+    values.push_back(std::to_string(c.longestRun));
+    values.push_back(std::to_string(c.selfDimer) + " bp (" + std::to_string(c.selfDimer3) + " at the 3′ end)");
+    values.push_back(std::to_string(c.hairpinStem) + " bp");
+    for (size_t i = 0; i < st->rows.size() && i < values.size(); ++i)
+        adw_action_row_set_subtitle(ADW_ACTION_ROW(st->rows[i]), values[i].c_str());
+    std::string warnings;
+    for (const std::string &w : c.warnings)
+        warnings += (warnings.empty() ? "" : "\n") + w;
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(st->summary),
+                                bases.empty() ? "Type or paste a primer." : warnings.empty() ? "Looks fine." : warnings.c_str());
+}
+} // namespace
+
+void Window::checkPrimerDialog()
+{
+    auto *st = new CheckPrimerForm{};
+    Form f = makeForm("Check a Primer", "Done", false);
+    adw_dialog_set_content_height(f.dialog, 560);
+    g_signal_connect_swapped(f.ok, "clicked", G_CALLBACK(adw_dialog_close), f.dialog);
+    const bool sel = m_doc.hasSelection() && m_doc.selection().length > 0;
+    st->bases = entryRow(addGroup(f), "Bases, 5′ to 3′", sel ? m_doc.selectedBases() : "");
+    GtkWidget *g = addGroup(f);
+    st->summary = adw_action_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(st->summary), "Result");
+    adw_action_row_set_subtitle_lines(ADW_ACTION_ROW(st->summary), 0);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(g), st->summary);
+    GtkWidget *details = addGroup(f);
+    for (const char *title : {"Length", "GC", "Tm", "3′ GC clamp", "Longest run", "Self-dimer", "Hairpin stem"}) {
+        GtkWidget *row = adw_action_row_new();
+        adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), title);
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(details), row);
+        st->rows.push_back(row);
+    }
+    showPrimerCheck(st);
+    g_signal_connect(st->bases, "changed", G_CALLBACK((+[](GtkEditable *, gpointer p) {
+                         showPrimerCheck(static_cast<CheckPrimerForm *>(p));
+                     })),
+                     st);
+    g_object_set_data_full(G_OBJECT(f.dialog), "state", st,
+                           [](gpointer p) { delete static_cast<CheckPrimerForm *>(p); });
+    presentDialog(f.dialog);
     gtk_widget_grab_focus(st->bases);
 }
 
