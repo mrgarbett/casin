@@ -40,6 +40,21 @@ const Knob kKnobs[] = {
     {"Bloom", &Gel3DLook::bloom, 0.0, 1.0, 0.02},         {"Vignette", &Gel3DLook::vignette, 0.0, 1.0, 0.05},
     {"Grain", &Gel3DLook::grain, 0.0, 0.1, 0.005},
 };
+// A knob's value as its slider shows it: on its step, with the step's decimals.
+double onStep(const Knob &k, double v)
+{
+    return std::round(v / k.step) * k.step;
+}
+std::string knobText(const Knob &k, double v)
+{
+    int decimals = 0;
+    for (double step = k.step; step < 0.999 && decimals < 4; step *= 10)
+        ++decimals;
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%.*f", decimals, onStep(k, v));
+    return buf;
+}
+
 // Each sequence's lanes as its gel was last closed, so reopening it keeps them.
 struct Remembered {
     Document *doc;
@@ -1035,46 +1050,48 @@ GtkWidget *GelWizard::buildTuner()
         gtk_scale_set_draw_value(GTK_SCALE(scale), FALSE);
         gtk_widget_set_size_request(scale, 160, -1);
         gtk_range_set_value(GTK_RANGE(scale), g_look3D.*k.value);
-        GtkWidget *value = gtk_label_new("");
+        GtkWidget *value = gtk_label_new(knobText(k, g_look3D.*k.value).c_str());
         gtk_widget_add_css_class(value, "numeric");
         gtk_widget_add_css_class(value, "dim-label");
         gtk_label_set_xalign(GTK_LABEL(value), 1);
         gtk_widget_set_size_request(value, 48, -1);
-        auto show = [](GtkWidget *label, double v) {
-            char buf[32];
-            std::snprintf(buf, sizeof buf, v >= 10 ? "%.0f" : v >= 1 ? "%.2f" : "%.3f", v);
-            gtk_label_set_text(GTK_LABEL(label), buf);
-        };
-        show(value, g_look3D.*k.value);
         g_object_set_data(G_OBJECT(scale), "oc-knob", const_cast<Knob *>(&k));
         g_object_set_data(G_OBJECT(scale), "oc-value", value);
+        // The value is kept on the slider's step, so what's copied is what
+        // the slider shows.
         g_signal_connect(scale, "value-changed", G_CALLBACK(+[](GtkRange *r, gpointer p) {
                              auto *self = static_cast<GelWizard *>(p);
                              auto *k = static_cast<const Knob *>(g_object_get_data(G_OBJECT(r), "oc-knob"));
                              auto *label = static_cast<GtkWidget *>(g_object_get_data(G_OBJECT(r), "oc-value"));
-                             const double v = gtk_range_get_value(r);
+                             const double v = onStep(*k, gtk_range_get_value(r));
                              g_look3D.*k->value = float(v);
-                             char buf[32];
-                             std::snprintf(buf, sizeof buf, v >= 10 ? "%.0f" : v >= 1 ? "%.2f" : "%.3f", v);
-                             gtk_label_set_text(GTK_LABEL(label), buf);
+                             gtk_label_set_text(GTK_LABEL(label), knobText(*k, v).c_str());
                              if (self->m_gel3D)
                                  self->m_gel3D->setLook(g_look3D);
                          }),
                          this);
+        m_knobScales.push_back(scale);
         gtk_grid_attach(GTK_GRID(grid), name, 0, row, 1, 1);
         gtk_grid_attach(GTK_GRID(grid), scale, 1, row, 1, 1);
         gtk_grid_attach(GTK_GRID(grid), value, 2, row, 1, 1);
         ++row;
     }
+    GtkWidget *reset = gtk_button_new_with_label("Reset");
+    gtk_widget_set_tooltip_text(reset, "Back to the values that ship");
+    g_signal_connect_swapped(reset, "clicked", G_CALLBACK(+[](gpointer p) { static_cast<GelWizard *>(p)->resetLook(); }),
+                             this);
     GtkWidget *copy = gtk_button_new_with_label("Copy Values");
     gtk_widget_set_tooltip_text(copy, "Put every value on the clipboard, to send");
-    gtk_widget_set_halign(copy, GTK_ALIGN_END);
-    gtk_widget_set_margin_top(copy, 6);
     g_signal_connect_swapped(copy, "clicked", G_CALLBACK(+[](gpointer p) { static_cast<GelWizard *>(p)->copyLook(); }),
                              this);
+    GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_set_halign(buttons, GTK_ALIGN_END);
+    gtk_widget_set_margin_top(buttons, 6);
+    gtk_box_append(GTK_BOX(buttons), reset);
+    gtk_box_append(GTK_BOX(buttons), copy);
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_box_append(GTK_BOX(box), grid);
-    gtk_box_append(GTK_BOX(box), copy);
+    gtk_box_append(GTK_BOX(box), buttons);
     GtkWidget *popover = gtk_popover_new();
     gtk_popover_set_child(GTK_POPOVER(popover), box);
     gtk_widget_set_margin_start(box, 6);
@@ -1084,16 +1101,23 @@ GtkWidget *GelWizard::buildTuner()
     return popover;
 }
 
+void GelWizard::resetLook()
+{
+    if (m_closing)
+        return;
+    const Gel3DLook shipped;
+    size_t i = 0;
+    for (const Knob &k : kKnobs)   // each slider's handler puts its value back
+        gtk_range_set_value(GTK_RANGE(m_knobScales[i++]), shipped.*k.value);
+}
+
 void GelWizard::copyLook()
 {
     if (m_closing)
         return;
     std::string text = "3D gel look (" + std::string(gel3DSceneTitle(g_scene3D)) + ")\n";
-    for (const Knob &k : kKnobs) {
-        char buf[64];
-        std::snprintf(buf, sizeof buf, "%s: %g\n", k.name, double(g_look3D.*k.value));
-        text += buf;
-    }
+    for (const Knob &k : kKnobs)
+        text += std::string(k.name) + ": " + knobText(k, g_look3D.*k.value) + "\n";
     gdk_clipboard_set_text(gtk_widget_get_clipboard(m_dialog), text.c_str());
 }
 

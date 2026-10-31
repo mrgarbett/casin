@@ -83,6 +83,7 @@ private:
     void show3D();
     GtkWidget *buildTuner();
     void copyLook();
+    void resetLook();
     void copyImage();
     Document *live(const Lane &lane) const;
 
@@ -103,6 +104,7 @@ private:
     GtkWidget *m_laneGroup, *m_sequence, *m_enzymeEntry, *m_enzymeMenu, *m_chips, *m_enzymeNote;
     GtkWidget *m_fragmentGroup, *m_fragmentList, *m_stain, *m_run, *m_runLabel, *m_copy;
     GtkWidget *m_stage, *m_lookTabs[2] = {nullptr, nullptr}, *m_tune = nullptr, *m_done = nullptr;
+    std::vector<GtkWidget *> m_knobScales;   // the tuner's sliders, in kKnobs order
 };
 
 } // namespace oc::gtk
