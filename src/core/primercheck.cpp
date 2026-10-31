@@ -499,7 +499,12 @@ FrameCheck checkPartFrame(const Sequence &seq, const PrimerSite &site, int tailL
             cds = &f;
             break;
         }
-        if (!overlapping && site.binding.start < hi && site.binding.end > lo)
+        // The annealing part overlaps the CDS (either piece of a site that
+        // runs across the origin).
+        const int n = seq.length();
+        const bool overlaps = (site.binding.start < hi && site.binding.end > lo)
+                           || (site.binding.end > n && site.binding.end - n > lo && 0 < hi);
+        if (!overlapping && overlaps)
             overlapping = &f;
     }
     if (!cds)
