@@ -294,20 +294,29 @@ GelView::Geometry GelView::geometry(double w, double h) const
     // Above the controls at the bottom.
     const double ax = 24, ay = 24, aw = std::max(100.0, w - 48), ah = std::max(120.0, h - ay - m_bottomInset);
     // Lanes grow to fill the pane (a few lanes make a wide gel, not a narrow
-    // strip), with the gaps and the size labels growing with them.
+    // strip), with the gaps and the size labels growing with them; many
+    // lanes shrink until the whole comb fits beside the ladder's sizes.
     const double n = double(std::max<size_t>(1, m_lanes.size()));
-    const double unit = (aw - 60) / (n * 1.25 + 0.25);
-    const double laneW = std::clamp(unit, 26.0, 120.0);
+    const bool ladder = std::any_of(m_lanes.begin(), m_lanes.end(), [](const GelLaneModel &l) { return l.ladder; });
+    const double unit = (aw - (ladder ? 60 : 0)) / (n * 1.25 + 0.25);
+    double laneW = std::clamp(unit, 12.0, 120.0);
     const double scale = std::max(1.0, laneW / 64);
-    const double gap = std::clamp(laneW * 0.25, 10.0, 28.0);
+    double gap = std::clamp(laneW * 0.25, 4.0, 28.0);
     // The ladder's sizes sit left of the slab; the slab is centred in the
     // pane, and only moves over when they wouldn't fit beside it.
-    const bool ladder = std::any_of(m_lanes.begin(), m_lanes.end(), [](const GelLaneModel &l) { return l.ladder; });
     const double labelW = ladder ? 60 * std::min(1.4, scale) : 0;
-    const double slabW = n * laneW + (n + 1) * gap;
+    double slabW = n * laneW + (n + 1) * gap;
+    if (labelW + slabW > aw) {
+        const double f = (aw - labelW) / slabW;
+        laneW *= f;
+        gap *= f;
+        slabW = aw - labelW;
+    }
     const double slabX = ax + std::max(labelW, (aw - slabW) / 2);
-    const double slabY = ay + 24 * scale, slabH = ah - 24 * scale;
-    return {slabX, slabY, slabW, slabH, laneW, gap, scale, labelW, slabY + 34 * scale, slabY + slabH - 22};
+    // The gel is as long whatever is loaded: its run is the pane's height,
+    // so the same fragment sits at the same place on every gel.
+    const double slabY = ay + 24, slabH = ah - 24;
+    return {slabX, slabY, slabW, slabH, laneW, gap, scale, labelW, slabY + 34, slabY + slabH - 22};
 }
 
 void GelView::draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer p)
@@ -332,7 +341,7 @@ void GelView::render(cairo_t *cr, double w, double h, bool forPicture) const
     // the gel sits in the middle): dark inside, the far wall shaded, a lit
     // lip below.
     const double wellH = (5 + 3 * m_comb.thickness) * std::min(1.5, g.scale);
-    const double wellY = g.slabY + 14 * g.scale;
+    const double wellY = g.slabY + 14;
     for (int i = 0; i < std::max<int>(1, int(m_lanes.size())); ++i) {
         const double x = g.laneX(i) + 2, ww = g.laneW - 4;
         roundedRect(cr, x, wellY, ww, wellH, 1.5);
@@ -367,7 +376,7 @@ void GelView::render(cairo_t *cr, double w, double h, bool forPicture) const
             cairo_fill(cr);
         }
         text(cr, m_area, lane.name, namePx, PANGO_WEIGHT_SEMIBOLD, 1, 1, 1,
-             int(i) == selected || forPicture ? 1 : 0.6, x + g.laneW / 2, g.slabY - 13 * g.scale, Align::Center);
+             int(i) == selected || forPicture ? 1 : 0.6, x + g.laneW / 2, g.slabY - 13, Align::Center);
 
         const double far = reach(int(i));
         const double fadeIn = std::min(1.0, (i < m_progress.size() ? m_progress[i] : 1) * 4);
@@ -621,8 +630,8 @@ GBytes *GelView::snapshotPng(const std::vector<std::pair<std::string, std::strin
     const double w = std::max(1, gtk_widget_get_width(m_area)), h = std::max(1, gtk_widget_get_height(m_area));
     const Geometry g = geometry(w, h);
     // Cropped to the gel and its labels.
-    const double cx = std::max(0.0, g.slabX - g.labelW - 8), cy = std::max(0.0, g.slabY - 30 * g.scale);
-    const double cw = std::min(w - cx, g.slabW + g.labelW + 24), ch = std::min(h - cy, g.slabH + 30 * g.scale + 16);
+    const double cx = std::max(0.0, g.slabX - g.labelW - 8), cy = std::max(0.0, g.slabY - 30);
+    const double cw = std::min(w - cx, g.slabW + g.labelW + 24), ch = std::min(h - cy, g.slabH + 30 + 16);
     const double lineH = 18;
     const double legendH = 14 + legend.size() * lineH + 6 + lineH + 10;
     const int scale = std::max(1, gtk_widget_get_scale_factor(m_area));
