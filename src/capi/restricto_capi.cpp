@@ -217,6 +217,8 @@ void oc_document_set_callback(OCDocument *doc, OCChangeCallback cb, void *contex
 
 bool oc_document_load(OCDocument *doc, const char *path, char **error)
 {
+    if (!path || !*path)
+        return failWith(error, "no file named");
     Sequence seq;
     std::string err;
     FileFormat format = FileFormat::Unknown;
@@ -232,6 +234,8 @@ bool oc_document_load(OCDocument *doc, const char *path, char **error)
 
 bool oc_document_save(OCDocument *doc, const char *path, int format, char **error)
 {
+    if (!path || !*path)
+        return failWith(error, "no file named");
     std::string err;
     const FileFormat f = format == OC_FORMAT_FASTA    ? FileFormat::Fasta
                        : format == OC_FORMAT_SNAPGENE ? FileFormat::SnapGene
@@ -593,7 +597,8 @@ bool oc_document_enzyme(OCDocument *doc, int index, OCEnzymeInfo *out)
 
 void oc_document_set_enzyme_hidden(OCDocument *doc, const char *name, bool hidden)
 {
-    doc->doc.setEnzymeHidden(name, hidden);
+    if (name)
+        doc->doc.setEnzymeHidden(name, hidden);
 }
 
 int oc_document_max_cuts(const OCDocument *doc) { return doc->doc.maxCuts(); }
@@ -821,7 +826,7 @@ char *oc_enzyme_suppliers(const char *enzyme) { return dupString(enzymeSuppliers
 void oc_document_show_enzyme_set(OCDocument *doc, const char *const *enzymes, int count)
 {
     std::set<std::string> names;
-    for (int i = 0; i < count; ++i)
+    for (int i = 0; i < count && enzymes; ++i)
         if (enzymes[i])
             names.insert(enzymes[i]);
     doc->doc.showOnlyEnzymes(names, doc->doc.maxCuts());

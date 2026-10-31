@@ -279,6 +279,26 @@ int main(int argc, char **argv)
     CHECK(oc_primer_sites(doc, "", sites, 4) == 0);
     oc_document_free(copy);
 
+    /* A missing string is an empty one, never a crash. */
+    {
+        char *err = NULL;
+        OCDocument *blank = oc_document_new();
+        CHECK(!oc_document_load(blank, NULL, &err) && err);
+        oc_string_free(err);
+        err = NULL;
+        CHECK(!oc_document_save(doc, NULL, OC_FORMAT_GENBANK, &err) && err);
+        oc_string_free(err);
+        oc_document_set_enzyme_hidden(doc, NULL, true);
+        oc_document_show_enzyme_set(doc, NULL, 3);
+        oc_document_show_only_enzymes(doc, NULL, 3, 6);
+        CHECK(!oc_document_new_sequence(blank, NULL, NULL, false));
+        oc_document_find_next(doc, NULL, NULL);
+        oc_document_rename(doc, NULL);
+        CHECK(oc_document_add_primer_sequence(doc, NULL, NULL, &err) == -1 && err);
+        oc_string_free(err);
+        oc_document_free(blank);
+    }
+
     /* Fitting to a Tm keeps the tail and the 3' end; a primer can't pair with itself. */
     {
         OCPrimerSite fitted;
