@@ -77,7 +77,11 @@ private:
 
     uint32_t m_samples = 0, m_frame = 0;
     guint m_tick = 0, m_idle = 0, m_buildTimer = 0;
-    gint64 m_lastBuild = 0;
+    gint64 m_lastBuild = 0, m_lastRender = 0;
+    double m_frameMs = 0;   // how long a traced frame takes, smoothed
+    // How many samples to take before resting: fewer on a slow renderer,
+    // so software GL and a weak GPU still come to rest.
+    uint32_t maxSamples() const;
     bool m_moving = false;   // being turned or zoomed: trace coarsely
 
     static constexpr float kHomePitch = 0.80f;

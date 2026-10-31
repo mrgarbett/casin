@@ -751,12 +751,19 @@ void Gel3DView::interacted()
 gboolean Gel3DView::tick(GtkWidget *, GdkFrameClock *, gpointer p)
 {
     auto *self = static_cast<Gel3DView *>(p);
-    if (self->m_samples >= kMaxSamples || !self->m_problem.empty()) {
+    if (self->m_samples >= self->maxSamples() || !self->m_problem.empty()) {
         self->m_tick = 0;
         return G_SOURCE_REMOVE;
     }
     gtk_gl_area_queue_render(GTK_GL_AREA(self->m_area));
     return G_SOURCE_CONTINUE;
+}
+
+uint32_t Gel3DView::maxSamples() const
+{
+    // A frame slower than 60 ms a sample (software GL, a tired laptop)
+    // settles for a grainier picture rather than tracing for minutes.
+    return m_frameMs > 60 ? 48 : kMaxSamples;
 }
 
 // The camera orbits a point just above the middle of the gel, moved by panning.
@@ -1068,7 +1075,11 @@ void Gel3DView::render()
     glDisable(GL_BLEND);
     glDisable(GL_DEPTH_TEST);
     glBindVertexArray(m_vao);
-    if (m_samples < kMaxSamples) {
+    if (m_samples < maxSamples()) {
+        const gint64 now = g_get_monotonic_time();
+        if (m_lastRender && now - m_lastRender < G_USEC_PER_SEC)
+            m_frameMs = 0.8 * m_frameMs + 0.2 * double(now - m_lastRender) / 1000;
+        m_lastRender = now;
         // accum[0] holds the samples so far; add one into accum[1], then swap.
         glBindFramebuffer(GL_FRAMEBUFFER, m_fbo[1]);
         glViewport(0, 0, w, h);
