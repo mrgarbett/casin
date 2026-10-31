@@ -279,7 +279,15 @@ int main(int argc, char **argv)
     CHECK(oc_document_primer_count(doc) == ci);   /* the original is untouched */
     oc_document_undo(copy);
     CHECK(oc_document_primer_count(copy) == ci);
-    OCPrimerSite bad = {oc_document_length(doc) - 5, 22, OC_STRAND_FORWARD, 0};
+    /* A site across the origin is a site on a circle; past the end of a linear sequence it isn't. */
+    OCPrimerSite wrap = {oc_document_length(doc) - 5, 22, OC_STRAND_FORWARD, 0};
+    const int wi = oc_document_add_primer_at(copy, "wrap", tailed, NULL, NULL, &wrap);
+    CHECK(wi >= 0 && oc_document_primer(copy, wi, &pinf) && pinf.start == oc_document_length(doc) - 5
+          && pinf.length == 22);
+    oc_document_set_circular(copy, false);
+    CHECK(oc_document_primer_count(copy) == wi);   /* a linear sequence can't hold it */
+    CHECK(oc_document_add_primer_at(copy, "bad", tailed, NULL, NULL, &wrap) == -1);
+    OCPrimerSite bad = {oc_document_length(doc), 22, OC_STRAND_FORWARD, 0};
     CHECK(oc_document_add_primer_at(copy, "bad", tailed, NULL, NULL, &bad) == -1);
     CHECK(oc_primer_sites(doc, "", sites, 4) == 0);
     oc_document_free(copy);

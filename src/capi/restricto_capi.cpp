@@ -545,8 +545,11 @@ bool primerAt(const OCDocument *doc, const char *name, const char *bases, const 
 {
     const std::string typed = cleanPrimerBases(bases ? bases : "");
     const int n = doc->doc.sequence().length();
-    if (typed.empty() || !siteOnSequence(site, n) || site->start + site->length > n
-        || site->length > int(typed.size()))
+    if (typed.empty() || !siteOnSequence(site, n))
+        return false;
+    // On a circle the site may run past the end and on from base 1.
+    const int maxEnd = doc->doc.sequence().circular ? site->start + n : n;
+    if (site->start + site->length > maxEnd || site->length > int(typed.size()))
         return false;
     out->name = name && *name ? name : "primer";
     out->bases = typed;
