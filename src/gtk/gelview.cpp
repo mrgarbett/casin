@@ -423,9 +423,22 @@ void GelView::render(cairo_t *cr, double w, double h, bool forPicture) const
                  1, (band.reference ? 0.8 : 0.5) * full, g.slabX - 10, y, Align::Right, true);
         }
     }
-    if (m_lanes.size() <= 1 && !forPicture)
-        text(cr, m_area, "Add a lane to run a sample", 13, PANGO_WEIGHT_NORMAL, 1, 1, 1, 0.5, g.slabX + g.slabW / 2,
-             g.slabY + g.slabH / 2, Align::Center);
+    if (m_lanes.size() <= 1 && !forPicture) {
+        // The hint sits beside the slab, clear of the ladder's bands; only
+        // a narrow pane puts it over the gel, on a dark backing.
+        const char *hint = "Add a lane to run a sample";
+        const double tw = textWidth(m_area, hint, 13, PANGO_WEIGHT_NORMAL), hy = g.slabY + g.slabH / 2;
+        const double right = g.slabX + g.slabW + 24;
+        if (right + tw <= w - 24) {
+            text(cr, m_area, hint, 13, PANGO_WEIGHT_NORMAL, 1, 1, 1, 0.5, right, hy, Align::Left);
+        } else {
+            const double hx = g.slabX + g.slabW / 2;
+            roundedRect(cr, hx - tw / 2 - 12, hy - 14, tw + 24, 28, 14);
+            cairo_set_source_rgba(cr, 0, 0, 0, 0.6);
+            cairo_fill(cr);
+            text(cr, m_area, hint, 13, PANGO_WEIGHT_NORMAL, 1, 1, 1, 0.7, hx, hy, Align::Center);
+        }
+    }
     if (hover.lane >= 0 && hover.band >= 0)
         drawCallout(cr, g, w);
 }
