@@ -172,6 +172,19 @@ typedef struct {
     const char *description;
 } OCPrimerInfo;
 
+/* A Gateway att site: the core every site of that number shares, wherever it
+ * lies on the top strand. `reversed` means it reads on the bottom strand, so
+ * two sites flanking an insert come out one of each. */
+typedef struct {
+    int number;      /* 1..4 */
+    int start;       /* 0-based, on the top strand */
+    int length;
+    bool reversed;
+} OCAttSite;
+
+int oc_document_att_site_count(const OCDocument *doc);
+bool oc_document_att_site(const OCDocument *doc, int index, OCAttSite *out);
+
 /* How the construct was made, oldest step first ("2026-10-27 PCR with ..."). */
 int oc_document_history_count(const OCDocument *doc);
 const char *oc_document_history(OCDocument *doc, int index);
@@ -443,6 +456,16 @@ bool oc_mutagenesis(const OCDocument *doc, const char *bases, double target_tm, 
 bool oc_gibson(const OCDocument *vector, const char *vector_enzyme1, const char *vector_enzyme2,
                const OCDocument *const *fragments, int fragment_count, int min_overlap, OCDocument *out,
                char **error);
+/* Gateway: `insert` is the attB fragment (BP) or the entry clone (LR), and
+ * `vector` the donor or destination. Both carry two att cores of the same
+ * numbers; the piece between the insert's ends up between the vector's.
+ * `byproduct` (may be NULL) gets the other circle, and is left empty when
+ * there isn't one, as after a BP with a linear attB product. *first_site and
+ * *second_site (may be NULL) get the att numbers they crossed at. */
+enum { OC_GATEWAY_BP = 0, OC_GATEWAY_LR = 1 };
+bool oc_gateway(const OCDocument *insert, const OCDocument *vector, int reaction, OCDocument *out,
+                OCDocument *byproduct, int *first_site, int *second_site, char **error);
+
 /* Overlap extension PCR: linear fragments joined by their end overlaps,
  * starting from the first, into one linear product. */
 bool oc_overlap_extension(const OCDocument *const *fragments, int fragment_count, int min_overlap, OCDocument *out,

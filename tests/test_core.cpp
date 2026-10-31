@@ -12,6 +12,7 @@
 #include "core/protein.h"
 #include "core/enzymes.h"
 #include "core/featurelib.h"
+#include "core/gateway.h"
 #include "core/fasta.h"
 #include "core/genbank.h"
 #include "core/seqio.h"
@@ -1275,6 +1276,145 @@ static void testGoldenGate()
     CHECK(!err.empty());
 }
 
+// Gateway BP and LR. The molecules are synthetic: what matters is that the
+// att cores sit the right way round, since the reaction crosses inside them.
+// attB1 is ACAAG + core1 + AGGCT and attB2, read on the product's top
+// strand, is ACCAC + core2 + TGGGT (Invitrogen's Gateway manual).
+static void testGateway()
+{
+    const std::string core1 = attCore(1), core2 = reverseComplement(attCore(2));
+    CHECK_EQ(core1.size(), size_t(15));
+    CHECK_EQ(core2.size(), size_t(15));
+    const std::string b1L = "ACAAG", b1R = "AGGCT", b2L = "ACCAC", b2R = "TGGGT";
+    const std::string gene = "ATG" + std::string(54, 'C') + "TAA";
+    const std::string kan = std::string(40, 'A'), ori = std::string(50, 'T');
+    const std::string ccdb = std::string(30, 'G'), ccdb2 = std::string(36, 'G');
+    const std::string kan2 = std::string(44, 'A'), ori2 = std::string(56, 'T');
+
+    // The PCR product: attB1, the gene, attB2 pointing back.
+    Sequence product;
+    product.name = "insert";
+    product.bases = b1L + core1 + b1R + gene + b2L + core2 + b2R;
+    product.features = {feat("geneX", {{int(b1L.size() + core1.size() + b1R.size()),
+                                        int(b1L.size() + core1.size() + b1R.size() + gene.size())}})};
+    const std::vector<AttSite> onProduct = findAttSites(product);
+    CHECK_EQ(onProduct.size(), size_t(2));
+    if (onProduct.size() == 2) {
+        CHECK(onProduct[0].number == 1 && !onProduct[0].reversed);
+        CHECK(onProduct[1].number == 2 && onProduct[1].reversed);
+    }
+
+    // The donor: the same cores around a stuffer, on a circle.
+    Sequence donor;
+    donor.name = "pDONOR";
+    donor.circular = true;
+    donor.bases = kan + core1 + ccdb + core2 + ori;
+
+    // Every core is written in the same sense, so they share their first
+    // bases. A core stored the other way round would be found on the wrong
+    // strand, and every real plasmid's two sites would look parallel.
+    for (int n = 1; n <= 4; ++n)
+        CHECK_EQ(attCore(n).substr(0, 6), attCore(1).substr(0, 6));
+
+    GatewayResult bp;
+    std::string err;
+    CHECK(gatewayRecombine(product, donor, GatewayReaction::BP, &bp, &err));
+    // The entry clone: the donor's backbone, then the insert, with both
+    // cores whole again across the joins.
+    const std::string expectEntry =
+        core2.substr(7) + ori + kan + core1 + b1R + gene + b2L + core2.substr(0, 7);
+    CHECK(bp.clone.circular);
+    CHECK_EQ(bp.clone.bases, expectEntry);
+    CHECK(bp.clone.bases.find(ccdb) == std::string::npos);   // the stuffer is gone
+    CHECK_EQ(bp.firstSite, 1);
+    CHECK_EQ(bp.secondSite, 2);
+    CHECK(bp.byproduct.empty());   // a linear attB product leaves no second circle
+    CHECK_EQ(bp.clone.name, std::string("pDONOR-insert"));
+    // The gene came along, and the new sites are attL1 and attL2.
+    bool carried = false, l1 = false, l2 = false;
+    for (const Feature &f : bp.clone.features) {
+        carried = carried || (f.name == "geneX" && bp.clone.featureBases(f) == gene);
+        l1 = l1 || (f.name == "attL1" && bp.clone.featureBases(f) == core1);
+        l2 = l2 || (f.name == "attL2" && bp.clone.featureBases(f) == core2);
+    }
+    CHECK(carried);
+    CHECK(l1 && l2);
+
+    // LR: the entry clone into a destination vector.
+    Sequence dest;
+    dest.name = "pDEST";
+    dest.circular = true;
+    dest.bases = kan2 + core1 + ccdb2 + core2 + ori2;
+    GatewayResult lr;
+    CHECK(gatewayRecombine(bp.clone, dest, GatewayReaction::LR, &lr, &err));
+    CHECK_EQ(lr.clone.bases, core2.substr(7) + ori2 + kan2 + core1 + b1R + gene + b2L + core2.substr(0, 7));
+    CHECK(lr.clone.circular && lr.clone.bases.find(ccdb2) == std::string::npos);
+    bool b1 = false, b2 = false;
+    for (const Feature &f : lr.clone.features) {
+        b1 = b1 || (f.name == "attB1" && lr.clone.featureBases(f) == core1);
+        b2 = b2 || (f.name == "attB2" && lr.clone.featureBases(f) == core2);
+    }
+    CHECK(b1 && b2);
+    // This time the other circle closes: the stuffer with the entry clone's
+    // backbone, and no gene in it.
+    CHECK(!lr.byproduct.empty());
+    CHECK(lr.byproduct.circular);
+    CHECK(lr.byproduct.bases.find(ccdb2) != std::string::npos);
+    CHECK(lr.byproduct.bases.find(ori) != std::string::npos);
+    CHECK(lr.byproduct.bases.find(gene) == std::string::npos);
+    CHECK_EQ(lr.byproduct.length(), dest.length() + bp.clone.length() - lr.clone.length());
+
+    // An entry clone the other way round on a circle recombines the same way.
+    Sequence flipped = bp.clone;
+    reverseComplementSequence(flipped);
+    GatewayResult other;
+    CHECK(gatewayRecombine(flipped, dest, GatewayReaction::LR, &other, &err));
+    CHECK_EQ(other.clone.bases, lr.clone.bases);
+    CHECK(other.insertFlipped);
+    CHECK(!lr.insertFlipped && !bp.insertFlipped);
+
+    // A product amplified the other way round (attB2 first) is turned over.
+    Sequence backwards;
+    backwards.name = "insert-rc";
+    backwards.bases = reverseComplement(product.bases);
+    GatewayResult turned;
+    CHECK(gatewayRecombine(backwards, donor, GatewayReaction::BP, &turned, &err));
+    CHECK_EQ(turned.clone.bases, expectEntry);
+    CHECK(turned.insertFlipped);
+
+    // A MultiSite pair (att4 with att1) works the same.
+    const std::string core4 = attCore(4), core1r = reverseComplement(attCore(1));
+    Sequence promoter;
+    promoter.name = "P";
+    promoter.bases = "ACAAC" + core4 + "TTG" + std::string(30, 'A') + "CAA" + core1r + "CTTGT";
+    Sequence donor41;
+    donor41.name = "pDONR-P4P1R";
+    donor41.circular = true;
+    donor41.bases = kan + core4 + ccdb + core1r + ori;
+    GatewayResult five;
+    CHECK(gatewayRecombine(promoter, donor41, GatewayReaction::BP, &five, &err));
+    CHECK(five.clone.circular && five.clone.bases.find(ccdb) == std::string::npos);
+    CHECK_EQ(five.firstSite, 4);
+    CHECK_EQ(five.secondSite, 1);
+
+    // What must fail.
+    Sequence linearDonor = donor;
+    linearDonor.circular = false;
+    CHECK(!gatewayRecombine(product, linearDonor, GatewayReaction::BP, &bp, &err));
+    CHECK(err.find("circular") != std::string::npos);
+    Sequence oneSite;
+    oneSite.name = "one";
+    oneSite.bases = b1L + core1 + b1R + gene;
+    CHECK(!gatewayRecombine(oneSite, donor, GatewayReaction::BP, &bp, &err));
+    Sequence sameWay;
+    sameWay.name = "same";
+    sameWay.bases = core1 + gene + reverseComplement(core2);   // both cores read forward
+    CHECK(!gatewayRecombine(sameWay, donor, GatewayReaction::BP, &bp, &err));
+    CHECK(err.find("point the same way") != std::string::npos);
+    CHECK(!gatewayRecombine(promoter, donor, GatewayReaction::BP, &bp, &err));   // att4/att1 into an att1/att2 donor
+    CHECK(err.find("don't match") != std::string::npos);
+}
+
 static void testGibson()
 {
     const std::string h1 = "ACGTTGCATGCCTAGGATCCGTAAC";   // 25 bp junctions
@@ -1888,6 +2028,7 @@ int main(int argc, char **argv)
     testCloning();
     testGoldenGate();
     testGibson();
+    testGateway();
     testProtein();
     testInsertionByPcr();
     testPrimerDesign();

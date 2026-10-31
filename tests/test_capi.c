@@ -397,6 +397,53 @@ int main(int argc, char **argv)
     oc_pcr_program("ACGN", "CGGCTCTCTTTACACGGCTC", 1530, OC_POLYMERASE_Q5, 30, &prog);
     CHECK(prog.step_count == 0);
 
+    /* Gateway: an attB product into a donor, then that entry clone into a
+     * destination. The cores are the 15 bp att1 and att2 share; att2 is
+     * written as it reads on the top strand, which is the other way round
+     * from att1, so the two sites face each other. */
+    {
+        const char *core1 = "TTTGTACAAAAAAGC", *core2 = "GCTTTCTTGTACAAA";
+        char insertBases[512], donorBases[512], destBases[512];
+        snprintf(insertBases, sizeof insertBases, "ACAAG%sAGGCTATGCCCCCCCCCCCCTAAACCAC%sTGGGT", core1, core2);
+        snprintf(donorBases, sizeof donorBases, "AAAAAAAAAAAAAAAAAAAA%sGGGGGGGGGGGGGGG%sTTTTTTTTTTTTTTTTTTTT",
+                 core1, core2);
+        snprintf(destBases, sizeof destBases, "AAAAAAAAAAAAAAAAAAAAAAAA%sGGGGGGGGGGGGGGGGGG%sTTTTTTTTTTTTTTTTTTTTTT",
+                 core1, core2);
+        OCDocument *gins = oc_document_new(), *gdon = oc_document_new(), *gdest = oc_document_new();
+        OCDocument *entry = oc_document_new(), *expr = oc_document_new(), *by = oc_document_new();
+        CHECK(oc_document_new_sequence(gins, "insert", insertBases, false));
+        CHECK(oc_document_new_sequence(gdon, "pDONOR", donorBases, true));
+        CHECK(oc_document_new_sequence(gdest, "pDEST", destBases, true));
+        /* Both sites are listed, one reading on each strand. */
+        OCAttSite site;
+        CHECK(oc_document_att_site_count(gins) == 2);
+        CHECK(oc_document_att_site(gins, 0, &site) && site.number == 1 && site.length == 15 && !site.reversed);
+        CHECK(oc_document_att_site(gins, 1, &site) && site.number == 2 && site.reversed);
+        CHECK(!oc_document_att_site(gins, 2, &site));
+        CHECK(oc_document_att_site_count(doc) == 0);   /* pOC-demo has none */
+        int firstSite = 0, secondSite = 0;
+        char *gerr = NULL;
+        CHECK(oc_gateway(gins, gdon, OC_GATEWAY_BP, entry, by, &firstSite, &secondSite, &gerr));
+        CHECK(firstSite == 1 && secondSite == 2 && gerr == NULL);
+        CHECK(oc_document_is_circular(entry) && oc_document_att_site_count(entry) == 2);
+        CHECK(oc_document_length(by) == 0);   /* a linear attB product leaves no second circle */
+        CHECK(oc_gateway(entry, gdest, OC_GATEWAY_LR, expr, by, NULL, NULL, NULL));
+        CHECK(oc_document_is_circular(expr) && oc_document_length(by) > 0);
+        CHECK(oc_document_length(expr) + oc_document_length(by)
+              == oc_document_length(entry) + oc_document_length(gdest));
+        /* The donor has no att4, and a linear vector is refused. */
+        CHECK(!oc_gateway(gins, gins, OC_GATEWAY_BP, expr, NULL, NULL, NULL, &gerr));
+        CHECK(gerr != NULL);
+        oc_string_free(gerr);
+        CHECK(!oc_gateway(gins, gdon, 7, expr, NULL, NULL, NULL, NULL));
+        oc_document_free(gins);
+        oc_document_free(gdon);
+        oc_document_free(gdest);
+        oc_document_free(entry);
+        oc_document_free(expr);
+        oc_document_free(by);
+    }
+
     char *status = oc_document_status_text(doc);
     CHECK(strstr(status, "3,188 bp") != NULL);
     oc_string_free(status);
