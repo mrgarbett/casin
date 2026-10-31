@@ -131,7 +131,7 @@ void Window::chooseEnzymesDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(dialog), "state", st, [](gpointer p) { delete static_cast<ChooseState *>(p); });
-    adw_dialog_present(dialog, m_window);
+    presentDialog(dialog);
 }
 
 } // namespace oc::gtk

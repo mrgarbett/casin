@@ -319,7 +319,7 @@ void Window::featureDialog(int index)
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<FeatureForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
     gtk_widget_grab_focus(st->name);
 }
 
@@ -528,7 +528,7 @@ void Window::cloningDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<CloneForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -666,7 +666,7 @@ void Window::goldenGateDialog()
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st,
                            [](gpointer p) { delete static_cast<GoldenGateForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -840,7 +840,7 @@ void Window::gibsonDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<GibsonForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -942,7 +942,7 @@ void Window::designPrimersDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<DesignForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -1047,7 +1047,7 @@ void Window::mutagenesisDialog()
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st,
                            [](gpointer p) { delete static_cast<MutagenesisForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
     gtk_widget_grab_focus(st->bases);
 }
 
@@ -1072,7 +1072,7 @@ void Window::historyDialog()
             adw_action_row_set_subtitle(ADW_ACTION_ROW(row), h.substr(0, 10).c_str());
         adw_preferences_group_add(ADW_PREFERENCES_GROUP(g), row);
     }
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 void Window::mapOptionsDialog()
@@ -1117,7 +1117,7 @@ void Window::mapOptionsDialog()
         for (const auto &kv : types)
             addSwitch(tg, kv.first + " (" + std::to_string(kv.second) + ")", kv.first, !opt.hiddenTypes.count(kv.first));
     }
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -1237,7 +1237,7 @@ void Window::taCloningDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<TaForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -1343,7 +1343,7 @@ void Window::overlapExtensionDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<SoeForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -1449,7 +1449,7 @@ void Window::proteinDialog()
                      })),
                      f.dialog);
     gtk_widget_set_sensitive(f.ok, !shown.empty());
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -1586,7 +1586,7 @@ void Window::insertionDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<InsertionForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 void Window::searchFolderDialog()
@@ -1647,7 +1647,7 @@ void Window::searchFolderDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<SearchForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
     adw_dialog_set_focus(f.dialog, st->query);
 }
 
@@ -1825,7 +1825,7 @@ void Window::alignDialog(bool compare)
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<AlignForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -1930,7 +1930,7 @@ void Window::orfDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<OrfForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -2029,7 +2029,7 @@ void Window::renameDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<TextForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
     gtk_widget_grab_focus(st->entry);
 }
 
@@ -2062,7 +2062,7 @@ void Window::goToDialog()
                      })),
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st, [](gpointer p) { delete static_cast<TextForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
     gtk_widget_grab_focus(st->entry);
 }
 
@@ -2109,7 +2109,7 @@ void Window::deletePrimerDialog()
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st,
                            [](gpointer p) { delete static_cast<DeletePrimerForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
 }
 
 namespace {
@@ -2171,7 +2171,7 @@ void Window::checkPrimerDialog()
                      st);
     g_object_set_data_full(G_OBJECT(f.dialog), "state", st,
                            [](gpointer p) { delete static_cast<CheckPrimerForm *>(p); });
-    adw_dialog_present(f.dialog, m_window);
+    presentDialog(f.dialog);
     gtk_widget_grab_focus(st->bases);
 }
 

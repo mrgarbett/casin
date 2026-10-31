@@ -74,6 +74,9 @@ private:
     // Asks about unsaved changes before the tab (or, with closeWindow, the
     // window) closes. True when it can close right away.
     bool confirmClose(bool closeWindow);
+    // Presents a dialog that belongs to this tab: it closes with the tab,
+    // so its OK button can never act on a document that's gone.
+    void presentDialog(AdwDialog *dialog);
     // The tab is closing: closes the windows it opened, such as the PCR wizard.
     void closeTools();
     void finishClose();
@@ -269,6 +272,7 @@ private:
     guint m_endPrimerIdle = 0;
     PcrWizard *m_pcr = nullptr;   // owns itself; closes with this tab
     GelWizard *m_gel = nullptr;   // the same
+    std::vector<AdwDialog *> m_dialogs;   // the tab's open dialogs, closed with it
     bool m_closeConfirmed = false;
     GtkWidget *m_filter = nullptr;
     GtkWidget *m_setDrop = nullptr;

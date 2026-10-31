@@ -1525,7 +1525,7 @@ void Window::saveEnzymeSetDialog()
                          self->toast("Saved enzyme set " + name);
                      })),
                      this);
-    adw_dialog_present(dialog, m_window);
+    presentDialog(dialog);
     adw_dialog_set_focus(dialog, entry);
 }
 
@@ -1595,7 +1595,7 @@ void Window::showError(const std::string &heading, const std::string &body)
 {
     AdwDialog *d = adw_alert_dialog_new(heading.c_str(), body.c_str());
     adw_alert_dialog_add_response(ADW_ALERT_DIALOG(d), "close", "Close");
-    adw_dialog_present(d, m_window);
+    presentDialog(d);
 }
 
 // ---- actions --------------------------------------------------------------------
@@ -1831,7 +1831,7 @@ void Window::revert()
                              self->showError("Could not revert", error);
                      })),
                      this);
-    adw_dialog_present(d, m_window);
+    presentDialog(d);
 }
 
 // The map as on Export Map, light, at 2x, as an image on the clipboard.
@@ -1922,8 +1922,28 @@ bool Window::save(bool closeAfter)
     return false;
 }
 
+void Window::presentDialog(AdwDialog *dialog)
+{
+    m_dialogs.push_back(dialog);
+    g_signal_connect(dialog, "closed", G_CALLBACK((+[](AdwDialog *d, gpointer p) {
+                         auto *self = static_cast<Window *>(p);
+                         self->m_dialogs.erase(std::remove(self->m_dialogs.begin(), self->m_dialogs.end(), d),
+                                               self->m_dialogs.end());
+                     })),
+                     this);
+    adw_dialog_present(dialog, m_window);
+}
+
 void Window::closeTools()
 {
+    // The tab's dialogs go with it (their handlers hold this window and its
+    // document). Closing one removes it from the list, so work on a copy.
+    const std::vector<AdwDialog *> dialogs = m_dialogs;
+    for (AdwDialog *d : dialogs) {
+        g_signal_handlers_disconnect_by_data(d, this);
+        adw_dialog_force_close(d);
+    }
+    m_dialogs.clear();
     if (m_pcr) {
         m_pcr->onClosed = nullptr;
         m_pcr->close();
