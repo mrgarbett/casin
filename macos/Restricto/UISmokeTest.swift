@@ -29,8 +29,9 @@ enum UISmokeTest {
                 _exit(128 + code)
             }
         }
-        // Give up rather than hang CI if the window never appears.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+        // Give up rather than hang CI if the window never appears. The whole run
+        // now takes about a minute on CI, so leave it room.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 150) {
             FileHandle.standardError.write("ui-smoke: timed out\n".data(using: .utf8)!)
             exit(3)
         }
@@ -229,6 +230,33 @@ enum UISmokeTest {
                     capture(wizard, to: out.appendingPathComponent("9k-gel-half-run-window.png"))
                 }
                 GelWizard.setRun(1, stain: .ethidiumUV)
+            }),
+            ("9k-gel-3d", {
+                // The 3D tab sets up Metal and compiles its shaders on first use.
+                if let wizard = GelWizard.openWindows.first {
+                    capture(wizard, to: out.appendingPathComponent("9k-gel-imager-window.png"))
+                }
+                GelWizard.showLook(1)
+                guard GelWizard.showing3D else {
+                    FileHandle.standardError.write("ui-smoke: the gel's 3D tab didn't open\n".data(using: .utf8)!)
+                    exit(8)
+                }
+                // A shader that doesn't compile is a bug; a machine without
+                // a GPU is just this machine.
+                if let problem = GelWizard.problem3D {
+                    FileHandle.standardError.write("ui-smoke: 3D gel: \(problem)\n".data(using: .utf8)!)
+                    if problem.contains("compile") { exit(9) }
+                }
+                // The other scenes, then back: each starts the picture over.
+                GelWizard.setScene3D(2)
+                GelWizard.setScene3D(1)
+                GelWizard.setScene3D(0)
+            }),
+            ("9k-gel-imager", {
+                if let wizard = GelWizard.openWindows.first {
+                    capture(wizard, to: out.appendingPathComponent("9k-gel-3d-window.png"))
+                }
+                GelWizard.showLook(0)
             }),
             ("9k-gel-closed", {
                 if let wizard = GelWizard.openWindows.first {
