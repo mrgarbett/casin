@@ -479,6 +479,13 @@ void Document::setCircular(bool circular)
     edit(circular ? "Make Circular" : "Make Linear",
          [&](Sequence &s) {
              s.circular = circular;
+             // A primer across the origin has no place on a line.
+             if (!circular) {
+                 const int n = s.length();
+                 s.primers.erase(std::remove_if(s.primers.begin(), s.primers.end(),
+                                                [n](const Primer &p) { return p.binding.end > n; }),
+                                 s.primers.end());
+             }
              return true;
          },
          [&] { return sel; });

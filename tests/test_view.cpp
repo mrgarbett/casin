@@ -370,6 +370,31 @@ int main(int argc, char **argv)
         CHECK(!labelled);
     }
 
+    // A primer across the origin: drawn on the circular map and in the
+    // sequence, dropped by Make Linear (a line has no place for it).
+    {
+        Sequence ring = seq;
+        const int n = ring.length();
+        ring.primers.push_back({"wrap", ring.bases.substr(size_t(n - 12)) + ring.bases.substr(0, 10),
+                                {n - 12, n + 10}, Strand::Forward});
+        MapLayout map(ring, {}, theme, tm, 900, 700);
+        bool labelled = false;
+        for (const Item &it : map.render({}).items)
+            if (auto *t = std::get_if<TextItem>(&it))
+                if (t->text == "wrap")
+                    labelled = true;
+        CHECK(labelled);
+        SequenceLayout sl(ring, {}, theme, tm, 900, true, SeqOptions{});
+        CHECK(!sl.render(0, 400, {}).items.empty());
+        Document d;
+        d.setSequence(ring, "");
+        CHECK(d.sequence().primers.size() == seq.primers.size() + 1);
+        d.setCircular(false);
+        CHECK(d.sequence().primers.size() == seq.primers.size());
+        d.undo();
+        CHECK(d.sequence().primers.size() == seq.primers.size() + 1);
+    }
+
     // The caret after a reverse complement: the same place read from the
     // other end, which on a linear sequence can be the very end.
     {
