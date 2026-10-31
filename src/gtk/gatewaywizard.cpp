@@ -2,6 +2,7 @@
 #include "gatewaywizard.h"
 #include "window.h"
 
+#include "core/edit.h"
 #include "view/maplayout.h"
 
 #include <algorithm>
@@ -157,7 +158,6 @@ void GatewayWizard::templateChanged()
 {
     if (m_closing)
         return;
-    m_insertView.setSequence(withSites(m_insert->sequence()));
     fillVectors();
     refresh();
 }
@@ -264,6 +264,21 @@ GtkWidget *GatewayWizard::buildSidebar()
     adw_preferences_row_set_use_underline(ADW_PREFERENCES_ROW(m_vectorRow), FALSE);
     g_signal_connect_swapped(m_vectorRow, "notify::selected", G_CALLBACK(changed), this);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(group), m_vectorRow);
+    // An insert whose sites face the other way only fits read from its
+    // other strand. It's turned over by itself when that's what it needs;
+    // the switch shows it, and lets the other way be tried by hand.
+    m_flip = adw_switch_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(m_flip), "Flip the insert");
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(m_flip), "Read it from its other strand, so its sites face the vector's");
+    g_signal_connect_swapped(m_flip, "notify::active", G_CALLBACK(+[](gpointer p) {
+                                 auto *self = static_cast<GatewayWizard *>(p);
+                                 if (self->m_filling)
+                                     return;
+                                 self->m_chosenFlip = true;
+                                 self->refresh();
+                             }),
+                             this);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group), m_flip);
     m_alsoByproduct = adw_switch_row_new();
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(m_alsoByproduct), "Also open the byproduct");
     adw_action_row_set_subtitle(ADW_ACTION_ROW(m_alsoByproduct),
@@ -365,18 +380,35 @@ void GatewayWizard::refresh()
 {
     if (m_closing)
         return;
-    const Sequence &insert = m_insert->sequence();
+    const Sequence &original = m_insert->sequence();
     Document *vec = vectorDoc();
     // The reaction is only guessed while it hasn't been picked by hand.
     if (!m_chosenReaction) {
         m_filling = true;
-        adw_combo_row_set_selected(ADW_COMBO_ROW(m_reaction), insert.circular ? 1 : 0);
+        adw_combo_row_set_selected(ADW_COMBO_ROW(m_reaction), original.circular ? 1 : 0);
         m_filling = false;
     }
+    // Likewise the flip: on when the insert only fits the other way round.
+    if (!m_chosenFlip) {
+        GatewayResult probe;
+        const bool flip = vec && gatewayRecombine(original, vec->sequence(), reaction(), &probe) && probe.insertFlipped;
+        m_filling = true;
+        adw_switch_row_set_active(ADW_SWITCH_ROW(m_flip), flip);
+        m_filling = false;
+    }
+    const bool flip = adw_switch_row_get_active(ADW_SWITCH_ROW(m_flip));
+    Sequence flipped;
+    if (flip) {
+        flipped = original;
+        reverseComplementSequence(flipped);
+    }
+    // The insert as it goes in, which is what the Insert view shows.
+    const Sequence &insert = flip ? flipped : original;
+    m_insertView.setSequence(withSites(insert));
     const std::string insertWhat = reaction() == GatewayReaction::BP ? "attB fragment" : "entry clone";
     const std::string vectorWhat = reaction() == GatewayReaction::BP ? "donor vector" : "destination vector";
 
-    std::vector<std::string> found{sitesOf(insert, "This tab (" + insertWhat + ")")};
+    std::vector<std::string> found{sitesOf(insert, "This tab (" + insertWhat + (flip ? ", flipped)" : ")"))};
     if (vec) {
         m_vector.setSequence(withSites(vec->sequence()));
         found.push_back(sitesOf(vec->sequence(), vec->sequence().name + " (" + vectorWhat + ")"));
@@ -388,9 +420,14 @@ void GatewayWizard::refresh()
     m_byproduct = Sequence{};
     m_hasClone = false;
     std::string err;
+    bool wrongWay = false;   // fits, but only with the flip the other way
     if (vec) {
         GatewayResult result;
-        if (gatewayRecombine(insert, vec->sequence(), reaction(), &result, &err)) {
+        const bool ok = gatewayRecombine(insert, vec->sequence(), reaction(), &result, &err);
+        // The core turns a backwards insert over by itself; here the switch
+        // decides, so an insert that only fits the other way is refused.
+        wrongWay = ok && result.insertFlipped;
+        if (ok && !wrongWay) {
             m_clone = result.clone;
             m_byproduct = result.byproduct;
             m_preview.setSequence(m_clone);
@@ -402,7 +439,9 @@ void GatewayWizard::refresh()
                             + "'s backbone");
             if (!m_byproduct.bases.empty())
                 lines.push_back("Byproduct: " + view::withThousands(m_byproduct.length()) + " bp");
-        } else {
+            if (flip)
+                lines.push_back("The insert went in flipped, read from its other strand");
+        } else if (!wrongWay) {
             warn.push_back(capitalised(err.empty() ? "these two don't recombine" : err) + ".");
         }
     }
@@ -413,6 +452,10 @@ void GatewayWizard::refresh()
                    + (reaction() == GatewayReaction::BP ? "entry clone" : "expression clone")
                    + ". See the Clone tab.",
                "object-select-symbolic", "ready");
+    } else if (wrongWay) {
+        setCue(std::string("The insert's sites face the other way. Turn Flip the insert ") + (flip ? "off" : "on")
+                   + " to fit the vector.",
+               "dialog-warning-symbolic", "problem");
     } else if (findAttSites(insert).size() != 2) {
         setCue("This tab needs two att sites of different numbers facing each other. None were found, or too many.",
                "dialog-warning-symbolic", "problem");

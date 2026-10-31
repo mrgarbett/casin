@@ -63,8 +63,9 @@ private:
     bool m_filling = false;
     bool m_closing = false;
     bool m_chosenReaction = false;   // the reaction was picked by hand, so leave it alone
+    bool m_chosenFlip = false;       // the same for Flip the insert
     GtkWidget *m_parent;
-    GtkWidget *m_dialog, *m_reaction, *m_vectorRow, *m_alsoByproduct;
+    GtkWidget *m_dialog, *m_reaction, *m_vectorRow, *m_flip, *m_alsoByproduct;
     GtkWidget *m_cue, *m_cueIcon, *m_cueText;
     GtkWidget *m_sitesGroup, *m_sites, *m_resultGroup, *m_size, *m_info, *m_warnings;
     GtkWidget *m_accept, *m_stack, *m_split;
