@@ -102,7 +102,7 @@ private:
     GtkWidget *m_parent, *m_dialog, *m_agarose, *m_comb, *m_laneList, *m_add, *m_remove, *m_left, *m_right;
     GtkWidget *m_laneGroup, *m_sequence, *m_enzymeEntry, *m_enzymeMenu, *m_chips, *m_enzymeNote;
     GtkWidget *m_fragmentGroup, *m_fragmentList, *m_stain, *m_run, *m_runLabel, *m_copy;
-    GtkWidget *m_stage, *m_lookTabs[2] = {nullptr, nullptr}, *m_tune = nullptr;
+    GtkWidget *m_stage, *m_lookTabs[2] = {nullptr, nullptr}, *m_tune = nullptr, *m_done = nullptr;
 };
 
 } // namespace oc::gtk

@@ -140,7 +140,9 @@ GelWizard::GelWizard(Document *templ, GtkWidget *parent, const std::string &name
                                  GtkWidget *focus = root ? gtk_root_get_focus(root) : nullptr;
                                  if (focus && (focus == self->m_enzymeEntry
                                                || gtk_widget_is_ancestor(focus, self->m_enzymeEntry))) {
-                                     gtk_widget_grab_focus(self->m_laneList);
+                                     // To the Done button: focusing the lane list scrolled
+                                     // the sidebar to the selected lane, under the pointer.
+                                     gtk_widget_grab_focus(self->m_done);
                                      return;
                                  }
                                  self->close();
@@ -297,7 +299,7 @@ GtkWidget *GelWizard::buildView()
     GtkWidget *header = adw_header_bar_new();
     adw_header_bar_set_show_end_title_buttons(ADW_HEADER_BAR(header), FALSE);
     adw_header_bar_set_show_start_title_buttons(ADW_HEADER_BAR(header), FALSE);
-    GtkWidget *done = gtk_button_new_with_label("Done");
+    GtkWidget *done = m_done = gtk_button_new_with_label("Done");
     gtk_widget_add_css_class(done, "suggested-action");
     g_signal_connect_swapped(done, "clicked", G_CALLBACK(+[](gpointer p) {
                                  static_cast<GelWizard *>(p)->close();
@@ -682,6 +684,13 @@ void GelWizard::fillSidebar()
     gtk_widget_set_sensitive(m_remove, m_lanes.size() > 1);
     gtk_widget_set_sensitive(m_left, m_selected > 0);
     gtk_widget_set_sensitive(m_right, m_selected < int(m_lanes.size()) - 1);
+    // A button that just went grey drops the focus, and with nothing in the
+    // dialog focused Esc (and Enter for Done) no longer reach it.
+    if (GtkRoot *root = gtk_widget_get_root(m_dialog)) {
+        GtkWidget *focus = gtk_root_get_focus(root);
+        if (!focus || !gtk_widget_is_ancestor(focus, m_dialog))
+            gtk_widget_grab_focus(m_done);
+    }
 
     // The selected lane: what's loaded, and a sample's enzymes.
     const Lane &lane = m_lanes[size_t(m_selected)];
