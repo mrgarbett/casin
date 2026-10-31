@@ -148,9 +148,17 @@ GelWizard::GelWizard(Document *templ, GtkWidget *parent, const std::string &name
                              this);
     g_signal_connect_swapped(m_dialog, "destroy", G_CALLBACK(+[](gpointer p) {
                                  auto *self = static_cast<GelWizard *>(p);
+                                 // The dialog's children are disposed after this, and their
+                                 // signals (a list emptied, a menu dropped) must not reach
+                                 // what's about to be deleted.
+                                 self->m_closing = true;
+                                 disconnectTree(self->m_dialog, self);
                                  if (self->onClosed)
                                      self->onClosed();
-                                 delete self;
+                                 // Deleted once the dialog is fully gone: a child's
+                                 // last signal still finds a live object that does
+                                 // nothing.
+                                 g_idle_add_once([](gpointer q) { delete static_cast<GelWizard *>(q); }, self);
                              }),
                              this);
     refresh();
@@ -183,6 +191,8 @@ void GelWizard::close()
 
 void GelWizard::templateChanged()
 {
+    if (m_closing)
+        return;
     refresh();
 }
 
@@ -514,6 +524,8 @@ std::vector<std::string> GelWizard::laneNames() const
 // Rebuilds the gel from the lanes, running the ones that changed.
 void GelWizard::refresh()
 {
+    if (m_closing)
+        return;
     // Lanes follow their sequences while those are open.
     for (Lane &lane : m_lanes)
         if (Document *d = lane.isSample() ? live(lane) : nullptr)
@@ -751,6 +763,8 @@ void GelWizard::fillSidebar()
 
 void GelWizard::selectLane(int lane)
 {
+    if (m_closing)
+        return;
     if (lane < 0 || lane >= int(m_lanes.size()) || lane == m_selected)
         return;
     m_selected = lane;
@@ -762,6 +776,8 @@ void GelWizard::selectLane(int lane)
 // Selects fragment `index` of `lane` in its sequence's tab.
 void GelWizard::pickFragment(int lane, int index)
 {
+    if (m_closing)
+        return;
     if (lane < 0 || lane >= int(m_lanes.size()) || size_t(lane) >= m_fragments.size() || index < 0
         || size_t(index) >= m_fragments[size_t(lane)].size())
         return;
@@ -772,6 +788,8 @@ void GelWizard::pickFragment(int lane, int index)
 
 void GelWizard::addLane()
 {
+    if (m_closing)
+        return;
     const int teeth = gelCombs()[size_t(std::clamp(g_comb, 0, int(gelCombs().size()) - 1))].teeth;
     if (int(m_lanes.size()) >= teeth)
         return;
@@ -798,6 +816,8 @@ void GelWizard::addLane()
 
 void GelWizard::removeLane()
 {
+    if (m_closing)
+        return;
     if (m_lanes.size() <= 1)
         return;
     m_lanes.erase(m_lanes.begin() + m_selected);
@@ -809,6 +829,8 @@ void GelWizard::removeLane()
 // Swaps the lane with its neighbour; both run again where they now are.
 void GelWizard::moveLane(int step)
 {
+    if (m_closing)
+        return;
     const int to = m_selected + step;
     if (to < 0 || to >= int(m_lanes.size()))
         return;
@@ -819,6 +841,8 @@ void GelWizard::moveLane(int step)
 
 void GelWizard::addEnzyme(const std::string &typed)
 {
+    if (m_closing)
+        return;
     Lane &lane = m_lanes[size_t(m_selected)];
     if (!lane.isSample())
         return;
@@ -859,6 +883,8 @@ void GelWizard::addEnzyme(const std::string &typed)
 
 void GelWizard::removeEnzyme(const std::string &name)
 {
+    if (m_closing)
+        return;
     std::vector<std::string> &e = m_lanes[size_t(m_selected)].enzymes;
     e.erase(std::remove(e.begin(), e.end(), name), e.end());
     refresh();
@@ -867,6 +893,8 @@ void GelWizard::removeEnzyme(const std::string &name)
 // The row picked a sequence, or a ladder, for the lane.
 void GelWizard::sequenceChosen()
 {
+    if (m_closing)
+        return;
     const guint i = adw_combo_row_get_selected(ADW_COMBO_ROW(m_sequence));
     Lane &lane = m_lanes[size_t(m_selected)];
     if (i == GTK_INVALID_LIST_POSITION)
@@ -909,6 +937,8 @@ void GelWizard::sequenceChosen()
 
 void GelWizard::runChanged()
 {
+    if (m_closing)
+        return;
     const double level = gtk_range_get_value(GTK_RANGE(m_run));
     m_gel->setRunLevel(level);
     show3D();
@@ -934,6 +964,8 @@ void GelWizard::fillStains()
 
 void GelWizard::stainChanged()
 {
+    if (m_closing)
+        return;
     if (m_filling)
         return;
     const guint i = gtk_drop_down_get_selected(GTK_DROP_DOWN(m_stain));
@@ -953,6 +985,8 @@ void GelWizard::stainChanged()
 // light box, to turn around, in the chosen scene.
 void GelWizard::lookChanged(int look)
 {
+    if (m_closing)
+        return;
     if (look == m_look)
         return;
     m_look = look;
@@ -1038,6 +1072,8 @@ GtkWidget *GelWizard::buildTuner()
 
 void GelWizard::copyLook()
 {
+    if (m_closing)
+        return;
     std::string text = "3D gel look (" + std::string(gel3DSceneTitle(g_scene3D)) + ")\n";
     for (const Knob &k : kKnobs) {
         char buf[64];
@@ -1050,12 +1086,16 @@ void GelWizard::copyLook()
 // The 3D gel follows the lanes and the run while it's showing.
 void GelWizard::show3D()
 {
+    if (m_closing)
+        return;
     if (m_gel3D && m_look == 1)
         m_gel3D->show(m_gel->lanes(), gtk_range_get_value(GTK_RANGE(m_run)), m_gel->dyeRuns());
 }
 
 void GelWizard::copyImage()
 {
+    if (m_closing)
+        return;
     // What each lane holds, and how the gel was run, under the picture.
     std::vector<std::pair<std::string, std::string>> legend;
     const std::vector<std::string> names = laneNames();

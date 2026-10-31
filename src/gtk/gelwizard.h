@@ -94,6 +94,7 @@ private:
     std::vector<std::vector<Fragment>> m_fragments;
     std::vector<std::string> m_drawnKeys;
     bool m_filling = false;
+    bool m_closing = false;   // the dialog is being destroyed: nothing more to do
     guint m_copiedTimer = 0, m_refreshIdle = 0;
     std::unique_ptr<GelView> m_gel;
     std::unique_ptr<Gel3DView> m_gel3D;   // made the first time the 3D tab opens

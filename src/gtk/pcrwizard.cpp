@@ -86,9 +86,16 @@ PcrWizard::PcrWizard(Document *templ, GtkWidget *parent, const std::string &name
     adw_dialog_set_content_height(ADW_DIALOG(m_dialog), std::max(500, int(h * 0.8)));
     g_signal_connect_swapped(m_dialog, "destroy", G_CALLBACK(+[](gpointer p) {
                                  auto *self = static_cast<PcrWizard *>(p);
+                                 // The dialog's children are disposed after this; their
+                                 // signals must not reach what's about to be deleted.
+                                 self->m_closing = true;
+                                 disconnectTree(self->m_dialog, self);
                                  if (self->onClosed)
                                      self->onClosed();
-                                 delete self;
+                                 // Deleted once the dialog is fully gone: a child's
+                                 // last signal still finds a live object that does
+                                 // nothing.
+                                 g_idle_add_once([](gpointer q) { delete static_cast<PcrWizard *>(q); }, self);
                              }),
                              this);
     fillPrimers();
@@ -112,6 +119,8 @@ void PcrWizard::close()
 
 void PcrWizard::templateChanged()
 {
+    if (m_closing)
+        return;
     m_vector.setSequence(m_template->sequence());
     fillPrimers();
     refresh();
@@ -362,6 +371,8 @@ void PcrWizard::fillPrimers()
 // over with it; shift-click adds it to the one already picked.
 void PcrWizard::pick(int primer, bool adding)
 {
+    if (m_closing)
+        return;
     const auto &primers = m_template->sequence().primers;
     if (primer < 0 || size_t(primer) >= primers.size() || primers[size_t(primer)].binding.length() <= 0) {
         gtk_widget_error_bell(m_dialog);
@@ -384,6 +395,8 @@ void PcrWizard::pick(int primer, bool adding)
 // and picks it.
 void PcrWizard::addTyped()
 {
+    if (m_closing)
+        return;
     const std::string typed = cleanPrimerBases(gtk_editable_get_text(GTK_EDITABLE(m_typed)));
     if (typed.empty()) {
         // Enter in an empty box does what Enter does elsewhere.
@@ -436,6 +449,8 @@ void PcrWizard::setCue(const std::string &text, const char *icon, const char *cs
 // readout and the suggested program.
 void PcrWizard::refresh()
 {
+    if (m_closing)
+        return;
     const Sequence &templ = m_template->sequence();
     const int fi = picked(m_fwd, m_forward), ri = picked(m_rev, m_reverse);
     const Primer *fp = fi >= 0 ? &templ.primers[size_t(fi)] : nullptr;
@@ -579,6 +594,8 @@ void PcrWizard::fillProgram(const PcrProgram &program)
 
 void PcrWizard::openProduct()
 {
+    if (m_closing)
+        return;
     if (!m_hasProduct) {
         gtk_widget_error_bell(m_dialog);
         return;

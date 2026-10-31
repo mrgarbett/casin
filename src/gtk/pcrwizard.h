@@ -57,6 +57,7 @@ private:
     std::vector<int> m_forward, m_reverse;   // the primer behind each row entry, after "Choose"
     bool m_hasProduct = false;
     bool m_filling = false;
+    bool m_closing = false;   // the dialog is being destroyed: nothing more to do
     bool m_filled = false;
     std::string m_markdown;   // what Copy puts on the clipboard
     GtkWidget *m_parent;

@@ -2645,6 +2645,13 @@ void showOpenDialog(GtkApplication *app, GtkWindow *parent)
     g_object_unref(dialog);
 }
 
+void disconnectTree(GtkWidget *root, gpointer data)
+{
+    g_signal_handlers_disconnect_by_data(root, data);
+    for (GtkWidget *c = gtk_widget_get_first_child(root); c; c = gtk_widget_get_next_sibling(c))
+        disconnectTree(c, data);
+}
+
 void showWholeNames(AdwComboRow *row)
 {
     GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
