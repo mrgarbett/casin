@@ -4,6 +4,7 @@
 #include "restricto.h"
 
 #include <stdio.h>
+#include <limits.h>
 #include <string.h>
 
 static int failures = 0, checks = 0;
@@ -278,6 +279,30 @@ int main(int argc, char **argv)
     CHECK(oc_document_add_primer_at(copy, "bad", tailed, NULL, NULL, &bad) == -1);
     CHECK(oc_primer_sites(doc, "", sites, 4) == 0);
     oc_document_free(copy);
+
+    /* A wild site (off the sequence, or so big that start + length overflows)
+       is refused everywhere, before any arithmetic on it. */
+    {
+        const OCPrimerSite wild[] = {{-1, 22, OC_STRAND_FORWARD, 0},
+                                     {oc_document_length(doc), 22, OC_STRAND_FORWARD, 0},
+                                     {5, 0, OC_STRAND_FORWARD, 0},
+                                     {5, -3, OC_STRAND_FORWARD, 0},
+                                     {INT_MAX - 5, 22, OC_STRAND_FORWARD, 0},
+                                     {5, INT_MAX, OC_STRAND_FORWARD, 0}};
+        for (size_t w = 0; w < sizeof wild / sizeof wild[0]; ++w) {
+            OCPrimerSite fitted = {1, 1, 0, 0};
+            OCFrameCheck frame;
+            CHECK(oc_document_add_primer_at(doc, "wild", tailed, NULL, NULL, &wild[w]) == -1);
+            CHECK(!oc_document_set_pending_primer(doc, "wild", tailed, NULL, &wild[w]));
+            char *same = oc_primer_fit_tm(doc, tailed, &wild[w], 65, &fitted);
+            CHECK(same && strcmp(same, tailed) == 0 && fitted.length == 0);
+            oc_string_free(same);
+            CHECK(oc_pcr_product_length(doc, &wild[w], 0, &sites[0], 0) == -1);
+            CHECK(oc_pcr_product_length(doc, &sites[0], 0, &wild[w], 0) == -1);
+            oc_primer_part_frame(doc, &wild[w], 6, 0, 3, true, &frame);
+            CHECK(!frame.applies);
+        }
+    }
 
     /* A missing string is an empty one, never a crash. */
     {

@@ -171,6 +171,13 @@ std::set<std::string> typeSet(const char *list)
 } // namespace
 
 namespace {
+// Whether a site from the app lies on the sequence at all: checked before
+// any arithmetic on it, so a wild start or length can't overflow.
+bool siteOnSequence(const OCPrimerSite *s, int n)
+{
+    return s && s->start >= 0 && s->start < n && s->length >= 1 && s->length <= n;
+}
+
 // A site from oc_primer_sites in the core's terms.
 PrimerSite coreSite(const OCPrimerSite &s)
 {
@@ -489,7 +496,7 @@ bool primerAt(const OCDocument *doc, const char *name, const char *bases, const 
 {
     const std::string typed = cleanPrimerBases(bases ? bases : "");
     const int n = doc->doc.sequence().length();
-    if (typed.empty() || !site || site->length <= 0 || site->start < 0 || site->start + site->length > n
+    if (typed.empty() || !siteOnSequence(site, n) || site->start + site->length > n
         || site->length > int(typed.size()))
         return false;
     out->name = name && *name ? name : "primer";
@@ -530,7 +537,7 @@ char *oc_primer_fit_tm(const OCDocument *doc, const char *bases, const OCPrimerS
                        OCPrimerSite *fitted)
 {
     const std::string primer = cleanPrimerBases(bases ? bases : "");
-    if (!site) {
+    if (!siteOnSequence(site, doc->doc.sequence().length())) {
         if (fitted)
             *fitted = {};
         return dupString(primer);
@@ -546,7 +553,8 @@ char *oc_primer_fit_tm(const OCDocument *doc, const char *bases, const OCPrimerS
 int oc_pcr_product_length(const OCDocument *doc, const OCPrimerSite *a, int tail_a, const OCPrimerSite *b,
                           int tail_b)
 {
-    if (!a || !b)
+    const int n = doc->doc.sequence().length();
+    if (!siteOnSequence(a, n) || !siteOnSequence(b, n))
         return -1;
     return pcrProductLength(doc->doc.sequence(), coreSite(*a), tail_a, coreSite(*b), tail_b);
 }
@@ -557,7 +565,7 @@ void oc_primer_part_frame(const OCDocument *doc, const OCPrimerSite *site, int t
     if (!out)
         return;
     *out = {};
-    if (!site)
+    if (!siteOnSequence(site, doc->doc.sequence().length()))
         return;
     const FrameCheck f =
         checkPartFrame(doc->doc.sequence(), coreSite(*site), tail_length, part_start, part_length, part_forward);
