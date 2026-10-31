@@ -354,6 +354,10 @@ typedef struct {
     int step_count;      /* 0 when a primer isn't plain DNA */
     OCPcrStep steps[8];
 } OCPcrProgram;
+/* A primer's Tm as NEB's calculator gives it in `polymerase`'s buffer, in
+   whole degrees (the Tm the PCR wizard, the primer editor and the status
+   line agree on); 0 when `bases` aren't plain DNA or are too short. */
+int oc_polymerase_tm(const char *bases, int polymerase);
 /* anneal1 and anneal2 are the primers' annealing parts (no tails). */
 void oc_pcr_program(const char *anneal1, const char *anneal2, int length, int polymerase, int cycles,
                     OCPcrProgram *out);
