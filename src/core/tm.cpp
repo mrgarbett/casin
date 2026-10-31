@@ -81,11 +81,14 @@ double polymeraseTmExact(const std::string &raw, Polymerase p)
     const double nan = std::numeric_limits<double>::quiet_NaN();
     if (n < 2)
         return nan;
+    // Every base must be one of the four before any pair is looked up (the
+    // pair at i reads base i + 1, which hasn't been checked yet).
+    for (char c : s)
+        if (idx(c) < 0)
+            return nan;
     double dH = 0, dS = 0;
     int gc = 0;
     for (int i = 0; i < n; ++i) {
-        if (idx(s[size_t(i)]) < 0)
-            return nan;
         gc += s[size_t(i)] == 'G' || s[size_t(i)] == 'C';
         if (i + 1 < n) {
             const NN &nn = kTable[idx(s[size_t(i)])][idx(s[size_t(i) + 1])];

@@ -531,6 +531,10 @@ static void testPcrProgram()
     CHECK_EQ(polymeraseTm(a, Polymerase::Taq), 64);
     CHECK_EQ(polymeraseTm("acgn", Polymerase::Q5), INT_MIN);
     CHECK_EQ(polymeraseTm("A", Polymerase::Q5), INT_MIN);
+    // A stray base anywhere (even second, where the first pair reads it
+    // before it's checked) gives no Tm, and reads nothing out of the table.
+    CHECK_EQ(polymeraseTm("AN", Polymerase::Q5), INT_MIN);
+    CHECK_EQ(polymeraseTm("ACGTRACGT", Polymerase::Taq), INT_MIN);
 
     // Q5: the lower Tm + 1, at most 72; at 72 it anneals and extends in one step.
     PcrProgram q5 = pcrProgram(a, b, 2500, Polymerase::Q5);
