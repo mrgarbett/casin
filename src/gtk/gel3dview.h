@@ -23,8 +23,8 @@ struct Gel3DLook {
     float stain = 1.0f;       // the free stain's glow, as a multiple
     float band = 1.0f;        // the DNA's glow, as a multiple
     float scatter = 18.0f;    // how much the gel scatters, per metre
-    float lamp = 7.0f;        // the spotlight's brightness
-    float lampSize = 0.09f;   // the spotlight's size, m
+    float lamp = 4.5f;        // the spotlight's brightness
+    float lampSize = 0.05f;   // the spotlight's size, m
     float spot = 0.35f;       // the spotlight's cone, radians (half angle)
     float bloom = 0.25f;      // the bright parts' halo
     float vignette = 0.6f;    // how dark the corners go
