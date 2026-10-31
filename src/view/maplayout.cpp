@@ -225,6 +225,10 @@ std::vector<std::vector<Span>> MapLayout::featureBlocks() const
             blocks.back().length += blocks.front().length;
             blocks.erase(blocks.begin());
         }
+        // A site between two bases (GenBank's 5^6) has no length: it's drawn
+        // as a tick where it lies.
+        if (blocks.empty() && !f.ranges.empty())
+            blocks.push_back({f.ranges.front().start, 0});
         out.push_back(blocks);
     }
     return out;
@@ -700,7 +704,7 @@ void MapLayout::layoutLinear(TextMeasurer &tm)
     // Features in lanes below the ticks.
     std::vector<int> order;
     for (size_t i = 0; i < m_seq.features.size(); ++i)
-        if (shows(m_seq.features[i]) && m_seq.features[i].totalLength() > 0)
+        if (shows(m_seq.features[i]) && !m_seq.features[i].ranges.empty())
             order.push_back(int(i));
     std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
         return m_seq.features[size_t(a)].span(m_n, false).length > m_seq.features[size_t(b)].span(m_n, false).length;

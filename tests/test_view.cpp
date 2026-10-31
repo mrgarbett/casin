@@ -349,7 +349,8 @@ int main(int argc, char **argv)
 
     // A file can put a feature before base 1, or give it no length at all:
     // the sequence and the linear map draw the rest without going out of
-    // bounds, and a feature with no length gets no label.
+    // bounds, and a feature with no length (a site between two bases) is
+    // drawn as a tick, with its name.
     {
         Sequence odd = seq;
         odd.circular = false;
@@ -357,6 +358,7 @@ int main(int argc, char **argv)
         early.ranges = {{-500, 20}};
         Feature nothing = odd.features.front();
         nothing.name = "nothing-here";
+        nothing.type = "misc_feature";   // (the front feature is the undrawn source)
         nothing.ranges = {{40, 40}};
         odd.features = {early, nothing};
         SequenceLayout sl(odd, {}, theme, tm, 900, true, SeqOptions{});
@@ -367,7 +369,15 @@ int main(int argc, char **argv)
             if (auto *t = std::get_if<TextItem>(&it))
                 if (t->text.find("nothing-here") != std::string::npos)
                     labelled = true;
-        CHECK(!labelled);
+        CHECK(labelled);
+        // The tick: a filled shape under the label.
+        bool tick = false;
+        for (const Item &it : lin.render({}).items)
+            if (auto *pth = std::get_if<PathItem>(&it))
+                if (pth->closed && pth->fill.a > 0 && pth->points.size() >= 4
+                    && pth->points[1].x - pth->points[0].x <= 2.5 && pth->points[0].x > 0)
+                    tick = true;
+        CHECK(tick);
     }
 
     // A primer across the origin: drawn on the circular map and in the
