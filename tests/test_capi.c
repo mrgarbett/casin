@@ -341,9 +341,11 @@ int main(int argc, char **argv)
     CHECK(prog.step_count == 0);
 
     /* Gateway: an attB product into a donor, then that entry clone into a
-     * destination. The cores are the 15 bp att1 and att2 share. */
+     * destination. The cores are the 15 bp att1 and att2 share; att2 is
+     * written as it reads on the top strand, which is the other way round
+     * from att1, so the two sites face each other. */
     {
-        const char *core1 = "TTTGTACAAAAAAGC", *core2 = "TTTGTACAAGAAAGC";
+        const char *core1 = "TTTGTACAAAAAAGC", *core2 = "GCTTTCTTGTACAAA";
         char insertBases[512], donorBases[512], destBases[512];
         snprintf(insertBases, sizeof insertBases, "ACAAG%sAGGCTATGCCCCCCCCCCCCTAAACCAC%sTGGGT", core1, core2);
         snprintf(donorBases, sizeof donorBases, "AAAAAAAAAAAAAAAAAAAA%sGGGGGGGGGGGGGGG%sTTTTTTTTTTTTTTTTTTTT",
