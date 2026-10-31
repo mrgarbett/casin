@@ -2569,6 +2569,9 @@ void openFiles(GtkApplication *app, const std::vector<std::string> &paths, Windo
     Window *busy = activeShell ? activeShell->current() : nullptr;
     if (busy && !busy->hasTools())
         busy = nullptr;
+    // The files that couldn't open: one alert for all of them at the end.
+    std::vector<std::pair<std::string, std::string>> failed;
+    Window *failedOn = nullptr;
     for (const std::string &path : paths) {
         // A file that's already open: go to its tab rather than open it twice.
         const std::string want = canonical(path);
@@ -2593,7 +2596,8 @@ void openFiles(GtkApplication *app, const std::vector<std::string> &paths, Windo
         std::string error;
         if (!target->load(path, &error)) {
             target->present();
-            target->showError("Could not open " + baseName(path), withSandboxHint(path, error));
+            failed.push_back({baseName(path), withSandboxHint(path, error)});
+            failedOn = target;
             continue;
         }
         if (busy) {
@@ -2603,6 +2607,14 @@ void openFiles(GtkApplication *app, const std::vector<std::string> &paths, Windo
             target->present();
         }
         preferred = nullptr;
+    }
+    if (failed.size() == 1) {
+        failedOn->showError("Could not open " + failed[0].first, failed[0].second);
+    } else if (!failed.empty()) {
+        std::string body;
+        for (const auto &[name, why] : failed)
+            body += (body.empty() ? "" : "\n") + name + ": " + why;
+        failedOn->showError("Could not open " + std::to_string(failed.size()) + " files", body);
     }
 }
 
