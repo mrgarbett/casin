@@ -292,7 +292,7 @@ GelView::Geometry GelView::geometry(double w, double h) const
     const double ax = 24, ay = 24, aw = std::max(100.0, w - 48), ah = std::max(120.0, h - ay - m_bottomInset);
     // Lanes grow to fill the pane (a few lanes make a wide gel, not a narrow
     // strip), with the gaps and the size labels growing with them.
-    const double n = double(std::max<size_t>({1, m_lanes.size(), size_t(m_comb.teeth)}));
+    const double n = double(std::max<size_t>(1, m_lanes.size()));
     const double unit = (aw - 60) / (n * 1.25 + 0.25);
     const double laneW = std::clamp(unit, 26.0, 120.0);
     const double scale = std::max(1.0, laneW / 64);
@@ -325,11 +325,12 @@ void GelView::render(cairo_t *cr, double w, double h, bool forPicture) const
     const Geometry g = geometry(w, h);
     drawSlab(cr, g);
 
-    // Every well the comb cast, the empty ones too: dark inside, the far wall
-    // shaded, a lit lip below.
+    // A well for each lane (the picture is cropped to the lanes loaded, so
+    // the gel sits in the middle): dark inside, the far wall shaded, a lit
+    // lip below.
     const double wellH = (5 + 3 * m_comb.thickness) * std::min(1.5, g.scale);
     const double wellY = g.slabY + 14 * g.scale;
-    for (int i = 0; i < std::max(int(m_lanes.size()), m_comb.teeth); ++i) {
+    for (int i = 0; i < std::max<int>(1, int(m_lanes.size())); ++i) {
         const double x = g.laneX(i) + 2, ww = g.laneW - 4;
         roundedRect(cr, x, wellY, ww, wellH, 1.5);
         cairo_set_source_rgba(cr, 0, 0, 0, 0.75);
