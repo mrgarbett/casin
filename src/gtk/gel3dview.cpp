@@ -822,7 +822,7 @@ Gel3DView::Camera Gel3DView::camera() const
     // Tilted towards straight down, the camera stands further back: from
     // above the whole gel has to fit, with room under it for the pill.
     const float fitTop = kDepth * 0.5f * 1.55f / std::tan(17.5f * float(M_PI) / 180);
-    const float above = std::clamp((m_pitch - kHomePitch) / (float(M_PI_2) - kHomePitch), 0.0f, 1.0f);
+    const float above = std::clamp((m_pitch - kTiltPitch) / (float(M_PI_2) - kTiltPitch), 0.0f, 1.0f);
     c.distance = (m_fit + (std::max(fitTop, m_fit) - m_fit) * above) * m_zoom;
     const Vec3 target = Vec3{0, kThick / 2, 0.004f} + m_pan;
     c.position = target + Vec3{c.distance * std::sin(m_yaw) * std::cos(m_pitch), c.distance * std::sin(m_pitch),

@@ -39,8 +39,9 @@ struct Gel3DLook {
 // lamp, and the picture is what a camera would see. Each frame adds a sample
 // per pixel; the picture converges while the gel is still, then the GPU
 // rests. While it's being turned it traces at half resolution, so it keeps
-// up on a laptop's integrated GPU. Drag to orbit, scroll to come closer,
-// double-click to go back. View only: the sidebar does the editing.
+// up on a laptop's integrated GPU. It opens straight down, as the imager
+// shows it; drag to tilt and orbit, scroll to come closer, double-click to
+// go back. View only: the sidebar does the editing.
 class Gel3DView {
 public:
     Gel3DView();
@@ -102,7 +103,9 @@ private:
     uint32_t maxSamples() const;
     bool m_moving = false;   // being turned or zoomed: trace coarsely
 
-    static constexpr float kHomePitch = 0.80f;
+    // It opens straight down, the imager's view; dragging tilts it, and
+    // from kTiltPitch down the camera comes closer.
+    static constexpr float kHomePitch = 1.5707964f, kTiltPitch = 0.80f;
     float m_yaw = 0, m_pitch = kHomePitch, m_zoom = 1, m_fit = 0.2f;
     Vec3 m_pan = {0, 0, 0};   // where the camera looks, off the gel's middle
     double m_dragX = 0, m_dragY = 0;
