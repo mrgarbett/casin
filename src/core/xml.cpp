@@ -81,7 +81,8 @@ std::string decodeEntities(const std::string &s)
             unsigned long cp = (ent.size() > 1 && (ent[1] == 'x' || ent[1] == 'X'))
                                    ? std::strtoul(ent.c_str() + 2, nullptr, 16)
                                    : std::strtoul(ent.c_str() + 1, nullptr, 10);
-            appendUtf8(out, cp);
+            if (cp > 0)   // "&#;" would be a NUL byte in a name
+                appendUtf8(out, cp);
         } else {
             out.append(s, i, semi - i + 1);   // unknown entity: keep literally
         }

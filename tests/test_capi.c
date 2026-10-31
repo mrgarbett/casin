@@ -4,6 +4,7 @@
 #include "restricto.h"
 
 #include <stdio.h>
+#include <limits.h>
 #include <string.h>
 
 static int failures = 0, checks = 0;
@@ -56,12 +57,16 @@ int main(int argc, char **argv)
     oc_document_set_max_cuts(doc, 1);
     oc_document_set_enzyme_hidden(doc, "EcoRI", true);
     CHECK(oc_document_visible_site_count(doc) == unique - 1);
+    bool sawEcoRI = false;
     for (int i = 0; i < oc_document_enzyme_count(doc); ++i) {
         OCEnzymeInfo e;
         oc_document_enzyme(doc, i, &e);
-        if (strcmp(e.name, "EcoRI") == 0)
+        if (strcmp(e.name, "EcoRI") == 0) {
+            sawEcoRI = true;
             CHECK(e.hidden && e.cuts == 1);
+        }
     }
+    CHECK(sawEcoRI);
 
     /* Find on both strands. */
     int count = 0;
@@ -274,10 +279,62 @@ int main(int argc, char **argv)
     CHECK(oc_document_primer_count(doc) == ci);   /* the original is untouched */
     oc_document_undo(copy);
     CHECK(oc_document_primer_count(copy) == ci);
-    OCPrimerSite bad = {oc_document_length(doc) - 5, 22, OC_STRAND_FORWARD, 0};
+    /* A site across the origin is a site on a circle; past the end of a linear sequence it isn't. */
+    OCPrimerSite wrap = {oc_document_length(doc) - 5, 22, OC_STRAND_FORWARD, 0};
+    const int wi = oc_document_add_primer_at(copy, "wrap", tailed, NULL, NULL, &wrap);
+    CHECK(wi >= 0 && oc_document_primer(copy, wi, &pinf) && pinf.start == oc_document_length(doc) - 5
+          && pinf.length == 22);
+    oc_document_set_circular(copy, false);
+    CHECK(oc_document_primer_count(copy) == wi);   /* a linear sequence can't hold it */
+    CHECK(oc_document_add_primer_at(copy, "bad", tailed, NULL, NULL, &wrap) == -1);
+    OCPrimerSite bad = {oc_document_length(doc), 22, OC_STRAND_FORWARD, 0};
     CHECK(oc_document_add_primer_at(copy, "bad", tailed, NULL, NULL, &bad) == -1);
     CHECK(oc_primer_sites(doc, "", sites, 4) == 0);
     oc_document_free(copy);
+
+    /* A wild site (off the sequence, or so big that start + length overflows)
+       is refused everywhere, before any arithmetic on it. */
+    {
+        const OCPrimerSite wild[] = {{-1, 22, OC_STRAND_FORWARD, 0},
+                                     {oc_document_length(doc), 22, OC_STRAND_FORWARD, 0},
+                                     {5, 0, OC_STRAND_FORWARD, 0},
+                                     {5, -3, OC_STRAND_FORWARD, 0},
+                                     {INT_MAX - 5, 22, OC_STRAND_FORWARD, 0},
+                                     {5, INT_MAX, OC_STRAND_FORWARD, 0}};
+        for (size_t w = 0; w < sizeof wild / sizeof wild[0]; ++w) {
+            OCPrimerSite fitted = {1, 1, 0, 0};
+            OCFrameCheck frame;
+            CHECK(oc_document_add_primer_at(doc, "wild", tailed, NULL, NULL, &wild[w]) == -1);
+            CHECK(!oc_document_set_pending_primer(doc, "wild", tailed, NULL, &wild[w]));
+            char *same = oc_primer_fit_tm(doc, tailed, &wild[w], 65, &fitted);
+            CHECK(same && strcmp(same, tailed) == 0 && fitted.length == 0);
+            oc_string_free(same);
+            CHECK(oc_pcr_product_length(doc, &wild[w], 0, &sites[0], 0) == -1);
+            CHECK(oc_pcr_product_length(doc, &sites[0], 0, &wild[w], 0) == -1);
+            oc_primer_part_frame(doc, &wild[w], 6, 0, 3, true, &frame);
+            CHECK(!frame.applies);
+        }
+    }
+
+    /* A missing string is an empty one, never a crash. */
+    {
+        char *err = NULL;
+        OCDocument *blank = oc_document_new();
+        CHECK(!oc_document_load(blank, NULL, &err) && err);
+        oc_string_free(err);
+        err = NULL;
+        CHECK(!oc_document_save(doc, NULL, OC_FORMAT_GENBANK, &err) && err);
+        oc_string_free(err);
+        oc_document_set_enzyme_hidden(doc, NULL, true);
+        oc_document_show_enzyme_set(doc, NULL, 3);
+        oc_document_show_only_enzymes(doc, NULL, 3, 6);
+        CHECK(!oc_document_new_sequence(blank, NULL, NULL, false));
+        oc_document_find_next(doc, NULL, NULL);
+        oc_document_rename(doc, NULL);
+        CHECK(oc_document_add_primer_sequence(doc, NULL, NULL, &err) == -1 && err);
+        oc_string_free(err);
+        oc_document_free(blank);
+    }
 
     /* Fitting to a Tm keeps the tail and the 3' end; a primer can't pair with itself. */
     {
@@ -289,7 +346,7 @@ int main(int argc, char **argv)
         CHECK(oc_pcr_product_length(doc, &sites[0], 0, &sites[0], 0) == -1);
         OCFrameCheck frame;
         oc_primer_part_frame(doc, &sites[0], 6, 0, 3, true, &frame);
-        CHECK(!frame.applies || frame.cds[0] != '\0');
+        CHECK(frame.applies && frame.cds[0] != '\0');   /* a CDS meets this primer's junction */
     }
 
     /* A pending primer is drawn but isn't part of the document. */
