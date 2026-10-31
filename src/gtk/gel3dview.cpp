@@ -87,6 +87,9 @@ void main() {
 const char *const kCommon = R"(#version 330 core
 struct Uniforms {
     vec4 camPos, camF, camR, camU, sigma, lens, slab, emitter, look, plate, stain, band, lip;
+    // contrast, the spotlight's brightness, size and cone; bloom, vignette,
+    // the free stain's and the DNA's glow as multiples.
+    vec4 tune0, tune1;
     uvec4 counts;
 };
 uniform Uniforms u;
@@ -152,6 +155,21 @@ float dust(vec2 p, float share) {
     return mix(0.45, 1.0, smoothstep(r * 0.3, r, length(p - c)));
 }
 
+// One spotlight, high up behind the gel, aimed at it: what it throws on a
+// matte surface at x facing n (a cone with a soft edge, falling off with
+// distance), and how it looks head on.
+const vec3 LAMP = vec3(0.03, 0.55, -0.30);
+const vec3 LAMP_COLOUR = vec3(1.0, 0.94, 0.86);
+vec3 spot(vec3 x, vec3 n) {
+    vec3 axis = normalize(vec3(0.0, 0.0, 0.0) - LAMP);
+    vec3 to = x - LAMP;
+    float dist2 = dot(to, to);
+    vec3 dir = to * inversesqrt(dist2);
+    float cone = smoothstep(cos(u.tune0.w), cos(u.tune0.w * 0.55), dot(dir, axis));
+    float lambert = max(0.0, -dot(dir, n));
+    return LAMP_COLOUR * (u.tune0.y * 0.035 * cone * lambert / max(dist2, 0.05));
+}
+
 // The plate: a diffuser lit from below, brightest under the gel, mottled,
 // dusty, dark beyond its edges.
 vec3 plate(vec2 q) {
@@ -165,7 +183,11 @@ vec3 plate(vec2 q) {
         float past = max(max(abs(q.x) - halfX, q.y - front), zmin - q.y);
         float bevel = smoothstep(0.004, 0.0, past);
         float frame = smoothstep(0.03, 0.018, past);
-        return dark + frame * (vec3(0.012) * (0.8 + 0.4 * vnoise(q * 300.0)) + u.plate.xyz * u.emitter.w * 0.05 * bevel);
+        // Beyond the frame, the bench; both matte, lit by the spotlight.
+        vec3 lit = spot(vec3(q.x, 0.0, q.y), vec3(0.0, 1.0, 0.0));
+        vec3 bench = (1.0 - frame) * lit * vec3(0.30, 0.27, 0.24) * (0.9 + 0.2 * vnoise(q * 200.0));
+        return dark + bench + frame * ((vec3(0.012) + lit * 0.06) * (0.8 + 0.4 * vnoise(q * 300.0))
+                                       + u.plate.xyz * u.emitter.w * 0.05 * bevel);
     }
     vec2 rel = (q - vec2(0.0, -0.3 * front)) / vec2(halfX, front);
     float fall = mix(1.0, 0.06, smoothstep(0.12, 1.1, length(rel)));
@@ -177,16 +199,25 @@ vec3 plate(vec2 q) {
     return mix(dark, lit * fall * mott * blot * speck * grain, edge);
 }
 
-// The dim room above, with one small lamp high up behind the gel.
+// The room: dark, with the spotlight itself where a ray meets it, a wall
+// behind the gel lit by it, and the bench the light box stands on.
 vec3 room(vec3 p, vec3 d) {
     vec3 dark = vec3(0.002, 0.001, 0.006);
-    if (d.y <= 0.0001) return dark;
-    float t = (0.55 - p.y) / d.y;
-    vec3 h = p + d * t;
-    // A small lamp with a soft edge, as a shaded bulb or a window looks in a glossy surface.
-    float lx = smoothstep(0.0, 0.035, 0.045 - abs(h.x - 0.03));
-    float lz = smoothstep(0.0, 0.035, 0.045 - abs(h.z + 0.30));
-    return dark + vec3(7.0, 6.6, 6.0) * lx * lz;
+    if (d.y > 0.0001) {
+        float t = (LAMP.y - p.y) / d.y;
+        vec3 h = p + d * t;
+        // A round lamp, soft towards its rim, so its reflection in the wet
+        // top is one soft blob however the surface undulates.
+        float r = length(h.xz - LAMP.xz) / u.tune0.z;
+        if (r < 1.0) return dark + LAMP_COLOUR * u.tune0.y * smoothstep(1.0, 0.25, r);
+    }
+    if (d.z < -0.0001) {
+        // The wall behind, 60 cm back: a matte grey the spotlight washes.
+        float t = (-0.6 - p.z) / d.z;
+        vec3 w = p + d * t;
+        if (w.y > -0.2) return dark + spot(w, vec3(0.0, 0.0, 1.0)) * vec3(0.32, 0.30, 0.28);
+    }
+    return dark;
 }
 
 // The wet top isn't quite smooth: a fine ripple tilts its reflections.
@@ -195,7 +226,7 @@ vec3 ripple(vec3 x, vec3 n) {
     vec2 q = x.xz * 160.0;
     float dx = vnoise(q + vec2(0.7, 0.0)) - vnoise(q - vec2(0.7, 0.0));
     float dz = vnoise(q + vec2(0.0, 0.7)) - vnoise(q - vec2(0.0, 0.7));
-    return normalize(n + vec3(dx, 0.0, dz) * 0.035);
+    return normalize(n + vec3(dx, 0.0, dz) * 0.02);
 }
 
 // The slab's shape: its top sags a little and climbs the tray's walls in a
@@ -206,7 +237,7 @@ float slabTop(vec2 xz) {
     float well = texture(bands, uv).b;
     float inset = min(hw - abs(xz.x), hd - abs(xz.y));
     float lip = exp(-max(inset, 0.0) / 0.0015) * 0.00055;
-    float sag = (vnoise(xz * 120.0) - 0.5) * 0.00014 + (vnoise(xz * 23.0 + 7.0) - 0.5) * 0.0003;
+    float sag = (vnoise(xz * 120.0) - 0.5) * 0.00007 + (vnoise(xz * 23.0 + 7.0) - 0.5) * 0.00015;
     float cut = smoothstep(0.55, 0.85, well) * u.slab.w * thick;
     return thick + lip + sag - cut;
 }
@@ -302,7 +333,7 @@ void medium(vec3 p, out vec3 emit, out vec3 absorb) {
     float prof = smoothstep(0.0, 0.15, yf) * smoothstep(1.0, 0.85, yf);
     float wall = (m.b > 0.2 && m.b <= 0.8 && yf > 1.0 - u.slab.w) ? 1.0 : 0.0;
     float uneven = 0.72 + 0.36 * vnoise(uv * vec2(9.0, 5.0) + 1.0) + 0.12 * vnoise(uv * vec2(60.0, 33.0));
-    vec3 stain = u.stain.xyz * u.stain.w, band = u.band.xyz * u.band.w;
+    vec3 stain = u.stain.xyz * u.stain.w * u.tune1.z, band = u.band.xyz * u.band.w * u.tune1.w;
     emit = (stain * uneven * (1.0 + 6.0 * wall) + band * m.r * prof) * u.look.z;
     absorb = u.sigma.xyz + vec3(0.6, 0.9, 0.15) * 260.0 * m.g;
 }
@@ -415,8 +446,10 @@ void main() {
         float cost = sqrt(1.0 - sin2t);
         float F = fresnel(cosi, cost, eta);
         vec3 out_ = normalize(eta * d - (eta * cosi - cost) * n);
-        // The bottom face lies on the plate.
-        if (ng.y < -0.5) { L += T * (1.0 - F) * plate(x.xz); T *= F; d = reflect(d, n); p = x - ng * EPS; continue; }
+        // The bottom face lies wet on the glass, near enough index matched:
+        // the plate's light comes through whole and nothing mirrors back
+        // (a second, dimmer lamp off the bottom would read as a stray blob).
+        if (ng.y < -0.5) { L += T * plate(x.xz); break; }
         // Out through the top or a side: what's there is taken outright, and the
         // ray goes on inside with what the face reflected (a small share).
         L += T * (1.0 - F) * outside(x + ng * EPS, out_);
@@ -467,12 +500,12 @@ void main() {
             wsum += w;
         }
     }
-    c = (c + bloom / wsum * 0.25) * u.look.x;
+    c = (c + bloom / wsum * u.tune1.x) * u.look.x;
     vec2 v = uv - 0.5;
-    c *= 1.0 - 0.6 * dot(v, v);
+    c *= 1.0 - u.tune1.y * dot(v, v);
     // Contrast, about mid grey: the plate's dark corners sink and the bands
     // stand out, as a phone's camera would push the picture.
-    c = max(0.18 + (c - 0.18) * 1.5, 0.0);
+    c = max(0.18 + (c - 0.18) * u.tune0.x, 0.0);
     // Shot noise: more where there's more light, none in the black.
     float g = (hashf(gl_FragCoord.xy + vec2(float(u.counts.x % 977u), 0.0)) - 0.5) * u.look.y;
     c += g * 2.5 * sqrt(max(c, vec3(0.0)));
@@ -691,6 +724,12 @@ void Gel3DView::setScene(Gel3DScene scene)
     if (scene == m_scene)
         return;
     m_scene = scene;
+    restart();
+}
+
+void Gel3DView::setLook(const Gel3DLook &look)
+{
+    m_look = look;
     restart();
 }
 
@@ -1060,11 +1099,13 @@ void Gel3DView::render()
         v4("u.camF", f.x, f.y, f.z, 0);
         v4("u.camR", r.x, r.y, r.z, 0);
         v4("u.camU", up.x, up.y, up.z, 0);
-        v4a("u.sigma", look.sigma);
+        v4("u.sigma", look.sigma[0], look.sigma[1], look.sigma[2], m_look.scatter);
         v4("u.lens", std::tan(17.5f * float(M_PI) / 180), float(w) / float(h), 0.0005f, cam.distance);
         v4("u.slab", m_width, kDepth, kThick, 0.7f);
         v4("u.emitter", m_width / 2 + 0.13f, kDepth / 2 + 0.11f, 0.025f, 1.0f);
-        v4("u.look", 0.75f, 0.02f, 14, 0.75f);
+        v4("u.look", m_look.exposure, m_look.grain, 14, 0.75f);
+        v4("u.tune0", m_look.contrast, m_look.lamp, m_look.lampSize, m_look.spot);
+        v4("u.tune1", m_look.bloom, m_look.vignette, m_look.stain, m_look.band);
         v4a("u.plate", look.plate);
         v4a("u.stain", look.stain);
         v4a("u.band", look.band);

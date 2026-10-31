@@ -15,6 +15,22 @@ namespace oc::gtk {
 enum class Gel3DScene { PinkOnBlue, GreenOnBlue, BlackAndWhite };
 const char *gel3DSceneTitle(Gel3DScene scene);
 
+// The knobs of the 3D picture, for tuning the look by eye (the pill's
+// sliders); the defaults are what ships.
+struct Gel3DLook {
+    float exposure = 0.75f;   // how bright the picture is developed
+    float contrast = 1.25f;   // about mid grey; 1 leaves it alone
+    float stain = 1.0f;       // the free stain's glow, as a multiple
+    float band = 1.0f;        // the DNA's glow, as a multiple
+    float scatter = 18.0f;    // how much the gel scatters, per metre
+    float lamp = 7.0f;        // the spotlight's brightness
+    float lampSize = 0.09f;   // the spotlight's size, m
+    float spot = 0.35f;       // the spotlight's cone, radians (half angle)
+    float bloom = 0.25f;      // the bright parts' halo
+    float vignette = 0.6f;    // how dark the corners go
+    float grain = 0.02f;      // the camera's noise
+};
+
 // EXPERIMENTAL: the gel photographed on a blue-light box, path traced on the
 // GPU (a port of the Mac's Metal tracer to OpenGL 3.3 fragment shaders).
 // Nothing is painted to look like a gel: a block of agarose (refracting,
@@ -37,6 +53,8 @@ public:
     void setScene(Gel3DScene scene);
     // The comb that cast the wells; the tray is 7 cm wide whatever it is.
     void setComb(const GelComb &comb);
+    void setLook(const Gel3DLook &look);
+    const Gel3DLook &look() const { return m_look; }
     // Why there's no picture, if there isn't one.
     const std::string &problem() const { return m_problem; }
 
@@ -93,6 +111,7 @@ private:
     double m_runLevel = 1;
     std::vector<double> m_dyeRuns;
     Gel3DScene m_scene = Gel3DScene::PinkOnBlue;
+    Gel3DLook m_look;
     GelComb m_comb;
     float m_width = 0.1f;
     static constexpr float kDepth = 0.10f, kThick = 0.006f;
