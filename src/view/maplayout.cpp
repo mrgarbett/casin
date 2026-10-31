@@ -522,7 +522,8 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
         g.color = m_theme.text;
         g.swatch = Color::parse(pr.color, m_theme.primer);
         g.priority = -1;
-        g.angle = angleOfPos((pr.binding.start + pr.binding.end) / 2.0);
+        // The middle of a primer across the origin lies past the end.
+        g.angle = angleOfPos(std::fmod((pr.binding.start + pr.binding.end) / 2.0, double(m_n)));
         g.anchorR = m_featureOuter + 10;
         g.rect = {0, 0, tm.width(g.text, g.font) + 12, tm.height(g.font)};
         m_labels.push_back(g);
