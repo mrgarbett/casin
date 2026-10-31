@@ -664,10 +664,19 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
 
     @objc private func accept(_ sender: Any?) {
         guard var s = site else { NSSound.beep(); return }
+        let description = descriptionField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The site was found by the same core that adds the primer, so this
+        // only fails on a site it can't yet take (one crossing the origin);
+        // then the editor stays open with a word, rather than closing on a
+        // primer that was never added.
+        if oc_document_add_primer_at(document.handle, primerName, bases, hexColor, description, &s) < 0 {
+            warnings.stringValue = "This primer couldn't be added where it binds."
+            warnings.isHidden = false
+            NSSound.beep()
+            return
+        }
         finished = true
         oc_document_clear_pending_primer(document.handle)
-        let description = descriptionField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        oc_document_add_primer_at(document.handle, primerName, bases, hexColor, description, &s)
         document.select(start: Int(s.start), length: Int(s.length))
         close()
     }
