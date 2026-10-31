@@ -202,7 +202,12 @@ std::string featuresXml(const Sequence &seq)
         for (size_t i = 0; i < f.ranges.size(); ++i) {
             const Range &r = f.ranges[i];
             int a = r.start + 1, b = r.end;
-            if (seq.circular && r.end == n && i + 1 < f.ranges.size() && f.ranges[i + 1].start == 0)
+            // SnapGene's ranges are inclusive, so a site between two bases
+            // (a = b + 1, which it would read as the whole circle) becomes
+            // the base after it.
+            if (r.length() == 0)
+                b = a = std::min(a, n);
+            else if (seq.circular && r.end == n && i + 1 < f.ranges.size() && f.ranges[i + 1].start == 0)
                 b = f.ranges[++i].end;
             x += "<Segment range=\"" + std::to_string(a) + "-" + std::to_string(b) + "\"";
             if (!f.color.empty())

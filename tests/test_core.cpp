@@ -949,6 +949,22 @@ static void testEditingAcrossOrigin()
     CHECK_EQ(total, 23);
 }
 
+// A site between two bases (GenBank 5^6) has no SnapGene range: it's
+// written as the base after it, not as a range that wraps the whole circle.
+static void testSnapGeneSite()
+{
+    Sequence s;
+    s.circular = true;
+    s.bases = std::string(100, 'A');
+    s.features = {feat("cut", {{5, 5}}), feat("end", {{100, 100}})};
+    Sequence r;
+    std::string err;
+    CHECK(readSnapGene(writeSnapGene(s), &r, &err));
+    CHECK_EQ(r.features.size(), size_t(2));
+    CHECK(sameRanges(r.features[0].ranges, {{5, 6}}));
+    CHECK(sameRanges(r.features[1].ranges, {{99, 100}}));
+}
+
 static void testSnapGeneWriter()
 {
     Sequence s;
@@ -1734,6 +1750,7 @@ int main(int argc, char **argv)
     testFastaAndIO();
     testEditing();
     testEditingAcrossOrigin();
+    testSnapGeneSite();
     testSnapGeneWriter();
     testDigest();
     testPrimerChecks();
