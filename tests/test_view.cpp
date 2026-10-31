@@ -363,6 +363,20 @@ int main(int argc, char **argv)
         CHECK(!labelled);
     }
 
+    // The caret after a reverse complement: the same place read from the
+    // other end, which on a linear sequence can be the very end.
+    {
+        Sequence lin = seq;
+        lin.circular = false;
+        Document d;
+        d.setSequence(lin, "");
+        d.setSelection({0, 0});
+        d.reverseComplementAll();
+        CHECK(d.selection().start == lin.length() && d.selection().length == 0);
+        d.setSelection({10, 5});
+        d.reverseComplementAll();
+        CHECK(d.selection().start == lin.length() - 15 && d.selection().length == 5);
+    }
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

@@ -446,7 +446,15 @@ void Document::reverseComplementAll()
              reverseComplementSequence(s);
              return !s.empty();
          },
-         [&] { return had ? Span{((n - sel.start - sel.length) % n + n) % n, sel.length} : Span{0, 0}; });
+         [&] {
+             if (!had || n <= 0)
+                 return Span{0, 0};
+             // The same bases, now read the other way; on a circle the end
+             // wraps to the start, on a line the caret at the start lands
+             // at the end.
+             const int start = n - sel.start - sel.length;
+             return Span{m_seq.circular ? (start % n + n) % n : std::clamp(start, 0, n), sel.length};
+         });
 }
 
 void Document::setOriginAtSelection()
