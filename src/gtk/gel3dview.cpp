@@ -170,7 +170,7 @@ vec3 plate(vec2 q) {
     vec2 rel = (q - vec2(0.0, -0.3 * front)) / vec2(halfX, front);
     float fall = mix(1.0, 0.06, smoothstep(0.12, 1.1, length(rel)));
     float mott = 0.80 + 0.40 * vnoise(q * 25.0 + 3.0);
-    float blot = 1.0 - 0.35 * smoothstep(0.55, 0.8, vnoise(q * 60.0 + 9.0));
+    float blot = 1.0 - 0.12 * smoothstep(0.55, 0.8, vnoise(q * 60.0 + 9.0));
     float speck = dust(q * 500.0, 0.06) * dust(q * 1500.0 + 5.0, 0.03);
     float grain = 0.95 + 0.10 * vnoise(q * 900.0);
     vec3 lit = u.plate.xyz * u.emitter.w;
@@ -763,7 +763,11 @@ gboolean Gel3DView::tick(GtkWidget *, GdkFrameClock *, gpointer p)
 Gel3DView::Camera Gel3DView::camera() const
 {
     Camera c;
-    c.distance = m_fit * m_zoom;
+    // Tilted towards straight down, the camera stands further back: from
+    // above the whole gel has to fit, with room under it for the pill.
+    const float fitTop = kDepth * 0.5f * 1.55f / std::tan(17.5f * float(M_PI) / 180);
+    const float above = std::clamp((m_pitch - kHomePitch) / (float(M_PI_2) - kHomePitch), 0.0f, 1.0f);
+    c.distance = (m_fit + (std::max(fitTop, m_fit) - m_fit) * above) * m_zoom;
     const Vec3 target = Vec3{0, kThick / 2, 0.004f} + m_pan;
     c.position = target + Vec3{c.distance * std::sin(m_yaw) * std::cos(m_pitch), c.distance * std::sin(m_pitch),
                                c.distance * std::cos(m_yaw) * std::cos(m_pitch)};
