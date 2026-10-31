@@ -4,6 +4,7 @@
 #include "../core/orf.h"
 
 #include <algorithm>
+#include <clocale>
 #include <cmath>
 #include <map>
 
@@ -40,11 +41,19 @@ std::string tickText(int pos, int step)
 
 } // namespace
 
+// Thousands are grouped the way the user's locale does, so that a German
+// reader sees 1.530 bp beside a GC of 53,5 %, not 1,530 (which reads as
+// 1.53). Without a grouping character, a locale with a decimal comma gets
+// the point and the rest the comma.
 std::string withThousands(int n)
 {
+    const std::lconv *lc = std::localeconv();
+    std::string sep = lc && lc->thousands_sep ? lc->thousands_sep : "";
+    if (sep.empty())
+        sep = (lc && lc->decimal_point && lc->decimal_point[0] == ',') ? "." : ",";
     std::string s = std::to_string(n < 0 ? -n : n);
     for (int i = int(s.size()) - 3; i > 0; i -= 3)
-        s.insert(size_t(i), ",");
+        s.insert(size_t(i), sep);
     return n < 0 ? "-" + s : s;
 }
 
