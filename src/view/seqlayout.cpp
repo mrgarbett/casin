@@ -172,7 +172,9 @@ SequenceLayout::SequenceLayout(const oc::Sequence &seq, const std::vector<CutSit
         for (const Range &r : f.ranges) {
             if (r.length() <= 0)
                 continue;
-            for (int li = r.start / m_bpl; li < int(m_lines.size()) && m_lines[size_t(li)].start < r.end; ++li) {
+            // (A file can put a range before base 1; it starts on line 0.)
+            for (int li = std::max(0, r.start / m_bpl); li < int(m_lines.size()) && m_lines[size_t(li)].start < r.end;
+                 ++li) {
                 const Line &line = m_lines[size_t(li)];
                 const int a = std::max(r.start, line.start) - line.start;
                 const int b = std::min(r.end, line.start + line.len) - line.start;

@@ -339,6 +339,30 @@ int main(int argc, char **argv)
         Scene ts = tl.render(tl.xOfBase(300) - 200, 400, {300, 1});
         CHECK(ts.items.size() > 30 && ts.width == 400);
     }
+
+    // A file can put a feature before base 1, or give it no length at all:
+    // the sequence and the linear map draw the rest without going out of
+    // bounds, and a feature with no length gets no label.
+    {
+        Sequence odd = seq;
+        odd.circular = false;
+        Feature early = odd.features.front();
+        early.ranges = {{-500, 20}};
+        Feature nothing = odd.features.front();
+        nothing.name = "nothing-here";
+        nothing.ranges = {{40, 40}};
+        odd.features = {early, nothing};
+        SequenceLayout sl(odd, {}, theme, tm, 900, true, SeqOptions{});
+        CHECK(!sl.render(0, 400, {}).items.empty());
+        MapLayout lin(odd, {}, theme, tm, 900, 700);
+        bool labelled = false;
+        for (const Item &it : lin.render({}).items)
+            if (auto *t = std::get_if<TextItem>(&it))
+                if (t->text.find("nothing-here") != std::string::npos)
+                    labelled = true;
+        CHECK(!labelled);
+    }
+
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

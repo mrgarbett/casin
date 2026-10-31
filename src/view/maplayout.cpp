@@ -684,7 +684,7 @@ void MapLayout::layoutLinear(TextMeasurer &tm)
     // Features in lanes below the ticks.
     std::vector<int> order;
     for (size_t i = 0; i < m_seq.features.size(); ++i)
-        if (shows(m_seq.features[i]) && !m_seq.features[i].ranges.empty())
+        if (shows(m_seq.features[i]) && m_seq.features[i].totalLength() > 0)
             order.push_back(int(i));
     std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
         return m_seq.features[size_t(a)].span(m_n, false).length > m_seq.features[size_t(b)].span(m_n, false).length;
