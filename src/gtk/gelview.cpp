@@ -174,7 +174,9 @@ const std::vector<GelComb> &gelCombs()
 GelView::GelView()
     : m_comb(gelCombs()[1])
 {
-    m_area = gtk_drawing_area_new();
+    // Held here as well as by the sheet: the wizard is deleted after its
+    // dialog is gone, and the run's tick callback is taken off a live widget.
+    m_area = GTK_WIDGET(g_object_ref_sink(gtk_drawing_area_new()));
     gtk_widget_set_hexpand(m_area, TRUE);
     gtk_widget_set_vexpand(m_area, TRUE);
     gtk_widget_set_size_request(m_area, 380, 360);
@@ -192,6 +194,7 @@ GelView::~GelView()
 {
     if (m_tick)
         gtk_widget_remove_tick_callback(m_area, m_tick);
+    g_object_unref(m_area);
 }
 
 void GelView::setLanes(std::vector<GelLaneModel> lanes, const std::set<int> &running)
