@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "mapview.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace oc::gtk {
@@ -26,9 +27,18 @@ MapView::MapView(Document *doc) : m_doc(doc)
 
     gtk_widget_set_has_tooltip(m_area, TRUE);
     g_signal_connect(m_area, "query-tooltip", G_CALLBACK(&MapView::queryTooltip), this);
+    GtkEventController *move = gtk_event_controller_motion_new();
+    g_signal_connect(move, "motion", G_CALLBACK(&MapView::motion), this);
+    g_signal_connect(move, "leave", G_CALLBACK(&MapView::leave), this);
+    gtk_widget_add_controller(m_area, move);
+    GtkGesture *click = gtk_gesture_click_new();
+    g_signal_connect(click, "pressed", G_CALLBACK(&MapView::pressed), this);
+    gtk_widget_add_controller(m_area, GTK_EVENT_CONTROLLER(click));
 
     m_doc->onSequenceChanged([this] { invalidate(); });
     m_doc->onEnzymesChanged([this] { invalidate(); });
+    // A primer being added draws as if it were on the sequence.
+    m_doc->onPendingChanged([this] { invalidate(); });
     m_doc->onSelectionChanged([this] { gtk_widget_queue_draw(m_area); });
 }
 
@@ -54,15 +64,51 @@ void MapView::setOptions(view::MapOptions options)
     invalidate();
 }
 
+void MapView::setInsets(int trailing, int bottom)
+{
+    if (trailing != m_trailing || bottom != m_bottom) {
+        m_trailing = trailing;
+        m_bottom = bottom;
+        invalidate();
+    }
+}
+
+void MapView::setZoom(double zoom)
+{
+    if (zoom != m_zoom) {
+        m_zoom = zoom;
+        invalidate();
+    }
+}
+
+namespace {
+const double kMinRadius = 0.85;   // of the circle at 100 %, when zoomed in
+} // namespace
+
 void MapView::ensureLayout(int w, int h)
 {
+    w = std::max(160, w - m_trailing);
+    h = std::max(160, h - m_bottom);
     if (m_layout && w == m_w && h == m_h)
         return;
     m_w = w;
     m_h = h;
-    m_layout = std::make_unique<view::MapLayout>(m_doc->sequence(), m_doc->visibleSites(),
+    // Zoom makes the text bigger, as far as the circle keeps most of its
+    // size: the bigger labels need more room beside it, so in a narrow view
+    // the text grows less.
+    view::MapOptions options = m_options;
+    auto layout = [&](double scale) {
+        options.textScale = scale;
+        return std::make_unique<view::MapLayout>(m_doc->displaySequence(), m_doc->visibleSites(),
                                                  m_dark ? view::Theme::darkTheme() : view::Theme::light(),
-                                                 m_measure, w, h, m_options);
+                                                 m_measure, w, h, options);
+    };
+    m_layout = layout(m_zoom);
+    if (m_zoom > 1 && m_layout->isCircular()) {
+        const double radius = layout(1)->radius() * kMinRadius;
+        for (double scale = m_zoom - 0.1; m_layout->radius() < radius - 1; scale -= 0.1)
+            m_layout = layout(std::max(1.0, scale));
+    }
 }
 
 void MapView::draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer p)
@@ -74,10 +120,17 @@ void MapView::draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer p)
     st.selection = self->m_doc->selection();
     st.activeFeature = self->m_doc->activeFeature();
     st.activeSite = self->m_doc->activeSite();
-    view::drawScene(cr, self->m_layout->render(st));
+    const view::Scene scene = self->m_layout->render(st);
+    if (!scene.background.isNone()) {
+        // Under the floating capsules too, so they float over the map.
+        const view::Color &c = scene.background;
+        cairo_set_source_rgba(cr, c.r, c.g, c.b, c.a);
+        cairo_paint(cr);
+    }
+    view::drawScene(cr, scene);
 }
 
-void MapView::dragBegin(GtkGestureDrag *, double x, double y, gpointer p)
+void MapView::dragBegin(GtkGestureDrag *drag, double x, double y, gpointer p)
 {
     auto *self = static_cast<MapView *>(p);
     if (!self->m_layout || self->m_doc->isEmpty())
@@ -85,7 +138,7 @@ void MapView::dragBegin(GtkGestureDrag *, double x, double y, gpointer p)
     self->m_x0 = x;
     self->m_y0 = y;
     self->m_selecting = false;
-    const view::MapHit hit = self->m_layout->hitTest({x, y});
+    const view::MapHit hit = self->m_layout->hitTest(view::Point{x, y});
     switch (hit.kind) {
     case view::MapHit::Feature:
         self->m_doc->activateFeature(hit.index);
@@ -93,11 +146,17 @@ void MapView::dragBegin(GtkGestureDrag *, double x, double y, gpointer p)
     case view::MapHit::Site:
         self->m_doc->activateSite(hit.index);
         break;
-    case view::MapHit::Primer:   // as before primers were hit-tested: start a selection
+    case view::MapHit::Primer:
+        if (self->onPickPrimer) {
+            const GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(drag));
+            self->onPickPrimer(hit.index, state & GDK_SHIFT_MASK);
+            break;
+        }
+        [[fallthrough]];   // elsewhere a primer starts a selection, as other bases do
     case view::MapHit::Sequence:
         self->m_selecting = true;
         self->m_anchor = hit.position;
-        self->m_lastAngle = self->m_layout->angleAt({x, y});
+        self->m_lastAngle = self->m_layout->angleAt(view::Point{x, y});
         self->m_accum = 0;
         self->m_doc->setSelection({hit.position, 0});
         break;
@@ -111,7 +170,7 @@ void MapView::dragUpdate(GtkGestureDrag *, double dx, double dy, gpointer p)
     auto *self = static_cast<MapView *>(p);
     if (!self->m_selecting || !self->m_layout)
         return;
-    const view::Point pt{self->m_x0 + dx, self->m_y0 + dy};
+    const view::Point pt = view::Point{self->m_x0 + dx, self->m_y0 + dy};
     const int n = self->m_doc->sequence().length();
     if (self->m_layout->isCircular()) {
         // Accumulate the swept angle so a drag can pass the origin either way.
@@ -132,11 +191,47 @@ void MapView::dragUpdate(GtkGestureDrag *, double dx, double dy, gpointer p)
         const int pos = self->m_layout->positionAt(pt);
         self->m_doc->setSelection({std::min(pos, self->m_anchor), std::abs(pos - self->m_anchor)});
     }
+    if (self->onSelectDrag)
+        self->onSelectDrag(self->m_x0 + dx, self->m_y0 + dy);
 }
 
 void MapView::dragEnd(GtkGestureDrag *, double, double, gpointer p)
 {
-    static_cast<MapView *>(p)->m_selecting = false;
+    auto *self = static_cast<MapView *>(p);
+    if (self->m_selecting && self->onSelectDrag)
+        self->onSelectDrag(-1, -1);
+    self->m_selecting = false;
+}
+
+void MapView::motion(GtkEventControllerMotion *, double x, double y, gpointer p)
+{
+    auto *self = static_cast<MapView *>(p);
+    if (!self->m_layout || self->m_doc->isEmpty())
+        return;
+    const view::MapHit hit = self->m_layout->hitTest(view::Point{x, y});
+    if (self->onPickPrimer)   // primers can be clicked here
+        gtk_widget_set_cursor_from_name(self->m_area, hit.kind == view::MapHit::Primer ? "pointer" : nullptr);
+    if (!self->onHoverBase)
+        return;
+    const int n = self->m_doc->sequence().length();
+    self->onHoverBase(hit.kind == view::MapHit::Sequence && n > 0 ? std::min(hit.position, n - 1) : -1);
+}
+
+void MapView::leave(GtkEventControllerMotion *, gpointer p)
+{
+    auto *self = static_cast<MapView *>(p);
+    if (self->onHoverBase)
+        self->onHoverBase(-1);
+}
+
+void MapView::pressed(GtkGestureClick *, int n, double x, double y, gpointer p)
+{
+    auto *self = static_cast<MapView *>(p);
+    if (n != 2 || !self->m_layout || !self->onEditFeature)
+        return;
+    const view::MapHit hit = self->m_layout->hitTest(view::Point{x, y});
+    if (hit.kind == view::MapHit::Feature)
+        self->onEditFeature(hit.index);
 }
 
 gboolean MapView::queryTooltip(GtkWidget *, int x, int y, gboolean, GtkTooltip *tip, gpointer p)
@@ -144,7 +239,7 @@ gboolean MapView::queryTooltip(GtkWidget *, int x, int y, gboolean, GtkTooltip *
     auto *self = static_cast<MapView *>(p);
     if (!self->m_layout)
         return FALSE;
-    const std::string text = self->m_layout->tooltipAt({double(x), double(y)});
+    const std::string text = self->m_layout->tooltipAt(view::Point{double(x), double(y)});
     if (text.empty())
         return FALSE;
     gtk_tooltip_set_text(tip, text.c_str());

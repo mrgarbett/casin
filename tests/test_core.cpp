@@ -19,6 +19,7 @@
 #include "core/snapgene.h"
 #include "core/pcrprogram.h"
 #include "core/tm.h"
+#include "core/xml.h"
 
 #include <algorithm>
 #include <climits>
@@ -147,6 +148,12 @@ static void testLocations()
              std::string("complement(join(10..20,30..40))"));
     CHECK_EQ(formatLocation({{4, 5}}, Strand::Forward, 100, false), std::string("5"));
     CHECK_EQ(formatLocation({{5, 5}}, Strand::Forward, 100, false), std::string("5^6"));
+    // A site at the origin of a circle (either end) is n^1, which reads
+    // back; on a linear sequence a site before base 1 becomes base 1.
+    CHECK_EQ(formatLocation({{0, 0}}, Strand::Forward, 100, true), std::string("100^1"));
+    CHECK_EQ(formatLocation({{100, 100}}, Strand::Forward, 100, true), std::string("100^1"));
+    CHECK(parseLocation("100^1", 100, true).ok);
+    CHECK_EQ(formatLocation({{0, 0}}, Strand::Forward, 100, false), std::string("1"));
     // Formatting then parsing gives the same ranges back.
     l = parseLocation(formatLocation({{89, 100}, {0, 10}}, Strand::Forward, 100, true), 100, true);
     CHECK(sameRanges(l.ranges, {{89, 100}, {0, 10}}));
@@ -220,6 +227,99 @@ static void testGenBankRoundTrip()
     s.features.pop_back();
     CHECK(readGenBank(writeGenBank(s), &r));
     CHECK(!r.circular);
+}
+
+// Primers are saved as primer_bind entries whose note holds the primer, and
+// read back as primers. Plain primer_bind features stay features.
+static void testGenBankPrimers(const char *samples)
+{
+    Sequence s;
+    s.name = "pPrim";
+    s.circular = true;
+    for (int i = 0; i < 25; ++i)
+        s.bases += "ATGAAACCCGGGTTTAAAGGATCCTAG";
+    const int n = s.length();
+    Feature site;
+    site.type = "primer_bind";
+    site.name = "fwd site";
+    site.strand = Strand::Forward;
+    site.ranges = {{27, 45}};
+    s.features = {site};
+    // A 6 nt lowercase 5' tail; a reverse primer; one long enough to wrap;
+    // one ending at the origin.
+    s.primers = {{"tailed fwd", "gaattc" + s.bases.substr(27, 18), {27, 45}, Strand::Forward},
+                 {"rev", reverseComplement(s.bases.substr(100, 20)), {100, 120}, Strand::Reverse},
+                 {"long", std::string(50, 'C') + s.bases.substr(200, 25), {200, 225}, Strand::Forward},
+                 {"at end", s.bases.substr(size_t(n - 15)), {n - 15, n}, Strand::Forward}};
+
+    const std::string text = writeGenBank(s);
+    size_t lineStart = 0, longest = 0;
+    for (size_t i = 0; i <= text.size(); ++i)
+        if (i == text.size() || text[i] == '\n') {
+            longest = std::max(longest, i - lineStart);
+            lineStart = i + 1;
+        }
+    CHECK(longest <= 80);
+    CHECK(text.find("complement(101..120)") != std::string::npos);
+
+    for (const std::string &file : {text, writeEmbl(s)}) {
+        Sequence r;
+        std::string err;
+        CHECK(readGenBank(file, &r, &err) || readEmbl(file, &r, &err));
+        CHECK_EQ(r.features.size(), size_t(1));
+        CHECK(!r.features.empty() && r.features[0].name == "fwd site" && r.features[0].type == "primer_bind");
+        CHECK_EQ(r.primers.size(), s.primers.size());
+        if (r.primers.size() != s.primers.size())
+            continue;
+        for (size_t i = 0; i < s.primers.size(); ++i) {
+            CHECK_EQ(r.primers[i].name, s.primers[i].name);
+            CHECK_EQ(r.primers[i].bases, s.primers[i].bases);
+            CHECK(r.primers[i].binding == s.primers[i].binding);
+            CHECK(r.primers[i].strand == s.primers[i].strand);
+        }
+        // The tail is what lies beyond the binding site.
+        CHECK_EQ(int(r.primers[0].bases.size()) - r.primers[0].binding.length(), 6);
+        CHECK_EQ(r.primers[0].bases.substr(0, 6), std::string("gaattc"));
+        // Saving again gives the same file.
+        Sequence again;
+        CHECK(readGenBank(writeGenBank(r), &again));
+        CHECK_EQ(again.primers.size(), s.primers.size());
+        CHECK_EQ(again.features.size(), size_t(1));
+    }
+
+    // SnapGene-style notes read too; a note without bases leaves a feature.
+    const std::string other = "LOCUS       x 30 bp DNA linear\nFEATURES             Location/Qualifiers\n"
+                              "     primer_bind     complement(11..30)\n"
+                              "                     /label=\"P2\"\n"
+                              "                     /note=\"color: black; sequence: ACGTACGTACGTACGTACGT\"\n"
+                              "     primer_bind     1..10\n"
+                              "                     /note=\"sequence: none here\"\n"
+                              "ORIGIN\n        1 acgtacgtac gtacgtacgt acgtacgtac\n//\n";
+    Sequence r;
+    CHECK(readGenBank(other, &r));
+    CHECK_EQ(r.primers.size(), size_t(1));
+    CHECK_EQ(r.features.size(), size_t(1));
+    if (!r.primers.empty()) {
+        CHECK_EQ(r.primers[0].name, std::string("P2"));
+        CHECK_EQ(r.primers[0].bases, std::string("ACGTACGTACGTACGTACGT"));
+        CHECK(r.primers[0].binding == (Range{10, 30}));
+        CHECK(r.primers[0].strand == Strand::Reverse);
+    }
+
+    // pOC-demo.dna: 2 primers and 11 features, the same after GenBank.
+    if (!samples)
+        return;
+    Sequence dna, gb;
+    CHECK(loadSequenceFile(std::string(samples) + "/pOC-demo.dna", &dna));
+    CHECK(readGenBank(writeGenBank(dna), &gb));
+    CHECK_EQ(gb.primers.size(), size_t(2));
+    CHECK_EQ(gb.features.size(), dna.features.size());
+    for (size_t i = 0; i < std::min(gb.primers.size(), dna.primers.size()); ++i) {
+        CHECK_EQ(gb.primers[i].name, dna.primers[i].name);
+        CHECK_EQ(gb.primers[i].bases, dna.primers[i].bases);
+        CHECK(gb.primers[i].binding == dna.primers[i].binding);
+        CHECK(gb.primers[i].strand == dna.primers[i].strand);
+    }
 }
 
 // ---- .dna built byte by byte ------------------------------------------------
@@ -426,6 +526,34 @@ static void testTm()
     CHECK(sc > 0 && sc < 60);
 }
 
+static void testXmlEntities()
+{
+    CHECK_EQ(xml::decodeEntities("a &amp; b &#65;&#x42;"), std::string("a & b AB"));
+    // An empty character reference isn't a NUL byte.
+    CHECK_EQ(xml::decodeEntities("x&#;y&#x;z"), std::string("xyz"));
+}
+
+// A damaged file is refused rather than opened as a shorter sequence with
+// its features past the end.
+static void testDamagedFiles()
+{
+    const std::string good = "LOCUS       x 30 bp DNA circular\nFEATURES             Location/Qualifiers\n"
+                             "     misc_feature    21..30\n"
+                             "ORIGIN\n        1 acgtacgtac gtacgtacgt acgtacgtac\n//\n";
+    Sequence r;
+    std::string err;
+    CHECK(readGenBank(good, &r, &err));
+    // Cut short in the bases: the LOCUS line still says 30 bp.
+    CHECK(!readGenBank(good.substr(0, good.size() - 15), &r, &err) && err.find("30 bp") != std::string::npos);
+    // Cut before ORIGIN, or no ORIGIN at all.
+    CHECK(!readGenBank(good.substr(0, good.find("ORIGIN")), &r, &err) && err.find("ORIGIN") != std::string::npos);
+    // A LOCUS line without a length doesn't complain about one.
+    CHECK(readGenBank("LOCUS x\nORIGIN\n 1 acgt\n//\n", &r, &err) && r.length() == 4);
+    // A FASTA that's only a header.
+    CHECK(!readFasta(">name only\n", &r, &err) && !err.empty());
+    CHECK(!readFasta("", &r, &err));
+}
+
 // Tm and annealing temperatures in each polymerase's buffer, as NEB's Tm
 // calculator gives them. The first pair is the example the independent
 // polymerase-tm project checks against NEB's tool (Q5: 72 and 75, Ta 72).
@@ -438,6 +566,10 @@ static void testPcrProgram()
     CHECK_EQ(polymeraseTm(a, Polymerase::Taq), 64);
     CHECK_EQ(polymeraseTm("acgn", Polymerase::Q5), INT_MIN);
     CHECK_EQ(polymeraseTm("A", Polymerase::Q5), INT_MIN);
+    // A stray base anywhere (even second, where the first pair reads it
+    // before it's checked) gives no Tm, and reads nothing out of the table.
+    CHECK_EQ(polymeraseTm("AN", Polymerase::Q5), INT_MIN);
+    CHECK_EQ(polymeraseTm("ACGTRACGT", Polymerase::Taq), INT_MIN);
 
     // Q5: the lower Tm + 1, at most 72; at 72 it anneals and extends in one step.
     PcrProgram q5 = pcrProgram(a, b, 2500, Polymerase::Q5);
@@ -813,6 +945,53 @@ static void testEditing()
     g.features[0].strand = Strand::Reverse;          // reverse: the 5' end is on the right
     frag = extractFragment(g, {0, 17});              // one base off the right
     CHECK_EQ(frag.features[0].qualifier("codon_start"), std::string("3"));
+}
+
+// Typing or pasting over a selection that runs across the origin of a
+// circle: the feature across it grows by what went in, whichever side of
+// the origin the new bases are counted on.
+static void testEditingAcrossOrigin()
+{
+    Sequence s;
+    s.circular = true;
+    s.bases = std::string(50, 'A') + std::string(50, 'C');   // 100
+    s.features = {feat("wrap", {{90, 100}, {0, 10}})};
+    Sequence t = s;
+    insertBases(t, 100, "GGG");   // at the end, which is the origin
+    CHECK(sameRanges(t.features[0].ranges, {{90, 103}, {0, 10}}));
+    t = s;
+    insertBases(t, 0, "GGG");
+    CHECK(sameRanges(t.features[0].ranges, {{93, 103}, {0, 13}}));   // the tail shifts along
+    t = s;
+    replaceBases(t, {95, 10}, "TTTTTTTTTT");   // five bases each side of the origin
+    CHECK_EQ(t.bases.size(), size_t(100));
+    CHECK_EQ(t.features.size(), size_t(1));
+    int total = 0;
+    for (const Range &r : t.features[0].ranges)
+        total += r.length();
+    CHECK_EQ(total, 20);
+    t = s;
+    replaceBases(t, {100, 0}, "GGG");   // the cursor at the very end
+    total = 0;
+    for (const Range &r : t.features[0].ranges)
+        total += r.length();
+    CHECK_EQ(total, 23);
+}
+
+// A site between two bases (GenBank 5^6) has no SnapGene range: it's
+// written as the base after it, not as a range that wraps the whole circle.
+static void testSnapGeneSite()
+{
+    Sequence s;
+    s.circular = true;
+    s.bases = std::string(100, 'A');
+    s.features = {feat("cut", {{5, 5}}), feat("end", {{100, 100}})};
+    Sequence r;
+    std::string err;
+    CHECK(readSnapGene(writeSnapGene(s), &r, &err));
+    CHECK_EQ(r.features.size(), size_t(2));
+    CHECK(sameRanges(r.features[0].ranges, {{5, 6}}));
+    CHECK(sameRanges(r.features[1].ranges, {{99, 100}}));
 }
 
 static void testSnapGeneWriter()
@@ -1245,6 +1424,10 @@ static void testPrimerHelpers()
     s.bases = "GCGTTGCATGCCTAGGATCCGTAACGGCATCAAGTCGACTTCAGCGTAGCATGAAACCCGGGTTTTAGTTGACCGGTACCATGCAAGCTTGCAGCAGGTCAG"
               "CATCGATCGGCTAGCTAGGCGCGCCATCGATGGTACCTTAGCAGTCAAGGCTTACGATCGTTGCAACGTAGGCATCGGATACGTTAGCCAATGCATGCAA";
     const int n = s.length();
+    // A primer shorter than the three 3' bases the search matches first
+    // finds nothing (and reads nothing before the strand).
+    CHECK(findPrimerSites(s, "AC", 2, 1).empty());
+    CHECK(findPrimerSites(s, "GCG", 0, 1).size() >= 1);
     Feature cds = feat("gene", {{60, 180}});
     cds.type = "CDS";
     cds.strand = Strand::Forward;
@@ -1269,6 +1452,13 @@ static void testPrimerHelpers()
     CHECK(revHot.size() > rev.size() && fitted.binding.start == 160 && fitted.strand == Strand::Reverse);
     CHECK_EQ(revHot, reverseComplement(s.bases.substr(160, size_t(fitted.binding.length()))));
     CHECK_EQ(fitAnnealingToTm(s, fwd, f, meltingTemperature(fwd), &fitted), fwd);   // already there
+    // In Q5's buffer: the fitted part comes closest to the target as NEB works the Tm out.
+    auto q5 = [](const std::string &b) { return polymeraseTmExact(b, Polymerase::Q5); };
+    const double q5Tm20 = q5(fwd);
+    const std::string q5Hot = fitAnnealingToTm(s, fwd, f, q5Tm20 + 6, &fitted, q5);
+    CHECK(q5Hot.size() > fwd.size() && fitted.binding.end == 80);
+    for (int len = 15; len <= 40 && 80 - len >= 0; ++len)
+        CHECK(std::fabs(q5(q5Hot) - (q5Tm20 + 6)) <= std::fabs(q5(s.bases.substr(size_t(80 - len), size_t(len))) - (q5Tm20 + 6)) + 1e-9);
 
     // Product: from the forward primer's 5' end to the reverse one's, tails included.
     CHECK_EQ(pcrProductLength(s, f, 0, r, 0), 120);
@@ -1317,6 +1507,7 @@ static void testMutagenesis()
     // Substitute AAA (Lys) at 53..56 with GCG (Ala).
     MutagenesisDesign d;
     std::string err;
+    CHECK(!designMutagenesis(s, {60, -5}, "GCG", 60, &d, &err));   // an inside-out selection
     CHECK(designMutagenesis(s, {53, 3}, "GCG", 60, &d, &err));
     CHECK_EQ(d.mutant.length(), n);
     CHECK_EQ(d.mutant.bases.substr(50, 9), std::string("ATGGCGCCC"));
@@ -1580,17 +1771,116 @@ static void testCommonFeatures()
     CHECK(found.size() == 1 && found[0].name == "T7 promoter");
 }
 
+// Primers that bind across the origin of a circle: their site runs past the end.
+static void testPrimersAcrossOrigin()
+{
+    Sequence s;
+    s.name = "ring";
+    s.circular = true;
+    s.bases = "GCGTTGCATGCCTAGGATCCGTAACGGCATCAAGTCGACTTCAGCGTAGCATGAAACCCGGGTTTTAGTTGACCGGTACCATGCAAGCTTGCAGCAGGTCAG"
+              "CATCGATCGGCTAGCTAGGCGCGCCATCGATGGTACCTTAGCAGTCAAGGCTTACGATCGTTGCAACGTAGGCATCGGATACGTTAGCCAATGCATGCAA";
+    const int n = s.length();
+    // 12 bases before the origin and 10 after, on each strand.
+    const std::string across = s.bases.substr(size_t(n - 12)) + s.bases.substr(0, 10);
+    std::vector<PrimerSite> f = findPrimerSites(s, across);
+    CHECK(!f.empty() && f[0].strand == Strand::Forward && f[0].binding == (Range{n - 12, n + 10}));
+    std::vector<PrimerSite> r = findPrimerSites(s, reverseComplement(across));
+    CHECK(!r.empty() && r[0].strand == Strand::Reverse && r[0].binding == (Range{n - 12, n + 10}));
+    // Found once, whole: not again cut short at either end.
+    int forwardSites = 0;
+    for (const PrimerSite &x : f)
+        forwardSites += x.strand == Strand::Forward && x.mismatches == 0;
+    CHECK_EQ(forwardSites, 1);
+    // A linear sequence has no such site.
+    Sequence line = s;
+    line.circular = false;
+    for (const PrimerSite &x : findPrimerSites(line, across))
+        CHECK(x.binding.end <= n);
+
+    // Fitting grows the 5' end on across the origin, and back.
+    PrimerSite fitted;
+    const std::string inside = s.bases.substr(0, 20);
+    const std::string grown = fitAnnealingToTm(s, inside, {{0, 20}, Strand::Forward, 0}, meltingTemperature(inside) + 8,
+                                               &fitted);
+    CHECK(grown.size() > 20 && fitted.binding.end == n + 20 && fitted.binding.start < n);
+    CHECK_EQ(grown, s.slice(fitted.binding.start, fitted.binding.length()));
+
+    // PCR from a forward primer at 100 to a reverse one across the origin.
+    Primer fwd{"fwd", s.bases.substr(100, 20), {100, 120}, Strand::Forward};
+    Primer rev{"rev", reverseComplement(across), {n - 12, n + 10}, Strand::Reverse};
+    CHECK_EQ(pcrProductLength(s, {fwd.binding, Strand::Forward, 0}, 0, {rev.binding, Strand::Reverse, 0}, 0),
+             n - 100 + 10);
+    Sequence product;
+    CHECK(pcrProduct(s, fwd, rev, &product));
+    CHECK_EQ(product.bases, s.slice(100, n - 100 + 10));
+    // And from a forward primer across the origin to a reverse one at 60.
+    Primer fwd2{"fwd2", across, {n - 12, n + 10}, Strand::Forward};
+    Primer rev2{"rev2", reverseComplement(s.bases.substr(40, 20)), {40, 60}, Strand::Reverse};
+    CHECK(pcrProduct(s, fwd2, rev2, &product));
+    CHECK_EQ(product.bases, s.slice(n - 12, 72));
+
+    // Edits keep the site: bases added or taken away elsewhere, the strands
+    // swapped, the origin moved.
+    Sequence e = s;
+    e.primers = {rev};
+    insertBases(e, 50, "AAAA");
+    CHECK(e.primers.size() == 1 && e.primers[0].binding == (Range{n - 8, n + 14}));
+    CHECK_EQ(reverseComplement(e.primers[0].bases), e.slice(e.primers[0].binding.start, 22));
+    deleteBases(e, {50, 4});
+    CHECK(e.primers.size() == 1 && e.primers[0].binding == rev.binding);
+    insertBases(e, 5, "T");   // inside the part after the origin
+    CHECK(e.primers.empty());
+    e = s;
+    e.primers = {rev};
+    deleteBases(e, {3, 2});
+    CHECK(e.primers.empty());
+    e = s;
+    e.primers = {rev};
+    reverseComplementSequence(e);
+    CHECK(e.primers.size() == 1 && e.primers[0].binding == (Range{n - 10, n + 12}));
+    CHECK(e.primers[0].strand == Strand::Forward);
+    CHECK_EQ(e.primers[0].bases, e.slice(n - 10, 22));
+    e = s;
+    e.primers = {rev};
+    rotateOrigin(e, 50);
+    CHECK(e.primers.size() == 1 && e.primers[0].binding == (Range{n - 62, n - 40}));
+    rotateOrigin(e, n - 50);
+    CHECK(e.primers.size() == 1 && e.primers[0].binding == rev.binding);
+    // A fragment holding the site whole keeps it.
+    e = s;
+    e.primers = {rev};
+    const Sequence frag = extractFragment(e, {n - 20, 40});
+    CHECK(frag.primers.size() == 1 && frag.primers[0].binding == (Range{8, 30}));
+
+    // Files keep it: GenBank as a join over the origin, SnapGene as a site that wraps.
+    Sequence io = s;
+    io.primers = {fwd2, rev};
+    const std::string gb = writeGenBank(io);
+    CHECK(gb.find("join(" + std::to_string(n - 11) + ".." + std::to_string(n) + ",1..10)") != std::string::npos);
+    Sequence back;
+    CHECK(readGenBank(gb, &back));
+    CHECK(back.primers.size() == 2 && back.primers[0].binding == fwd2.binding
+          && back.primers[1].binding == rev.binding && back.primers[1].strand == Strand::Reverse);
+    CHECK(readSnapGene(writeSnapGene(io), &back));
+    CHECK(back.primers.size() == 2 && back.primers[0].binding == fwd2.binding && back.primers[1].binding == rev.binding);
+}
+
 int main(int argc, char **argv)
 {
     testBasics();
     testLocations();
     testGenBankRoundTrip();
+    testGenBankPrimers(argc > 1 ? argv[1] : nullptr);
     testSnapGene();
     testEnzymes();
     testTm();
+    testXmlEntities();
+    testDamagedFiles();
     testPcrProgram();
     testFastaAndIO();
     testEditing();
+    testEditingAcrossOrigin();
+    testSnapGeneSite();
     testSnapGeneWriter();
     testDigest();
     testPrimerChecks();
@@ -1602,6 +1892,7 @@ int main(int argc, char **argv)
     testInsertionByPcr();
     testPrimerDesign();
     testPrimerHelpers();
+    testPrimersAcrossOrigin();
     testMutagenesis();
     testAlign();
     testOrfs();

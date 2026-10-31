@@ -446,7 +446,15 @@ void Document::reverseComplementAll()
              reverseComplementSequence(s);
              return !s.empty();
          },
-         [&] { return had ? Span{((n - sel.start - sel.length) % n + n) % n, sel.length} : Span{0, 0}; });
+         [&] {
+             if (!had || n <= 0)
+                 return Span{0, 0};
+             // The same bases, now read the other way; on a circle the end
+             // wraps to the start, on a line the caret at the start lands
+             // at the end.
+             const int start = n - sel.start - sel.length;
+             return Span{m_seq.circular ? (start % n + n) % n : std::clamp(start, 0, n), sel.length};
+         });
 }
 
 void Document::setOriginAtSelection()
@@ -471,6 +479,13 @@ void Document::setCircular(bool circular)
     edit(circular ? "Make Circular" : "Make Linear",
          [&](Sequence &s) {
              s.circular = circular;
+             // A primer across the origin has no place on a line.
+             if (!circular) {
+                 const int n = s.length();
+                 s.primers.erase(std::remove_if(s.primers.begin(), s.primers.end(),
+                                                [n](const Primer &p) { return p.binding.end > n; }),
+                                 s.primers.end());
+             }
              return true;
          },
          [&] { return sel; });
@@ -550,13 +565,14 @@ int Document::annotateCommonFeatures()
 
 int Document::addPrimerFromSelection(const std::string &name, Strand strand)
 {
-    if (!m_hasSelection || m_selection.length <= 0 || m_selection.wraps(m_seq.length()))
+    // A selection across the origin of a circle makes a site that runs past the end.
+    if (!m_hasSelection || m_selection.length <= 0 || (m_selection.wraps(m_seq.length()) && !m_seq.circular))
         return -1;
     Primer p;
     p.name = trim(name).empty() ? "Primer " + std::to_string(m_seq.primers.size() + 1) : trim(name);
     p.binding = {m_selection.start, m_selection.end()};
     p.strand = strand == Strand::Reverse ? Strand::Reverse : Strand::Forward;
-    const std::string top = m_seq.bases.substr(size_t(p.binding.start), size_t(p.binding.length()));
+    const std::string top = m_seq.slice(p.binding.start, p.binding.length());
     p.bases = p.strand == Strand::Reverse ? reverseComplement(top) : top;
     const Span sel = m_selection;
     edit("Add Primer",
@@ -604,7 +620,9 @@ std::string Document::statusText(bool withLength) const
     if (!m_hasSelection)
         return s;
     if (m_selection.length == 0) {
-        s += sep + "position " + view::withThousands(m_selection.start);
+        // The caret sits between bases: named by the 1-based base before it.
+        s += sep + (m_selection.start <= 0 ? std::string("before base 1")
+                                           : "after base " + view::withThousands(m_selection.start));
         return s;
     }
     int end = m_selection.end();
@@ -617,10 +635,12 @@ std::string Document::statusText(bool withLength) const
     char buf[64];
     std::snprintf(buf, sizeof buf, "  ·  GC %.1f%%", gcFraction(bases) * 100.0);
     s += buf;
+    // Q5's Tm, as the primer editor and Primers pane show it (one Tm per
+    // sequence, the one the PCR wizard uses). Nearest-neighbour Tm is for oligos.
     if (m_selection.length >= 8 && m_selection.length <= 100) {
-        const double tm = meltingTemperature(bases);
-        if (!std::isnan(tm)) {
-            std::snprintf(buf, sizeof buf, "  ·  Tm %.1f °C", tm);
+        const int tm = polymeraseTm(bases, Polymerase::Q5);
+        if (tm > 0) {
+            std::snprintf(buf, sizeof buf, "  ·  Q5 Tm %d °C", tm);
             s += buf;
         }
     }
