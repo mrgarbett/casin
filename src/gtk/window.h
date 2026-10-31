@@ -74,6 +74,7 @@ private:
     // Asks about unsaved changes before the tab (or, with closeWindow, the
     // window) closes. True when it can close right away.
     bool confirmClose(bool closeWindow);
+    bool askingClose() const { return m_closeAlert != nullptr; }
     // Presents a dialog that belongs to this tab: it closes with the tab,
     // so its OK button can never act on a document that's gone.
     void presentDialog(AdwDialog *dialog);

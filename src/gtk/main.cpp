@@ -174,6 +174,14 @@ void actQuit(GSimpleAction *, GVariant *, gpointer app)
                                       nullptr);
     bool asking = false;
     for (GList *l = windows; l && !asking; l = l->next) {
+        // A window already asking about a tab (Ctrl+Q over its Save/Discard/
+        // Cancel): closing it would only dismiss that alert, so its question
+        // is put to the window's closing instead and the answer carries on.
+        gtk::Shell *shell = gtk::Shell::fromWindow(GTK_WINDOW(l->data));
+        if (shell && shell->askingClose()) {
+            asking = true;
+            break;
+        }
         gtk_window_close(GTK_WINDOW(l->data));
         asking = g_list_find(gtk_application_get_windows(GTK_APPLICATION(app)), l->data) != nullptr;
     }

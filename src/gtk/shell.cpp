@@ -536,6 +536,16 @@ void Shell::onPagesChanged(GObject *, GParamSpec *, gpointer p)
     documentsChanged(self->app());
 }
 
+bool Shell::askingClose()
+{
+    for (Window *w : pages())
+        if (w->askingClose()) {
+            w->confirmClose(true);
+            return true;
+        }
+    return false;
+}
+
 gboolean Shell::onCloseRequest(GtkWindow *, gpointer p)
 {
     auto *self = static_cast<Shell *>(p);

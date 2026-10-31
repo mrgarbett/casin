@@ -1974,7 +1974,11 @@ bool Window::confirmClose(bool closeWindow)
     present();   // show the document being asked about
     if (m_closeAlert) {
         // Already being asked (a second Ctrl+W, or Ctrl+Q over a tab's
-        // question): the one alert stands, so its answer can't be given twice.
+        // question): the one alert stands, so its answer can't be given
+        // twice; it now says what its answer closes.
+        adw_alert_dialog_set_body(ADW_ALERT_DIALOG(m_closeAlert), closeWindow
+                                                                      ? "Unsaved changes are lost when the window closes."
+                                                                      : "Unsaved changes are lost when the tab closes.");
         gtk_widget_grab_focus(GTK_WIDGET(m_closeAlert));
         return false;
     }

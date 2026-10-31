@@ -26,6 +26,9 @@ public:
     GtkApplication *app() const { return gtk_window_get_application(gtkWindow()); }
     Window *current() const;
     std::vector<Window *> pages() const;
+    // A tab's Save/Discard/Cancel is up: it now asks about closing the
+    // window, and its answer carries on with that. False when none is.
+    bool askingClose();
     void addPage(Window *w);
     void selectPage(Window *w);
     // Closes the tab, asking first about unsaved changes.
