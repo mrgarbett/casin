@@ -338,6 +338,13 @@ int main(int argc, char **argv)
         CHECK(tl.baseAt(-50) == 0 && tl.baseAt(1e9) == int(tr.bases.size()) - 1);
         Scene ts = tl.render(tl.xOfBase(300) - 200, 400, {300, 1});
         CHECK(ts.items.size() > 30 && ts.width == 400);
+        // A selection off the ends, and a zero scale, draw without reading
+        // past the peaks or dividing by zero.
+        CHECK(!tl.render(0, 400, {-20, 10}).items.empty());
+        CHECK(!tl.render(0, 400, {-20, 5}).items.empty());
+        CHECK(!tl.render(0, 400, {int(tr.bases.size()) - 2, 50}).items.empty());
+        TraceLayout flat(tr, theme, 190, 0);
+        CHECK(flat.totalWidth() > 0 && !flat.render(0, 400, {0, 0}).items.empty());
     }
 
     // A file can put a feature before base 1, or give it no length at all:
