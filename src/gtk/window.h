@@ -4,6 +4,7 @@
 #include "mapview.h"
 #include "seqview.h"
 #include "primereditor.h"
+#include "gatewaywizard.h"
 #include "gelwizard.h"
 #include "pcrwizard.h"
 #include "core/abif.h"
@@ -42,7 +43,7 @@ public:
     // The file it was opened from or saved to, or empty.
     const std::string &path() const { return m_doc.path(); }
     // A wizard (gel, PCR) is open over this tab.
-    bool hasTools() const { return m_pcr || m_gel; }
+    bool hasTools() const { return m_pcr || m_gel || m_gateway; }
     bool isCurrent() const;
     bool load(const std::string &path, std::string *error);
     // Shows this tab and brings its window to the front.
@@ -140,6 +141,7 @@ private:
     static void actAddPrimer(GSimpleAction *, GVariant *, gpointer self);
     static void actDigest(GSimpleAction *, GVariant *, gpointer self);
     static void actPcr(GSimpleAction *, GVariant *, gpointer self);
+    static void actGateway(GSimpleAction *, GVariant *, gpointer self);
     static void actClone(GSimpleAction *, GVariant *, gpointer self);
     static void actGoldenGate(GSimpleAction *, GVariant *, gpointer self);
     static void actGibson(GSimpleAction *, GVariant *, gpointer self);
@@ -198,6 +200,7 @@ private:
     void featureDialog(int index);
     void openGelWizard();
     void openPcrWizard();
+    void openGatewayWizard();
     void cloningDialog();
     void goldenGateDialog();
     void gibsonDialog();
@@ -273,6 +276,7 @@ private:
     guint m_endPrimerIdle = 0;
     PcrWizard *m_pcr = nullptr;   // owns itself; closes with this tab
     GelWizard *m_gel = nullptr;   // the same
+    GatewayWizard *m_gateway = nullptr;   // the same
     std::vector<AdwDialog *> m_dialogs;   // the tab's open dialogs, closed with it
     AdwDialog *m_closeAlert = nullptr;    // the Save/Discard/Cancel being asked
     bool m_closeConfirmed = false;

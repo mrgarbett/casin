@@ -26,6 +26,7 @@ add_library(restricto_core STATIC
     src/core/digest.cpp
     src/core/primercheck.cpp
     src/core/cloning.cpp
+    src/core/gateway.cpp
     src/core/abif.cpp
     src/core/align.cpp
     src/core/orf.cpp

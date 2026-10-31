@@ -17,6 +17,39 @@ They were copied from the test data of the pydna project, because this build
 environment can't reach NCBI directly; the LOCUS, ACCESSION and VERSION lines
 and the lengths match the records above.
 
+## Gateway att sites
+
+Recombination crosses inside the core every att site of one number shares, so
+`src/core/gateway.cpp` holds one 15 bp core per number rather than whole att
+sites. Every core is written in the same 5'->3' sense, so they all share their first
+six bases. The two sites flanking an insert face each other, so one is found
+on the top strand and the other reversed. Which one is reversed depends on how
+the molecule was written, not on the number: in the plasmids checked below,
+att2 reads on the bottom strand where att1 reads on the top.
+
+| Number | Core | Where it comes from |
+| --- | --- | --- |
+| att1 | `TTTGTACAAAAAAGC` | the middle of attB1 (25 bp), Invitrogen Gateway Technology manual |
+| att2 | `TTTGTACAAGAAAGC` | the middle of attB2 (25 bp), same manual |
+| att3 | `TTTGTATAATAAAGT` | the middle of the attB3 primer tail, MultiSite Gateway manual |
+| att4 | `TTTGTATAGAAAAGT` | the middle of the attB4 primer tail, same manual |
+
+att5 is not included yet, so three-fragment MultiSite (att4-att1, att1-att2,
+att2-att3) works and four-fragment doesn't.
+
+An earlier version stored att2 the other way round, which made both sites of
+every real Gateway plasmid read on the same strand, so every reaction was
+refused (reported against PR #38 on a pDONR201 entry clone and pB7FWG2, which
+now give the expected 10,788 bp expression clone). `testGateway` now checks
+that all four cores share their first bases, which is what went wrong. att3
+and att4 follow the same sense as att1, but no real MultiSite file has been
+tested against them yet.
+
+The manuals state that the att sites of one number share a 15 bp core and that
+the strands cross within it; the products of a reaction therefore carry half
+the core from either parent, which `testGateway` checks by rebuilding each
+core whole across both joins.
+
 ## Expected results
 
 | Check | Expected | Source |
