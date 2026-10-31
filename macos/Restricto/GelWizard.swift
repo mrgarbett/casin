@@ -142,25 +142,36 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
     private let tuneButton = NSButton()
     private var tunePopover: NSPopover?
     private var tuneValueLabels: [NSTextField] = []
+    private var tuneSliders: [NSSlider] = []
     private static var look3D = Gel3DLook()
     private struct Knob {
         let name: String
         let value: WritableKeyPath<Gel3DLook, Float>
         let lo: Double
         let hi: Double
+        let step: Double
+        /// The value on the slider's step, with the step's decimals: what's
+        /// copied is what the slider shows.
+        func onStep(_ v: Double) -> Double { (v / step).rounded() * step }
+        func text(_ v: Double) -> String {
+            var decimals = 0
+            var s = step
+            while s < 0.999 && decimals < 4 { s *= 10; decimals += 1 }
+            return String(format: "%.\(decimals)f", onStep(v))
+        }
     }
     private static let knobs: [Knob] = [
-        Knob(name: "Exposure", value: \.exposure, lo: 0.2, hi: 2.0),
-        Knob(name: "Contrast", value: \.contrast, lo: 0.6, hi: 2.5),
-        Knob(name: "Stain glow", value: \.stain, lo: 0.0, hi: 3.0),
-        Knob(name: "Band glow", value: \.band, lo: 0.0, hi: 3.0),
-        Knob(name: "Scatter", value: \.scatter, lo: 0.0, hi: 60.0),
-        Knob(name: "Lamp", value: \.lamp, lo: 0.0, hi: 30.0),
-        Knob(name: "Lamp size", value: \.lampSize, lo: 0.01, hi: 0.2),
-        Knob(name: "Spot cone", value: \.spot, lo: 0.1, hi: 1.2),
-        Knob(name: "Bloom", value: \.bloom, lo: 0.0, hi: 1.0),
-        Knob(name: "Vignette", value: \.vignette, lo: 0.0, hi: 1.0),
-        Knob(name: "Grain", value: \.grain, lo: 0.0, hi: 0.1),
+        Knob(name: "Exposure", value: \.exposure, lo: 0.2, hi: 2.0, step: 0.05),
+        Knob(name: "Contrast", value: \.contrast, lo: 0.6, hi: 2.5, step: 0.05),
+        Knob(name: "Stain glow", value: \.stain, lo: 0.0, hi: 3.0, step: 0.05),
+        Knob(name: "Band glow", value: \.band, lo: 0.0, hi: 3.0, step: 0.05),
+        Knob(name: "Scatter", value: \.scatter, lo: 0.0, hi: 60.0, step: 1.0),
+        Knob(name: "Lamp", value: \.lamp, lo: 0.0, hi: 30.0, step: 0.5),
+        Knob(name: "Lamp size", value: \.lampSize, lo: 0.01, hi: 0.2, step: 0.005),
+        Knob(name: "Spot cone", value: \.spot, lo: 0.1, hi: 1.2, step: 0.02),
+        Knob(name: "Bloom", value: \.bloom, lo: 0.0, hi: 1.0, step: 0.02),
+        Knob(name: "Vignette", value: \.vignette, lo: 0.0, hi: 1.0, step: 0.05),
+        Knob(name: "Grain", value: \.grain, lo: 0.0, hi: 0.1, step: 0.005),
     ]
     private var chrome: WizardChrome?
     /// Sequences listed in the sequence popup, in its order.
@@ -798,6 +809,7 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         grid.rowSpacing = 4
         grid.columnSpacing = 10
         tuneValueLabels = []
+        tuneSliders = []
         for (i, knob) in Self.knobs.enumerated() {
             let name = NSTextField(labelWithString: knob.name)
             let slider = NSSlider(value: Double(Self.look3D[keyPath: knob.value]), minValue: knob.lo, maxValue: knob.hi,
@@ -806,7 +818,8 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
             slider.controlSize = .small
             slider.tag = i
             slider.widthAnchor.constraint(equalToConstant: 160).isActive = true
-            let value = NSTextField(labelWithString: Self.knobText(Double(Self.look3D[keyPath: knob.value])))
+            tuneSliders.append(slider)
+            let value = NSTextField(labelWithString: knob.text(Double(Self.look3D[keyPath: knob.value])))
             value.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
             value.textColor = .secondaryLabelColor
             value.alignment = .right
@@ -814,9 +827,14 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
             tuneValueLabels.append(value)
             grid.addRow(with: [name, slider, value])
         }
+        let reset = NSButton(title: "Reset", target: self, action: #selector(resetLook(_:)))
+        reset.toolTip = "Back to the values that ship"
         let copy = NSButton(title: "Copy Values", target: self, action: #selector(copyLook(_:)))
         copy.toolTip = "Put every value on the clipboard, to send"
-        let box = NSStackView(views: [grid, copy])
+        let buttons = NSStackView(views: [reset, copy])
+        buttons.orientation = .horizontal
+        buttons.spacing = 6
+        let box = NSStackView(views: [grid, buttons])
         box.orientation = .vertical
         box.alignment = .trailing
         box.spacing = 8
@@ -830,22 +848,28 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         popover.show(relativeTo: tuneButton.bounds, of: tuneButton, preferredEdge: .maxY)
     }
 
-    private static func knobText(_ v: Double) -> String {
-        String(format: v >= 10 ? "%.0f" : v >= 1 ? "%.2f" : "%.3f", v)
-    }
-
     @objc private func tuneChanged(_ sender: NSSlider) {
         let i = sender.tag
         guard i >= 0 && i < Self.knobs.count else { return }
-        Self.look3D[keyPath: Self.knobs[i].value] = Float(sender.doubleValue)
-        if i < tuneValueLabels.count { tuneValueLabels[i].stringValue = Self.knobText(sender.doubleValue) }
+        let knob = Self.knobs[i]
+        let v = knob.onStep(sender.doubleValue)
+        Self.look3D[keyPath: knob.value] = Float(v)
+        if i < tuneValueLabels.count { tuneValueLabels[i].stringValue = knob.text(v) }
         gel3D?.look = Self.look3D
+    }
+
+    @objc private func resetLook(_ sender: Any?) {
+        let shipped = Gel3DLook()
+        for (i, knob) in Self.knobs.enumerated() where i < tuneSliders.count {
+            tuneSliders[i].doubleValue = Double(shipped[keyPath: knob.value])
+            tuneChanged(tuneSliders[i])
+        }
     }
 
     @objc private func copyLook(_ sender: Any?) {
         var text = "3D gel look (\(scene3D.title))\n"
         for knob in Self.knobs {
-            text += "\(knob.name): \(String(format: "%g", Double(Self.look3D[keyPath: knob.value])))\n"
+            text += "\(knob.name): \(knob.text(Double(Self.look3D[keyPath: knob.value])))\n"
         }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)

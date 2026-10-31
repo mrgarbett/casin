@@ -218,20 +218,30 @@ final class GelView: NSView {
         let area = NSRect(x: 24, y: 54, width: max(100, bounds.width - 48),
                           height: max(120, bounds.height - 54 - bottomInset))
         // Lanes grow to fill the pane (a few lanes make a wide gel, not a
-        // narrow strip), with the gaps and the size labels growing with them.
+        // narrow strip), with the gaps and the size labels growing with them;
+        // many lanes shrink until the whole comb fits beside the ladder's sizes.
         let n = CGFloat(max(1, lanes.count))
-        let unit = (area.width - 60) / (n * 1.25 + 0.25)
-        let laneW = min(120, max(26, unit))
+        let ladder = lanes.contains(where: { $0.isLadder })
+        let unit = (area.width - (ladder ? 60 : 0)) / (n * 1.25 + 0.25)
+        var laneW = min(120, max(12, unit))
         let scale = max(1, laneW / 64)
-        let gap = min(28, max(10, laneW * 0.25))
+        var gap = min(28, max(4, laneW * 0.25))
         // The ladder's sizes sit left of the slab; the slab is centred in the
         // pane, and only moves over when they wouldn't fit beside it.
-        let labelW = lanes.contains(where: { $0.isLadder }) ? 60 * min(1.4, scale) : 0
-        let slabW = n * laneW + (n + 1) * gap
+        let labelW = ladder ? 60 * min(1.4, scale) : 0
+        var slabW = n * laneW + (n + 1) * gap
+        if labelW + slabW > area.width {
+            let f = (area.width - labelW) / slabW
+            laneW *= f
+            gap *= f
+            slabW = area.width - labelW
+        }
         let slabX = area.minX + max(labelW, (area.width - slabW) / 2)
-        let slab = NSRect(x: slabX, y: area.minY + 24 * scale, width: slabW, height: area.maxY - area.minY - 24 * scale)
+        // The gel is as long whatever is loaded: its run is the pane's height,
+        // so the same fragment sits at the same place on every gel.
+        let slab = NSRect(x: slabX, y: area.minY + 24, width: slabW, height: area.maxY - area.minY - 24)
         return Geometry(slab: slab, laneW: laneW, gap: gap, scale: scale, labelW: labelW,
-                        runTop: slab.minY + 34 * scale, runBottom: slab.maxY - 22)
+                        runTop: slab.minY + 34, runBottom: slab.maxY - 22)
     }
 
     /// Thicker for more DNA; wider and softer the further it ran, as bands diffuse.
@@ -263,7 +273,7 @@ final class GelView: NSView {
         let wellH = (5 + 3 * CGFloat(comb.thickness)) * min(1.5, g.scale)
         for i in 0..<lanes.count {
             let x = g.laneX(i)
-            drawWell(NSRect(x: x + 2, y: g.slab.minY + 14 * g.scale, width: g.laneW - 4, height: wellH))
+            drawWell(NSRect(x: x + 2, y: g.slab.minY + 14, width: g.laneW - 4, height: wellH))
         }
         let nameFont = NSFont.systemFont(ofSize: min(16, 11 * g.scale), weight: .semibold)
         for (i, lane) in lanes.enumerated() {
@@ -277,7 +287,7 @@ final class GelView: NSView {
             }
             let nameColor = i == selectedLane ? NSColor.white : NSColor.white.withAlphaComponent(0.6)
             drawText(lane.name, font: nameFont, color: nameColor,
-                     centeredAt: NSPoint(x: x + g.laneW / 2, y: g.slab.minY - 13 * g.scale))
+                     centeredAt: NSPoint(x: x + g.laneW / 2, y: g.slab.minY - 13))
 
             let far = reach(i)
             let fadeIn = CGFloat(min(1, (i < progress.count ? progress[i] : 1) * 4))
@@ -550,8 +560,8 @@ final class GelView: NSView {
         finishRunning()
         defer { hover = keepHover; selectedLane = keepSelected; needsDisplay = true }
         let g = geometry
-        let crop = NSRect(x: g.slab.minX - g.labelW - 8, y: g.slab.minY - 30 * g.scale,
-                          width: g.slab.width + g.labelW + 24, height: g.slab.height + 30 * g.scale + 16)
+        let crop = NSRect(x: g.slab.minX - g.labelW - 8, y: g.slab.minY - 30,
+                          width: g.slab.width + g.labelW + 24, height: g.slab.height + 30 + 16)
             .intersection(bounds)
         guard !crop.isEmpty, let rep = bitmapImageRepForCachingDisplay(in: crop) else { return nil }
         cacheDisplay(in: crop, to: rep)

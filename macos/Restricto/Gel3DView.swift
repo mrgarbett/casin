@@ -125,9 +125,9 @@ struct Gel3DLook: Equatable {
     /// How much the gel scatters, per metre.
     var scatter: Float = 18.0
     /// The spotlight's brightness.
-    var lamp: Float = 7.0
+    var lamp: Float = 4.5
     /// The spotlight's size, m.
-    var lampSize: Float = 0.09
+    var lampSize: Float = 0.05
     /// The spotlight's cone, radians (half angle).
     var spot: Float = 0.35
     /// The bright parts' halo.
