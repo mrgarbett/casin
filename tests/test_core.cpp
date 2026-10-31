@@ -1395,6 +1395,10 @@ static void testPrimerHelpers()
     s.bases = "GCGTTGCATGCCTAGGATCCGTAACGGCATCAAGTCGACTTCAGCGTAGCATGAAACCCGGGTTTTAGTTGACCGGTACCATGCAAGCTTGCAGCAGGTCAG"
               "CATCGATCGGCTAGCTAGGCGCGCCATCGATGGTACCTTAGCAGTCAAGGCTTACGATCGTTGCAACGTAGGCATCGGATACGTTAGCCAATGCATGCAA";
     const int n = s.length();
+    // A primer shorter than the three 3' bases the search matches first
+    // finds nothing (and reads nothing before the strand).
+    CHECK(findPrimerSites(s, "AC", 2, 1).empty());
+    CHECK(findPrimerSites(s, "GCG", 0, 1).size() >= 1);
     Feature cds = feat("gene", {{60, 180}});
     cds.type = "CDS";
     cds.strand = Strand::Forward;
@@ -1474,6 +1478,7 @@ static void testMutagenesis()
     // Substitute AAA (Lys) at 53..56 with GCG (Ala).
     MutagenesisDesign d;
     std::string err;
+    CHECK(!designMutagenesis(s, {60, -5}, "GCG", 60, &d, &err));   // an inside-out selection
     CHECK(designMutagenesis(s, {53, 3}, "GCG", 60, &d, &err));
     CHECK_EQ(d.mutant.length(), n);
     CHECK_EQ(d.mutant.bases.substr(50, 9), std::string("ATGGCGCCC"));

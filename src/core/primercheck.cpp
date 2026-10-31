@@ -277,6 +277,8 @@ bool designMutagenesis(const Sequence &seq, Span target, const std::string &rawR
     const int n = seq.length();
     const std::string replacement = cleanBases(rawReplacement);
     const int s = target.start, e = target.start + target.length;
+    if (target.length < 0)
+        return fail("the selection is inside out");
     if (target.length == 0 && replacement.empty())
         return fail("type the new bases, or select bases to delete");
     if (s < 32 || e + 32 > n)
@@ -331,6 +333,7 @@ std::vector<PrimerSite> findPrimerSites(const Sequence &seq, const std::string &
     std::vector<PrimerSite> out;
     const std::string p = cleanBases(raw);
     const int n = seq.length(), lp = int(p.size());
+    minBinding = std::max(minBinding, 3);   // the 3' end is matched three bases at a time
     if (lp < minBinding || n < minBinding)
         return out;
     const std::string &top = seq.bases;
