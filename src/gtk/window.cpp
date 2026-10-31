@@ -239,6 +239,9 @@ Window::Window(Shell *shell) : m_shell(shell), m_window(shell->widget())
     if (pane == "features" || pane == "primers")
         m_tablePane = pane;
     m_map = std::make_unique<MapView>(&m_doc);
+    // Ours until the view goes (see ~Window): the page's widgets are gone
+    // before this is torn down, and the view still draws into it then.
+    g_object_ref_sink(m_map->widget());
     m_seq = std::make_unique<SequenceView>(&m_doc);
     m_map->setZoom(savedZoom());
     m_seq->setZoom(savedZoom());
@@ -302,8 +305,11 @@ Window::~Window()
         adw_dialog_force_close(std::exchange(m_closeAlert, nullptr));
     }
     // The views first: the sequence pane they draw in is ours to drop.
+    GtkWidget *mapWidget = m_map ? m_map->widget() : nullptr;
     m_seq.reset();
     m_map.reset();
+    if (mapWidget)
+        g_object_unref(mapWidget);
     if (m_seqPane)
         g_object_unref(m_seqPane);
 }
