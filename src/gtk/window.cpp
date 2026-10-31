@@ -1194,7 +1194,7 @@ void Window::updateStatus()
     if (text.empty()) {
         text = m_doc.statusText(false);
         if (m_hoverBase >= 0 && m_hoverBase < m_doc.sequence().length())
-            text += (text.empty() ? "" : "  ·  ") + std::string("Base ") + view::withThousands(m_hoverBase + 1);
+            text += (text.empty() ? "" : "  ·  ") + std::string("pointer at ") + view::withThousands(m_hoverBase + 1);
     }
     gtk_label_set_text(GTK_LABEL(m_status), text.c_str());
     fade(m_info, !text.empty());

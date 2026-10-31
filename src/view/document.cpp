@@ -620,7 +620,9 @@ std::string Document::statusText(bool withLength) const
     if (!m_hasSelection)
         return s;
     if (m_selection.length == 0) {
-        s += sep + "position " + view::withThousands(m_selection.start);
+        // The caret sits between bases: named by the 1-based base before it.
+        s += sep + (m_selection.start <= 0 ? std::string("before base 1")
+                                           : "after base " + view::withThousands(m_selection.start));
         return s;
     }
     int end = m_selection.end();
