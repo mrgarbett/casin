@@ -32,13 +32,12 @@ struct Knob {
     float Gel3DLook::*value;
     double lo, hi, step;
 };
+// The picture's knobs; the lamp, bloom, vignette and grain stay at what
+// ships (Rodrigo: the sliders stop at Scatter).
 const Knob kKnobs[] = {
-    {"Exposure", &Gel3DLook::exposure, 0.2, 2.0, 0.05},   {"Contrast", &Gel3DLook::contrast, 0.6, 2.5, 0.05},
-    {"Stain glow", &Gel3DLook::stain, 0.0, 3.0, 0.05},    {"Band glow", &Gel3DLook::band, 0.0, 3.0, 0.05},
-    {"Scatter", &Gel3DLook::scatter, 0.0, 60.0, 1.0},     {"Lamp", &Gel3DLook::lamp, 0.0, 30.0, 0.5},
-    {"Lamp size", &Gel3DLook::lampSize, 0.01, 0.2, 0.005}, {"Spot cone", &Gel3DLook::spot, 0.1, 1.2, 0.02},
-    {"Bloom", &Gel3DLook::bloom, 0.0, 1.0, 0.02},         {"Vignette", &Gel3DLook::vignette, 0.0, 1.0, 0.05},
-    {"Grain", &Gel3DLook::grain, 0.0, 0.1, 0.005},
+    {"Exposure", &Gel3DLook::exposure, 0.2, 2.0, 0.05}, {"Contrast", &Gel3DLook::contrast, 0.6, 2.5, 0.05},
+    {"Stain glow", &Gel3DLook::stain, 0.0, 3.0, 0.05},  {"Band glow", &Gel3DLook::band, 0.0, 3.0, 0.05},
+    {"Scatter", &Gel3DLook::scatter, 0.0, 60.0, 1.0},
 };
 // A knob's value as its slider shows it: on its step, with the step's decimals.
 double onStep(const Knob &k, double v)
