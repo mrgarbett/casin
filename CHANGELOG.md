@@ -5,6 +5,7 @@ versions may change file handling, menus and the C API.
 
 ## Unreleased
 
+- **Mac Quick Look:** the map preview (Space on a .gb or .dna file in Finder) is now drawn as vectors instead of a bitmap, so it is crisp at any size and on Retina screens.
 - **macOS:** File ▸ Open Recent; the files open at the last quit reopen when the app is launched with nothing to open; ⌘1 to ⌘9 switch window tabs.
 - **macOS:** hovering a feature or an enzyme site on the map lightly highlights it in the sequence view, and the other way round.
 - **macOS:** in the sequence view the arrow keys move the caret (by a base, or a line up and down), Shift+arrows grow the selection and Escape clears it.
