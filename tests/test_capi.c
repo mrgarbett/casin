@@ -208,6 +208,7 @@ int main(int argc, char **argv)
     oc_string_free(chosen);
     oc_document_show_only_enzymes(doc, eb, 2, 1);
     CHECK(oc_document_visible_site_count(doc) == 2);
+    CHECK(oc_document_visible_site_cut(doc, 0) >= 0 && oc_document_visible_site_cut(doc, 2) == -1);
     /* Put the PCR product between EcoRI and BamHI: it has no sites, so expect a clear error. */
     OCDocument *product = oc_document_new();
     char *cerr = NULL;

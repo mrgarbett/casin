@@ -6,9 +6,10 @@
 // and hides the map, walks the right panel's panes (the sequence among them
 // with the map beside it), hides and shows the inspector, opens Find (which
 // reopens a hidden panel on the sequence), selects bases (the status splits)
-// and the bases between two sites, copies the map image, adds a His-tagged
-// primer in the Primers pane, opens a PCR product from the PCR wizard, runs a
-// gel in the gel wizard, and saves a PNG of the window after each step. It exits 0 when every step got
+// and the bases between two sites, selects between two sites from the site
+// menu, copies the map image, adds a His-tagged primer in the Primers pane,
+// opens a PCR product from the PCR wizard, runs a gel in the gel wizard, and
+// saves a PNG of the window after each step. It exits 0 when every step got
 // through layout; a layout loop or other exception aborts the process instead.
 import AppKit
 import RestrictoCore
@@ -106,6 +107,13 @@ enum UISmokeTest {
                     core?.activateSite(0)
                     core?.extendToSite(1)
                 }
+            }),
+            ("9g-site-menu-select-to", {
+                // Right-click an enzyme > Select to > the next site.
+                guard let core = (controller?.document as? SequenceDocument)?.core,
+                      core.visibleSiteEnzymes.count >= 2 else { return }
+                SiteMenu.menu(for: 0, in: core, onDigest: { _ in }).item(withTitle: "Select to")?.submenu?
+                    .performActionForItem(at: 0)
             }),
             ("9g-copy-map-image", { controller?.copyMapImage(nil) }),
             ("9g-caret", { (controller?.document as? SequenceDocument)?.core.select(start: 10, length: 0) }),

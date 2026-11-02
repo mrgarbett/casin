@@ -158,6 +158,8 @@ final class CoreDocument {
             String(cString: oc_document_visible_site_enzyme(handle, Int32($0)))
         }
     }
+    /// Where a visible site cuts the top strand.
+    func visibleSiteCut(_ i: Int) -> Int { Int(oc_document_visible_site_cut(handle, Int32(i))) }
 
     /// Adds features for the common elements found in the sequence (one undo
     /// step); returns how many.

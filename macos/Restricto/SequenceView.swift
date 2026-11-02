@@ -32,6 +32,8 @@ final class SequenceView: NSView {
     var onEditFeature: ((Int) -> Void)?
     /// Right-click > Add Primer… (with the selection, if any).
     var onAddPrimer: (() -> Void)?
+    /// Right-click on a site > Digest with…: called with the enzyme.
+    var onDigest: ((String) -> Void)?
     /// False for a preview: typing, paste, cut and delete don't change it.
     var isEditable = true
     /// While the width keeps changing (a side panel sliding open), the old
@@ -268,8 +270,14 @@ final class SequenceView: NSView {
 
     // MARK: Mouse
 
-    /// Right-click: Add Primer…, pre-filled with the selected bases.
+    /// Right-click: on an enzyme site, the site menu; elsewhere Add Primer…,
+    /// pre-filled with the selected bases.
     override func menu(for event: NSEvent) -> NSMenu? {
+        if let digest = onDigest, let layout = ensureLayout(), !document.isEmpty {
+            let p = layoutPoint(event)
+            let site = Int(oc_seq_layout_site_at(layout, p.x, p.y))
+            if site >= 0 { return SiteMenu.menu(for: site, in: document, onDigest: digest) }
+        }
         guard onAddPrimer != nil, !document.isEmpty else { return super.menu(for: event) }
         let menu = NSMenu()
         let title = document.hasSelection && document.selectionLength > 0 ? "Add Primer from Selection…" : "Add Primer…"

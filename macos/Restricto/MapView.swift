@@ -21,6 +21,8 @@ final class MapView: NSView {
     /// Called with a primer's index when it is clicked, and whether shift
     /// was down. Without it, a click on a primer selects where it binds.
     var onPickPrimer: ((Int, Bool) -> Void)?
+    /// Right-click on a site > Digest with…: called with the enzyme.
+    var onDigest: ((String) -> Void)?
 
     init(document: CoreDocument) {
         self.document = document
@@ -101,6 +103,18 @@ final class MapView: NSView {
     }
 
     // MARK: Mouse
+
+    /// Right-click on an enzyme site: the site menu.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let digest = onDigest, let layout = ensureLayout(), !document.isEmpty else {
+            return super.menu(for: event)
+        }
+        let p = mapPoint(event)
+        var kind: Int32 = 0, index: Int32 = 0, position: Int32 = 0
+        oc_map_layout_hit(layout, p.x, p.y, &kind, &index, &position)
+        guard kind == Int32(OC_HIT_SITE) else { return super.menu(for: event) }
+        return SiteMenu.menu(for: Int(index), in: document, onDigest: digest)
+    }
 
     override func mouseDown(with event: NSEvent) {
         guard let layout = ensureLayout(), !document.isEmpty else { return }

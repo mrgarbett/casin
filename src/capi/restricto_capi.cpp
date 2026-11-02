@@ -685,6 +685,12 @@ const char *oc_document_visible_site_enzyme(const OCDocument *doc, int index)
     return v[size_t(index)].enzyme->name.c_str();
 }
 
+int oc_document_visible_site_cut(const OCDocument *doc, int index)
+{
+    const auto &v = doc->doc.visibleSites();
+    return index < 0 || index >= int(v.size()) ? -1 : v[size_t(index)].cutTop;
+}
+
 bool oc_document_has_selection(const OCDocument *doc) { return doc->doc.hasSelection(); }
 int oc_document_selection_start(const OCDocument *doc) { return doc->doc.selection().start; }
 int oc_document_selection_length(const OCDocument *doc) { return doc->doc.selection().length; }

@@ -359,11 +359,19 @@ extension DocumentWindowController {
     }
 
     /// Opens the gel wizard on this sequence (see GelWizard).
-    @objc func digestAndGel(_ sender: Any?) {
+    @objc func digestAndGel(_ sender: Any?) { digestAndGel(with: nil) }
+
+    /// The gel wizard, with a lane cut by `enzyme`, or by the two enzymes of a
+    /// selection between two sites.
+    func digestAndGel(with enzyme: String?) {
         guard let d = doc, !d.isEmpty else { return }
-        // A selection between two sites adds a lane cut by its two enzymes.
+        // `enzyme` when given, else the two enzymes of a selection between two sites.
         var enzymes: [String] = []
-        if let f = d.siteFragment { enzymes = f.first == f.second ? [f.first] : [f.first, f.second] }
+        if let enzyme = enzyme {
+            enzymes = [enzyme]
+        } else if let f = d.siteFragment {
+            enzymes = f.first == f.second ? [f.first] : [f.first, f.second]
+        }
         GelWizard.show(for: d, near: window, cutWith: enzymes)
     }
 

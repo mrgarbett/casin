@@ -106,6 +106,8 @@ int oc_document_max_cuts(const OCDocument *doc);
 void oc_document_set_max_cuts(OCDocument *doc, int max_cuts);  /* 1, 2, 3 or 0 = all */
 int oc_document_visible_site_count(const OCDocument *doc);
 const char *oc_document_visible_site_enzyme(const OCDocument *doc, int index);
+/* Where the site cuts the top strand (0..length), or -1 for a bad index. */
+int oc_document_visible_site_cut(const OCDocument *doc, int index);
 
 bool oc_document_has_selection(const OCDocument *doc);
 int oc_document_selection_start(const OCDocument *doc);
