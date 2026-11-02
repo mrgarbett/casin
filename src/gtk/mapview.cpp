@@ -144,7 +144,11 @@ void MapView::dragBegin(GtkGestureDrag *drag, double x, double y, gpointer p)
         self->m_doc->activateFeature(hit.index);
         break;
     case view::MapHit::Site:
-        self->m_doc->activateSite(hit.index);
+        // Shift-click on a second enzyme selects the bases between the two cuts.
+        if (gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(drag)) & GDK_SHIFT_MASK)
+            self->m_doc->extendToSite(hit.index);
+        else
+            self->m_doc->activateSite(hit.index);
         break;
     case view::MapHit::Primer:
         if (self->onPickPrimer) {

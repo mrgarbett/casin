@@ -306,7 +306,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         onMapOnly.title = "On map only"
         onMapOnly.controlSize = .small
         onMapOnly.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        onMapOnly.toolTip = "Hide enzymes the cut filter leaves out or that are unticked"
+        onMapOnly.toolTip = "Hide enzymes the cut filter leaves out (unticked ones stay listed, to tick again)"
         onMapOnly.target = self
         onMapOnly.action = #selector(onMapOnlyChanged(_:))
         onMapOnly.state = UserDefaults.standard.bool(forKey: Self.onMapOnlyKey) ? .on : .off
@@ -368,14 +368,15 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         applyEnzymeSearch()
     }
 
-    /// The cutters whose name contains the search text, and with "Only enzymes
-    /// on the map", only those the map shows.
+    /// The cutters whose name contains the search text, and with "On map
+    /// only", only those the cut filter lets onto the map. Unticked ones stay
+    /// listed, or there would be no way to tick them again.
     private func applyEnzymeSearch() {
         let query = enzymeSearch.stringValue.trimmingCharacters(in: .whitespaces)
         let mapOnly = onMapOnly.state == .on
         enzymes = cutters.filter { e in
             (query.isEmpty || e.name.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil)
-                && (!mapOnly || (e.passesFilter && !e.hidden))
+                && (!mapOnly || e.passesFilter)
         }
         enzymeTable.reloadData()
     }

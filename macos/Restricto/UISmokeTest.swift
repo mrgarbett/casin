@@ -5,9 +5,11 @@
 // it (as a restored frame can be), collapses and reopens the sidebar, stacks
 // and hides the map, walks the right panel's panes (the sequence among them
 // with the map beside it), hides and shows the inspector, opens Find (which
-// reopens a hidden panel on the sequence), selects bases (the status splits),
-// copies the map image, adds a His-tagged primer in the Primers
-// pane, opens a PCR product from the PCR wizard, and saves a PNG of the window after each step. It exits 0 when every step got
+// reopens a hidden panel on the sequence), selects bases (the status splits)
+// and the bases between two sites, selects between two sites from the site
+// menu, copies the map image, adds a His-tagged primer in the Primers pane,
+// opens a PCR product from the PCR wizard, runs a gel in the gel wizard, and
+// saves a PNG of the window after each step. It exits 0 when every step got
 // through layout; a layout loop or other exception aborts the process instead.
 import AppKit
 import RestrictoCore
@@ -29,8 +31,9 @@ enum UISmokeTest {
                 _exit(128 + code)
             }
         }
-        // Give up rather than hang CI if the window never appears.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+        // Give up rather than hang CI if the window never appears. The whole run
+        // now takes about a minute on CI, so leave it room.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 150) {
             FileHandle.standardError.write("ui-smoke: timed out\n".data(using: .utf8)!)
             exit(3)
         }
@@ -96,6 +99,21 @@ enum UISmokeTest {
             ("9e-find-closed-again", { controller?.toggleFindBar(nil) }),
             ("9g-selection-split-status", {
                 (controller?.document as? SequenceDocument)?.core.select(start: 99, length: 30)
+            }),
+            ("9g-site-fragment-status", {
+                // Click one enzyme, shift-click another: the fragment and its digest button.
+                let core = (controller?.document as? SequenceDocument)?.core
+                if (core?.visibleSiteEnzymes.count ?? 0) >= 2 {
+                    core?.activateSite(0)
+                    core?.extendToSite(1)
+                }
+            }),
+            ("9g-site-menu-select-to", {
+                // Right-click an enzyme > Select to > the next site.
+                guard let core = (controller?.document as? SequenceDocument)?.core,
+                      core.visibleSiteEnzymes.count >= 2 else { return }
+                SiteMenu.menu(for: 0, in: core, onDigest: { _ in }).item(withTitle: "Select to")?.submenu?
+                    .performActionForItem(at: 0)
             }),
             ("9g-copy-map-image", { controller?.copyMapImage(nil) }),
             ("9g-caret", { (controller?.document as? SequenceDocument)?.core.select(start: 10, length: 0) }),
@@ -190,6 +208,78 @@ enum UISmokeTest {
                 note("close product")
                 product.close()
                 note("closed")
+                window.makeKeyAndOrderFront(nil)
+            }),
+            ("9k-gel-wizard", {
+                // Cloning > Digest and Gel…: the ladder, the plasmid uncut (two
+                // bands, nicked and supercoiled), and cut with the first enzyme
+                // shown; then a lane cut with EcoRI.
+                controller?.digestAndGel(nil)
+                let length = (controller?.document as? SequenceDocument)?.core.length ?? 0
+                let first = GelWizard.bands
+                GelWizard.addLane(enzymes: ["ecori"])
+                let after = GelWizard.bands
+                guard GelWizard.isAnyOpen, first.count >= 2, first[0].count > 5, first[1] == [length, length],
+                      after.count == first.count + 1, let cut = after.last, cut.count >= 1,
+                      cut.reduce(0, +) == length else {
+                    FileHandle.standardError.write("ui-smoke: the gel wizard showed the wrong bands \(after)\n"
+                                                       .data(using: .utf8)!)
+                    exit(8)
+                }
+            }),
+            ("9k-gel-agarose", {
+                // A 2% gel holds the uncut plasmid back more than a 0.7% one;
+                // then half a run, in black and white.
+                GelWizard.setAgarose(0.7)
+                let thin = GelWizard.runs.dropFirst().first?.first ?? 0
+                GelWizard.setAgarose(2)
+                let dense = GelWizard.runs.dropFirst().first?.first ?? 0
+                guard thin > 0, dense > 0, dense < thin else {
+                    FileHandle.standardError.write("ui-smoke: the gel's agarose didn't change how far bands ran\n"
+                                                       .data(using: .utf8)!)
+                    exit(8)
+                }
+                GelWizard.setAgarose(1)
+                GelWizard.setRun(0.5, stain: .blackAndWhite)
+            }),
+            ("9k-gel-half-run", {
+                if let wizard = GelWizard.openWindows.first {
+                    capture(wizard, to: out.appendingPathComponent("9k-gel-half-run-window.png"))
+                }
+                GelWizard.setRun(1, stain: .ethidiumUV)
+            }),
+            ("9k-gel-3d", {
+                // The 3D tab sets up Metal and compiles its shaders on first use.
+                if let wizard = GelWizard.openWindows.first {
+                    capture(wizard, to: out.appendingPathComponent("9k-gel-imager-window.png"))
+                }
+                GelWizard.showLook(1)
+                guard GelWizard.showing3D else {
+                    FileHandle.standardError.write("ui-smoke: the gel's 3D tab didn't open\n".data(using: .utf8)!)
+                    exit(8)
+                }
+                // A shader that doesn't compile is a bug; a machine without
+                // a GPU is just this machine.
+                if let problem = GelWizard.problem3D {
+                    FileHandle.standardError.write("ui-smoke: 3D gel: \(problem)\n".data(using: .utf8)!)
+                    if problem.contains("compile") { exit(9) }
+                }
+                // The other scenes, then back: each starts the picture over.
+                GelWizard.setScene3D(2)
+                GelWizard.setScene3D(1)
+                GelWizard.setScene3D(0)
+            }),
+            ("9k-gel-imager", {
+                if let wizard = GelWizard.openWindows.first {
+                    capture(wizard, to: out.appendingPathComponent("9k-gel-3d-window.png"))
+                }
+                GelWizard.showLook(0)
+            }),
+            ("9k-gel-closed", {
+                if let wizard = GelWizard.openWindows.first {
+                    capture(wizard, to: out.appendingPathComponent("9k-gel-wizard-window.png"))
+                }
+                GelWizard.closeAll()
                 window.makeKeyAndOrderFront(nil)
             }),
             ("9j-zoomed-125", {
