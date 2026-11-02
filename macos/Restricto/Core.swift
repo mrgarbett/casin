@@ -47,6 +47,8 @@ struct EnzymeInfo {
     /// "Dcm", "Dam and Dcm"; empty when none).
     let methylationBlocked: Int
     let methylation: String
+    /// The features (not "source") its cuts fall inside: cloning there breaks them.
+    let cutFeatures: [String]
 }
 
 /// The document model shared with the Linux app (selection, enzyme filter, ...).
@@ -133,7 +135,9 @@ final class CoreDocument {
             return EnzymeInfo(name: String(cString: e.name), site: String(cString: e.site), cuts: Int(e.cuts),
                               hidden: e.hidden, passesFilter: e.passes_filter,
                               methylationBlocked: Int(e.methylation_blocked),
-                              methylation: e.methylation != nil ? String(cString: e.methylation) : "")
+                              methylation: e.methylation != nil ? String(cString: e.methylation) : "",
+                              cutFeatures: e.cut_features > 0 && e.cut_feature_names != nil
+                                  ? String(cString: e.cut_feature_names).components(separatedBy: "\n") : [])
         }
     }
 

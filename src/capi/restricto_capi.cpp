@@ -662,6 +662,14 @@ bool oc_document_enzyme(OCDocument *doc, int index, OCEnzymeInfo *out)
     out->methylation_blocked = blocked;
     static const char *const names[] = {"", "Dam", "Dcm", "Dam and Dcm"};
     out->methylation = names[kinds & 3];
+    const std::vector<int> cut = doc->doc.featuresCutByEnzyme(e.name);
+    doc->scratch1.clear();
+    for (int fi : cut) {
+        const Feature &f = doc->doc.sequence().features[size_t(fi)];
+        doc->scratch1 += (doc->scratch1.empty() ? "" : "\n") + (f.name.empty() ? f.type : f.name);
+    }
+    out->cut_features = int(cut.size());
+    out->cut_feature_names = doc->scratch1.c_str();
     return true;
 }
 
