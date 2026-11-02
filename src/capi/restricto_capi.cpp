@@ -1478,6 +1478,7 @@ bool oc_seq_layout_translation_at(const OCSeqLayout *l, double x, double y, int 
 int oc_seq_layout_base_at(const OCSeqLayout *l, double x, double y) { return l->layout->baseAt({x, y}); }
 double oc_seq_layout_line_top(const OCSeqLayout *l, int position) { return l->layout->lineTopFor(position); }
 double oc_seq_layout_line_height(const OCSeqLayout *l, int position) { return l->layout->lineHeightFor(position); }
+int oc_seq_layout_bases_per_line(const OCSeqLayout *l) { return l->layout->basesPerLine(); }
 char *oc_seq_layout_tooltip(const OCSeqLayout *l, double x, double y) { return guarded<char *>(nullptr, nullptr, [&]() -> char * { return dupString(l->layout->tooltipAt({x, y})); }); }
 
 // ---- scenes ---------------------------------------------------------------------
