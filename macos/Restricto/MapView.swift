@@ -21,6 +21,25 @@ final class MapView: NSView {
     /// Called with a primer's index when it is clicked, and whether shift
     /// was down. Without it, a click on a primer selects where it binds.
     var onPickPrimer: ((Int, Bool) -> Void)?
+    /// Right-click > Analyze Translation…, with where the popover points.
+    var onAnalyzeTranslation: ((NSRect) -> Void)?
+    private var menuPoint = NSRect.zero
+
+    /// Right-click on a selection of a codon or more: its protein.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard onAnalyzeTranslation != nil, document.hasSelection, document.selectionLength >= 3 else {
+            return super.menu(for: event)
+        }
+        let p = convert(event.locationInWindow, from: nil)
+        menuPoint = NSRect(x: p.x - 2, y: p.y - 2, width: 4, height: 4)
+        let menu = NSMenu()
+        let item = NSMenuItem(title: "Analyze Translation…", action: #selector(analyzeFromMenu(_:)), keyEquivalent: "")
+        item.target = self
+        menu.addItem(item)
+        return menu
+    }
+
+    @objc private func analyzeFromMenu(_ sender: Any?) { onAnalyzeTranslation?(menuPoint) }
 
     init(document: CoreDocument) {
         self.document = document

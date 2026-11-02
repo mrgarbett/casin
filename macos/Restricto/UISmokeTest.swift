@@ -6,7 +6,7 @@
 // and hides the map, walks the right panel's panes (the sequence among them
 // with the map beside it), hides and shows the inspector, opens Find (which
 // reopens a hidden panel on the sequence), selects bases (the status splits),
-// copies the map image, adds a His-tagged primer in the Primers
+// opens Analyze Translation on a CDS and its amino acid count, copies the map image, adds a His-tagged primer in the Primers
 // pane, opens a PCR product from the PCR wizard, and saves a PNG of the window after each step. It exits 0 when every step got
 // through layout; a layout loop or other exception aborts the process instead.
 import AppKit
@@ -99,6 +99,27 @@ enum UISmokeTest {
             }),
             ("9g-copy-map-image", { controller?.copyMapImage(nil) }),
             ("9g-caret", { (controller?.document as? SequenceDocument)?.core.select(start: 10, length: 0) }),
+            ("9k-analyze-translation", {
+                // A CDS selected, then Sequence > Analyze Translation.
+                guard let core = (controller?.document as? SequenceDocument)?.core,
+                      let cds = core.features.first(where: { $0.type == "CDS" }) else { return }
+                core.activateFeature(cds.index)
+                controller?.analyzeTranslation(nil)
+                TranslationPopover.holdOpen()
+            }),
+            ("9k-analyze-more", {
+                if let w = TranslationPopover.openWindow { capture(w, to: out.appendingPathComponent("9k-popover.png")) }
+                TranslationPopover.toggleMore()
+            }),
+            ("9k-analyze-closed", {
+                if let w = TranslationPopover.openWindow {
+                    capture(w, to: out.appendingPathComponent("9k-popover-more.png"))
+                } else {
+                    FileHandle.standardError.write("ui-smoke: Analyze Translation showed no popover\n".data(using: .utf8)!)
+                    exit(7)
+                }
+                TranslationPopover.closeAll()
+            }),
             ("9e-translation-on-map", { (controller?.document as? SequenceDocument)?.core.frames = 6 }),
             ("9e-translation-off", { (controller?.document as? SequenceDocument)?.core.frames = 0 }),
             ("9h-primer-pane", {

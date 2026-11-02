@@ -72,6 +72,10 @@ public:
     void activateFeature(int index);
     // Selects the site's recognition sequence and makes it active.
     void activateSite(int visibleIndex);
+    // The strand a selection of whole codons reads on: the active feature's
+    // when it is selected; else reverse when the selection sits in the frame
+    // of a reverse CDS or ORF (of at least `minOrfCodons`); else forward.
+    Strand selectionReadingStrand(int minOrfCodons = 75) const;
 
     // Searches both strands for `query` (IUPAC) and selects the first match
     // starting after the current selection start, wrapping around. Returns the

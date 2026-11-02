@@ -32,6 +32,8 @@ final class SequenceView: NSView {
     var onEditFeature: ((Int) -> Void)?
     /// Right-click > Add Primer… (with the selection, if any).
     var onAddPrimer: (() -> Void)?
+    /// Right-click > Analyze Translation…, with where the popover points.
+    var onAnalyzeTranslation: ((NSRect) -> Void)?
     /// False for a preview: typing, paste, cut and delete don't change it.
     var isEditable = true
     /// While the width keeps changing (a side panel sliding open), the old
@@ -270,16 +272,41 @@ final class SequenceView: NSView {
 
     /// Right-click: Add Primer…, pre-filled with the selected bases.
     override func menu(for event: NSEvent) -> NSMenu? {
-        guard onAddPrimer != nil, !document.isEmpty else { return super.menu(for: event) }
+        guard !document.isEmpty, onAddPrimer != nil || onAnalyzeTranslation != nil else { return super.menu(for: event) }
         let menu = NSMenu()
-        let title = document.hasSelection && document.selectionLength > 0 ? "Add Primer from Selection…" : "Add Primer…"
-        let item = NSMenuItem(title: title, action: #selector(addPrimerFromMenu(_:)), keyEquivalent: "")
-        item.target = self
-        menu.addItem(item)
-        return menu
+        if onAddPrimer != nil {
+            let title = document.hasSelection && document.selectionLength > 0 ? "Add Primer from Selection…" : "Add Primer…"
+            let item = NSMenuItem(title: title, action: #selector(addPrimerFromMenu(_:)), keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+        }
+        // On a selection of a codon or more: its protein, pointing at the click.
+        if onAnalyzeTranslation != nil, document.hasSelection, document.selectionLength >= 3 {
+            let p = convert(event.locationInWindow, from: nil)
+            menuPoint = NSRect(x: p.x - 2, y: p.y - 2, width: 4, height: 4)
+            let item = NSMenuItem(title: "Analyze Translation…", action: #selector(analyzeFromMenu(_:)), keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+        }
+        return menu.items.isEmpty ? super.menu(for: event) : menu
     }
 
+    private var menuPoint = NSRect.zero
     @objc private func addPrimerFromMenu(_ sender: Any?) { onAddPrimer?() }
+    @objc private func analyzeFromMenu(_ sender: Any?) { onAnalyzeTranslation?(menuPoint) }
+
+    /// Where a popover about the selection points: the line of its first base,
+    /// or the top of the view when that line is scrolled out.
+    func selectionAnchorRect() -> NSRect {
+        guard let layout = ensureLayout(), document.hasSelection else {
+            return NSRect(x: visibleRect.midX, y: visibleRect.minY, width: 1, height: 1)
+        }
+        let top = CGFloat(oc_seq_layout_line_top(layout, Int32(document.selectionStart))) * zoom
+        let height = CGFloat(oc_seq_layout_line_height(layout, Int32(document.selectionStart))) * zoom
+        let line = NSRect(x: visibleRect.minX, y: top, width: visibleRect.width, height: height)
+        return line.intersects(visibleRect) ? line.intersection(visibleRect)
+                                            : NSRect(x: visibleRect.midX, y: visibleRect.minY, width: 1, height: 1)
+    }
 
     override func mouseDown(with event: NSEvent) {
         guard let layout = ensureLayout(), !document.isEmpty else { return }

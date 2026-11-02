@@ -389,8 +389,16 @@ typedef struct {
     int extinction_reduced;  /* 280 nm, M^-1 cm^-1 */
     int extinction_cystines;
     int positive, negative;  /* K + R, D + E */
+    double instability;      /* instability index; > 40 predicts unstable */
+    double gravy;            /* mean Kyte-Doolittle hydropathy */
+    double aliphatic;        /* aliphatic index */
+    double charge_ph7;       /* net charge at pH 7 */
+    int strand;              /* OC_STRAND_FORWARD or OC_STRAND_REVERSE: the strand translated */
+    int codons;              /* whole codons in the selection, stop included */
+    int counts[26];          /* residues up to the first stop, by letter ('A' = 0) */
 } OCProteinInfo;
-/* Translates the selection (or the selected feature, on its own strand) and
+/* Translates the selection (or the selected feature, on its own strand; or the
+ * reverse strand when the selection sits in a reverse CDS or ORF's frame) and
  * returns the protein without its stop; NULL when fewer than 3 bases are selected. */
 char *oc_document_selection_protein(const OCDocument *doc, OCProteinInfo *out);
 

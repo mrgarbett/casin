@@ -871,13 +871,24 @@ char *oc_document_selection_protein(const OCDocument *doc, OCProteinInfo *out)
         const Sequence &seq = doc->doc.sequence();
         std::string bases = doc->doc.selectedBases();
         const int fi = doc->doc.activeFeature();
+        const Strand strand = doc->doc.selectionReadingStrand();
         if (fi >= 0 && size_t(fi) < seq.features.size() && seq.features[size_t(fi)].span(seq.length(), seq.circular) == sel)
             bases = seq.featureBases(seq.features[size_t(fi)]);
+        else if (strand == Strand::Reverse)
+            bases = reverseComplement(bases);
         std::string protein = translate(bases);
         const ProteinStats ps = proteinStats(protein);
-        if (out)
+        if (out) {
             *out = {ps.length, ps.unknown, ps.truncated, ps.mass, ps.pI, ps.extinctionReduced, ps.extinctionCystines,
-                    ps.positive, ps.negative};
+                    ps.positive, ps.negative, ps.instability, ps.gravy, ps.aliphatic, proteinCharge(protein, 7.0),
+                    strand == Strand::Reverse ? OC_STRAND_REVERSE : OC_STRAND_FORWARD, sel.length / 3, {}};
+            for (char c : protein) {
+                if (c == '*')
+                    break;
+                if (c >= 'A' && c <= 'Z')
+                    ++out->counts[c - 'A'];
+            }
+        }
         if (!protein.empty() && protein.back() == '*')
             protein.pop_back();
         return dupString(protein);
