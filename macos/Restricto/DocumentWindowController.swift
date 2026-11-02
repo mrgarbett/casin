@@ -825,6 +825,20 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         browser.chooseFolder(sender)
     }
 
+    /// A second window on the same document, beside this one rather than as
+    /// a tab: e.g. the map in one and the sequence in the other. Both show
+    /// the same sequence, selection and edits.
+    @objc func newWindowForDocument(_ sender: Any?) {
+        guard let doc = document as? SequenceDocument else { return }
+        let controller = DocumentWindowController(document: doc)
+        controller.window?.tabbingMode = .disallowed
+        doc.addWindowController(controller)
+        if let frame = window?.frame {
+            controller.window?.setFrame(frame.offsetBy(dx: 30, dy: -30), display: false)
+        }
+        controller.showWindow(nil)
+    }
+
     @objc func toggleMapHidden(_ sender: Any?) {
         mapHidden.toggle()
         UserDefaults.standard.set(mapHidden, forKey: Self.mapHiddenKey)
