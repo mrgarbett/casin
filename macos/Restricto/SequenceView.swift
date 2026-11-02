@@ -285,10 +285,19 @@ final class SequenceView: NSView {
         guard let layout = ensureLayout(), !document.isEmpty else { return }
         let p = layoutPoint(event)
         if event.modifierFlags.contains(.shift) {
-            // On a second enzyme: the bases between the two cuts.
+            // On a second enzyme: the bases between the two cuts. On a
+            // primer or feature: the selection grown to cover it.
             let site = Int(oc_seq_layout_site_at(layout, p.x, p.y))
-            if site >= 0 {
-                document.extendToSite(site)
+            let primer = site < 0 ? Int(oc_seq_layout_primer_at(layout, p.x, p.y)) : -1
+            let feature = site < 0 && primer < 0 ? Int(oc_seq_layout_feature_at(layout, p.x, p.y)) : -1
+            if site >= 0 || primer >= 0 || feature >= 0 {
+                if site >= 0 {
+                    document.extendToSite(site)
+                } else if primer >= 0 {
+                    document.extendToPrimer(primer)
+                } else {
+                    document.extendToFeature(feature)
+                }
                 SelectionBadge.shared.show(for: document, event: event, in: self)
                 SelectionBadge.shared.hideSoon()
                 return
