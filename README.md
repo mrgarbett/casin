@@ -140,7 +140,8 @@ Options: `--size WxH`, `--enzymes 1|2|3|all` (cutter filter), `--select A-B`
   sequence. Status bar shows length, topology, selection, GC% and Tm for 8–100 bp.
 - Features and Enzymes sidebar: per-enzyme show/hide, cut counts, and a unique / ≤2 /
   ≤3 / all cutters filter.
-- Find on both strands (IUPAC codes allowed). Copy and Copy Reverse Complement.
+- Find on both strands (IUPAC codes allowed); on the Mac, Find also jumps to a feature,
+  primer or enzyme by name. Copy and Copy Reverse Complement.
 - Save As GenBank, Export FASTA, Export Map (PNG/SVG/PDF on Linux, PNG/PDF on macOS).
 
 ## Editing (milestone 2, Linux app; the Mac app gets it next)

@@ -477,7 +477,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         window?.titleVisibility = .hidden
         window?.toolbar = toolbar
         window?.toolbarStyle = .unified
-        searchField.placeholderString = "Find bases (both strands)"
+        searchField.placeholderString = "Find bases or a name"
         searchField.sendsWholeSearchString = true
         searchField.target = self
         searchField.action = #selector(findFromField(_:))
@@ -697,10 +697,11 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     @objc private func findFromField(_ sender: NSSearchField) {
         let query = sender.stringValue.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return }
-        let result = core.findNext(query)
+        // A feature, primer or enzyme by name first, then bases on both strands.
+        let result = core.findNamed(query)
         if result.match < 0 {
             NSSound.beep()
-            statusMessage = "Find takes DNA bases (IUPAC codes such as N and R work too)"
+            statusMessage = "No feature, primer or enzyme named \(query), and it isn't DNA bases"
         } else if result.match == 0 {
             NSSound.beep()
             statusMessage = "No match for \(query.uppercased()) on either strand"

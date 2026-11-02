@@ -174,10 +174,12 @@ final class CoreDocument {
     func activateFeature(_ i: Int) { oc_document_activate_feature(handle, Int32(i)) }
     func activateSite(_ i: Int) { oc_document_activate_site(handle, Int32(i)) }
 
-    /// 1-based match number, 0 for no match, -1 when the query isn't DNA.
-    func findNext(_ query: String) -> (match: Int, count: Int) {
+    /// Finds features, primers and enzymes named `query` first, then its
+    /// bases on both strands, and selects the next match. 1-based match
+    /// number, 0 for no match, -1 when nothing has the name and it isn't DNA.
+    func findNamed(_ query: String) -> (match: Int, count: Int) {
         var count: Int32 = 0
-        let n = oc_document_find_next(handle, query, &count)
+        let n = oc_document_find_named(handle, query, &count, nil)
         return (Int(n), Int(count))
     }
 }

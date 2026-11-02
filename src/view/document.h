@@ -77,6 +77,19 @@ public:
     // starting after the current selection start, wrapping around. Returns the
     // 1-based match number, 0 if nothing matched, -1 if the query isn't DNA.
     int findNext(const std::string &query, int *count = nullptr, Strand *strand = nullptr);
+    // What findNamesOrBases selected.
+    enum class FindKind { None, Feature, Primer, Site, Bases };
+    // Find by name, then bases: the features (not "source"), primers and
+    // enzyme sites whose name is `query` (ignoring case and surrounding
+    // spaces), in sequence order, then, when the query is DNA, its matches
+    // on both strands as findNext finds them. A new query starts at the first
+    // name match after the selection start (or, with none, the first base
+    // match after it); repeating it while its last match is still selected
+    // steps on through the whole list, wrapping around. Selects the match
+    // (activating a feature or a site on the map) and returns its 1-based
+    // number, 0 if nothing matched, -1 if nothing is named so and the query
+    // isn't DNA.
+    int findNamesOrBases(const std::string &query, int *count = nullptr, FindKind *kind = nullptr);
 
     // ---- editing ----
     // Every change to the sequence goes through these. Each one is a step on
@@ -180,6 +193,10 @@ private:
     unsigned m_state = 0, m_savedState = 0, m_nextState = 0;
     bool m_inEdit = false;
     bool m_typing = false;   // the last step was typed at the caret, so more typing joins it
+    // The last findNamesOrBases: its query, the match's place in the list and what it selected.
+    std::string m_findQuery;
+    int m_findIndex = -1;
+    Span m_findSelection;
     std::vector<Listener> m_seqListeners, m_selListeners, m_enzListeners, m_histListeners, m_readListeners,
         m_pendingListeners;
 };

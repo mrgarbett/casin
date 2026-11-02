@@ -73,6 +73,13 @@ int main(int argc, char **argv)
     CHECK(oc_document_find_next(doc, "GGTCTC", &count) >= 1);
     CHECK(count >= 2);   /* at least the two BsaI sites of the cassette */
     CHECK(oc_document_find_next(doc, "hello", &count) == -1);
+    {
+        int kind = OC_HIT_NONE;
+        CHECK(oc_document_find_named(doc, "DEMOa", &count, &kind) == 1);
+        CHECK(count == 1 && kind == OC_HIT_FEATURE);
+        CHECK(oc_document_find_named(doc, "GGTCTC", &count, &kind) >= 1 && kind == OC_HIT_SEQUENCE);
+        CHECK(oc_document_find_named(doc, "hello", &count, &kind) == -1);
+    }
 
     /* Newer tools: map options, ORFs, enzyme sets, printing. */
     {
@@ -330,6 +337,7 @@ int main(int argc, char **argv)
         oc_document_show_only_enzymes(doc, NULL, 3, 6);
         CHECK(!oc_document_new_sequence(blank, NULL, NULL, false));
         oc_document_find_next(doc, NULL, NULL);
+        oc_document_find_named(doc, NULL, NULL, NULL);
         oc_document_rename(doc, NULL);
         CHECK(oc_document_add_primer_sequence(doc, NULL, NULL, &err) == -1 && err);
         oc_string_free(err);

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "document.h"
 #include "maplayout.h"   // withThousands
+#include "style.h"
 #include "../core/edit.h"
 #include "../core/featurelib.h"
 #include "../core/tm.h"
@@ -209,6 +210,98 @@ int Document::findNext(const std::string &raw, int *count, Strand *strand)
     if (strand)
         *strand = matches[hit].strand;
     setSelection({matches[hit].start, matches[hit].length});
+    return int(hit) + 1;
+}
+
+int Document::findNamesOrBases(const std::string &raw, int *count, FindKind *kind)
+{
+    if (count)
+        *count = 0;
+    if (kind)
+        *kind = FindKind::None;
+    auto lower = [](std::string t) {
+        for (char &c : t)
+            c = char(std::tolower(static_cast<unsigned char>(c)));
+        return t;
+    };
+    const size_t first = raw.find_first_not_of(" \t\r\n");
+    const std::string name = first == std::string::npos
+        ? std::string() : lower(raw.substr(first, raw.find_last_not_of(" \t\r\n") - first + 1));
+    std::string bases;
+    for (char c : raw)
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r')
+            bases.push_back(c);
+    if (name.empty())
+        return -1;
+
+    struct Hit {
+        FindKind kind;
+        int index;   // feature, primer or visible site; -1 for a site the filter hides
+        Span span;
+    };
+    std::vector<Hit> hits;
+    for (size_t i = 0; i < m_seq.features.size(); ++i) {
+        const Feature &f = m_seq.features[i];
+        if (view::FeatureStyle::isDrawn(f) && lower(f.name) == name)
+            hits.push_back({FindKind::Feature, int(i), f.span(m_seq.length(), m_seq.circular)});
+    }
+    for (size_t i = 0; i < m_seq.primers.size(); ++i) {
+        const Primer &p = m_seq.primers[i];
+        if (p.binding.length() > 0 && lower(p.name) == name)
+            hits.push_back({FindKind::Primer, int(i), {p.binding.start, p.binding.length()}});
+    }
+    for (const CutSite &s : m_allSites) {
+        if (lower(s.enzyme->name) != name)
+            continue;
+        // Enzymes that cut twice list a site twice; keep one.
+        const Span span{s.matchStart, s.enzyme->siteLength()};
+        bool seen = false;
+        for (const Hit &h : hits)
+            seen = seen || (h.kind == FindKind::Site && h.span == span);
+        if (seen)
+            continue;
+        int visible = -1;
+        for (size_t v = 0; v < m_visibleSites.size() && visible < 0; ++v)
+            if (m_visibleSites[v].enzyme == s.enzyme && m_visibleSites[v].matchStart == s.matchStart)
+                visible = int(v);
+        hits.push_back({FindKind::Site, visible, span});
+    }
+    std::stable_sort(hits.begin(), hits.end(), [](const Hit &a, const Hit &b) { return a.span.start < b.span.start; });
+    const size_t names = hits.size();
+    const bool dna = !bases.empty() && cleanBases(bases).size() == bases.size();
+    if (dna)
+        for (const PatternMatch &m : findPattern(m_seq, bases))
+            hits.push_back({FindKind::Bases, -1, {m.start, m.length}});
+    if (count)
+        *count = int(hits.size());
+    if (hits.empty())
+        return dna ? 0 : -1;
+
+    size_t hit = 0;
+    if (name == m_findQuery && m_findIndex >= 0 && m_hasSelection && m_selection == m_findSelection) {
+        hit = size_t(m_findIndex + 1) % hits.size();
+    } else {
+        // The first name match after the selection start, else the first base match.
+        const size_t end = names > 0 ? names : hits.size();
+        const int from = m_hasSelection ? m_selection.start : -1;
+        for (size_t i = 0; i < end; ++i)
+            if (hits[i].span.start > from) {
+                hit = i;
+                break;
+            }
+    }
+    const Hit &h = hits[hit];
+    if (h.kind == FindKind::Feature)
+        activateFeature(h.index);
+    else if (h.kind == FindKind::Site && h.index >= 0)
+        activateSite(h.index);
+    else
+        setSelection(h.span);
+    m_findQuery = name;
+    m_findIndex = int(hit);
+    m_findSelection = m_selection;
+    if (kind)
+        *kind = h.kind;
     return int(hit) + 1;
 }
 
