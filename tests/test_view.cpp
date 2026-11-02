@@ -93,6 +93,28 @@ static void testUndo(const Sequence &seq)
 
 // The Edit Feature dialog sets a colour with replaceFeature: one undo step,
 // kept by GenBank and .dna.
+static void testEditingHistoryHidden()
+{
+    // Geneious keeps edits as features: the original bases as one label, the
+    // kind of edit as another. They stay in the file but aren't drawn.
+    Feature edit;
+    edit.type = "misc_feature";
+    edit.name = "AC";
+    edit.qualifiers = {{"label", "AC"}, {"label", "nonstandard type: Editing History Deletion"}};
+    CHECK(FeatureStyle::isEditingHistory(edit));
+    CHECK(!FeatureStyle::isDrawn(edit));
+    Feature insertion;
+    insertion.type = "misc_feature";
+    insertion.name = "nonstandard type: Editing History Insertion";
+    CHECK(!FeatureStyle::isDrawn(insertion));
+    // A real feature with a Geneious type label is still drawn.
+    Feature spr;
+    spr.type = "misc_feature";
+    spr.name = "SpR";
+    spr.qualifiers = {{"label", "SpR"}, {"label", "nonstandard type: Bacterial Selection"}};
+    CHECK(FeatureStyle::isDrawn(spr));
+}
+
 static void testFeatureColor(const Sequence &seq)
 {
     Document doc;
@@ -345,6 +367,7 @@ int main(int argc, char **argv)
     }
     testUndo(seq);
     testFeatureColor(seq);
+    testEditingHistoryHidden();
     {
         GelLayout gel({{"Ladder", {10000, 1000, 100}, {1000}, true, false, {}}, {"Cut", {3000, 500}, {}, false, false, {}}},
                       theme, tm, 500, 400);

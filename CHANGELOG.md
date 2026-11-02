@@ -8,6 +8,7 @@ versions may change file handling, menus and the C API.
 - **Sequence view:** double-clicking an amino acid selects the whole translation: the open reading frame from its start codon through its stop, or the CDS feature under a feature's translation row (macOS; the Linux view follows). An amino acid lights up with the selection whenever its codon is selected, so a clicked codon and a double-clicked frame both show what they took.
 - **macOS:** the app now needs macOS 26 Tahoe or later (built with Xcode 26). Support for macOS 13 to 15 and the plain, non-glass layout were dropped.
 - **Focus:** the menus now show the core cloning tools only (primers, PCR, digest and gel, insertion by PCR, Gibson) plus opening, saving and editing. The other tools from the first alpha are hidden until each gets its own tested step; turn on **Experimental Tools** (main menu on Linux, the Restricto menu on the Mac) to show them again. Nothing was removed.
+- **Geneious files:** the editing-history records Geneious exports as features ("nonstandard type: Editing History Insertion/Deletion/Replacement") are no longer drawn on the map or in the sequence. They stay in the file and are saved back unchanged.
 
 ## 0.1.0-alpha (2026-10-27)
 
