@@ -1370,7 +1370,82 @@ std::string fixed(double v, int decimals)
 {
     char buf[64];
     std::snprintf(buf, sizeof buf, "%.*f", decimals, v);
-    return buf;
+    std::string s = buf;
+    // A value that rounds to zero keeps no minus sign ("-0.000").
+    if (s[0] == '-' && s.find_first_of("123456789") == std::string::npos)
+        s.erase(0, 1);
+    return s;
+}
+
+// The amino acid composition: one line per residue with its count, its share
+// and a bar (a quarter of the protein fills it), then the usual groupings.
+void addComposition(const Form &f, const std::string &protein)
+{
+    GtkWidget *group = addGroup(f, "Composition");
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 12);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 2);
+    gtk_widget_add_css_class(grid, "card");
+    gtk_widget_set_margin_top(grid, 4);
+    gtk_widget_set_margin_bottom(grid, 4);
+
+    int counts[26] = {};
+    for (char c : protein)
+        if (c >= 'A' && c <= 'Z')
+            ++counts[c - 'A'];
+    static const struct { char letter; const char *name; } kResidues[] = {
+        {'A', "Ala"}, {'R', "Arg"}, {'N', "Asn"}, {'D', "Asp"}, {'C', "Cys"}, {'Q', "Gln"}, {'E', "Glu"},
+        {'G', "Gly"}, {'H', "His"}, {'I', "Ile"}, {'L', "Leu"}, {'K', "Lys"}, {'M', "Met"}, {'F', "Phe"},
+        {'P', "Pro"}, {'S', "Ser"}, {'T', "Thr"}, {'W', "Trp"}, {'Y', "Tyr"}, {'V', "Val"},
+    };
+    int total = 0;
+    for (const auto &r : kResidues)
+        total += counts[r.letter - 'A'];
+    total = std::max(1, total);
+    auto share = [total](int k) { return fixed(100.0 * k / total, 1) + " %"; };
+    auto cell = [&](const std::string &text, int column, int row, bool dim, bool end) {
+        GtkWidget *l = gtk_label_new(text.c_str());
+        gtk_label_set_xalign(GTK_LABEL(l), end ? 1.0f : 0.0f);
+        if (dim)
+            gtk_widget_add_css_class(l, "dim-label");
+        else
+            gtk_widget_add_css_class(l, "numeric");
+        gtk_widget_set_hexpand(l, column == 0);
+        gtk_grid_attach(GTK_GRID(grid), l, column, row, 1, 1);
+    };
+    int row = 0;
+    for (const auto &r : kResidues) {
+        const int k = counts[r.letter - 'A'];
+        cell(std::string(r.name) + "  " + r.letter, 0, row, true, false);
+        cell(std::to_string(k), 1, row, false, true);
+        cell(share(k), 2, row, false, true);
+        GtkWidget *bar = gtk_level_bar_new_for_interval(0, 1);
+        gtk_level_bar_set_value(GTK_LEVEL_BAR(bar), std::min(1.0, 4.0 * k / total));
+        gtk_widget_set_size_request(bar, 56, -1);
+        gtk_widget_set_valign(bar, GTK_ALIGN_CENTER);
+        gtk_grid_attach(GTK_GRID(grid), bar, 3, row, 1, 1);
+        ++row;
+    }
+    static const struct { const char *title; const char *letters; } kGroups[] = {
+        {"Acidic (D, E)", "DE"},
+        {"Basic (K, R, H)", "KRH"},
+        {"Polar (S, T, N, Q, C, Y)", "STNQCY"},
+        {"Hydrophobic (A, V, I, L, M, F, W)", "AVILMFW"},
+    };
+    GtkWidget *rule = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_widget_set_margin_top(rule, 6);
+    gtk_widget_set_margin_bottom(rule, 6);
+    gtk_grid_attach(GTK_GRID(grid), rule, 0, row++, 4, 1);
+    for (const auto &g : kGroups) {
+        int k = 0;
+        for (const char *c = g.letters; *c; ++c)
+            k += counts[*c - 'A'];
+        cell(g.title, 0, row, true, false);
+        cell(std::to_string(k), 1, row, false, true);
+        cell(share(k), 2, row, false, true);
+        ++row;
+    }
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group), grid);
 }
 } // namespace
 
@@ -1381,27 +1456,36 @@ void Window::proteinDialog()
         toast("Select the coding bases, or a CDS feature, first");
         return;
     }
-    // A selected feature is read on its own strand, with its exons joined.
+    // A selected feature is read on its own strand, with its exons joined;
+    // bases inside a reverse CDS or ORF's frame are read backwards too.
     const Sequence &seq = m_doc.sequence();
+    const Strand strand = m_doc.selectionReadingStrand();
     std::string bases = m_doc.selectedBases();
-    std::string from = "Selection, forward strand";
+    std::string from = std::string("Selection, ") + (strand == Strand::Reverse ? "reverse" : "forward") + " strand";
     const int fi = m_doc.activeFeature();
+    bool named = false;
     if (fi >= 0 && size_t(fi) < seq.features.size()) {
         const Feature &f = seq.features[size_t(fi)];
         if (f.span(seq.length(), seq.circular) == sel) {
             bases = seq.featureBases(f);
             from = f.name + (f.strand == Strand::Reverse ? ", reverse strand" : "");
+            named = true;
         }
     }
+    if (!named && strand == Strand::Reverse)
+        bases = reverseComplement(bases);
     const std::string protein = translate(bases);
     const ProteinStats ps = proteinStats(protein);
+    const double charge = proteinCharge(protein, 7.0);
     std::string shown = protein;
     if (!shown.empty() && shown.back() == '*')
         shown.pop_back();
+    // The residues up to the first stop, which is what the stats count.
+    const std::string counted = shown.substr(0, shown.find('*'));
 
-    Form f = makeForm("Protein Properties", "Copy Protein");
+    Form f = makeForm("Translation", "Copy Protein");
     adw_dialog_set_content_height(f.dialog, 600);
-    GtkWidget *gp = addGroup(f, "Translation");
+    GtkWidget *gp = addGroup(f, "Protein");
     adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(gp),
                                           (from + " · " + view::formatBp(int(bases.size()))).c_str());
     GtkWidget *text = gtk_label_new(shown.c_str());
@@ -1419,7 +1503,7 @@ void Window::proteinDialog()
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(gp), text);
     // Leave room around the text inside the card.
     GtkCssProvider *css = gtk_css_provider_new();
-    gtk_css_provider_load_from_string(css, "label.card { padding: 10px 12px; }");
+    gtk_css_provider_load_from_string(css, "label.card, grid.card { padding: 10px 12px; }");
     gtk_style_context_add_provider_for_display(gtk_widget_get_display(text), GTK_STYLE_PROVIDER(css),
                                                GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
     g_object_unref(css);
@@ -1428,18 +1512,39 @@ void Window::proteinDialog()
     if (ps.truncated)
         adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(gs),
                                               "A stop codon ends the protein early; figures are up to it");
+    const int end = sel.length > 0 ? (sel.start + sel.length - 1) % std::max(1, seq.length()) + 1 : sel.start;
+    valueRow(gs, "Position", view::withThousands(sel.start + 1) + "–" + view::withThousands(end) + " ("
+                                 + (strand == Strand::Reverse ? "reverse" : "forward") + ")");
     valueRow(gs, "Length", std::to_string(ps.length) + " aa");
     valueRow(gs, "Molecular weight", fixed(ps.mass / 1000, 2) + " kDa");
     valueRow(gs, "Isoelectric point", fixed(ps.pI, 2));
+    valueRow(gs, "Charge at pH 7", (charge > 0 ? "+" : "") + fixed(charge, 1));
     valueRow(gs, "Charged residues", std::to_string(ps.positive) + " + (K, R), " + std::to_string(ps.negative) + " − (D, E)");
+    // Absorbance of a 1 g/l solution, as the extinction over the mass.
+    auto absorbance = [&](int ext) { return ps.mass > 0 ? fixed(ext / ps.mass, 3) : std::string("–"); };
     valueRow(gs, "Extinction at 280 nm", grouped(ps.extinctionReduced) + " M⁻¹cm⁻¹ (Cys reduced)");
-    if (ps.extinctionCystines != ps.extinctionReduced)
+    valueRow(gs, "Abs 0.1 % (1 g/l)", absorbance(ps.extinctionReduced));
+    if (ps.extinctionCystines != ps.extinctionReduced) {
         valueRow(gs, "With cystines", grouped(ps.extinctionCystines) + " M⁻¹cm⁻¹");
+        valueRow(gs, "Abs 0.1 % with cystines", absorbance(ps.extinctionCystines));
+    }
+    valueRow(gs, "Instability index",
+             fixed(ps.instability, 2) + (ps.instability > 40 ? " (unstable)" : " (stable)"));
+    valueRow(gs, "Aliphatic index", fixed(ps.aliphatic, 2));
+    valueRow(gs, "GRAVY", fixed(ps.gravy, 3));
     if (ps.unknown > 0)
         valueRow(gs, "Unknown residues", std::to_string(ps.unknown) + " (left out of the weight)");
+    if (sel.length % 3 != 0)
+        valueRow(gs, "Part codon", "the last " + std::to_string(sel.length % 3) + " base"
+                                       + (sel.length % 3 == 1 ? "" : "s") + " are left out");
+
+    addComposition(f, counted);
+
     GtkWidget *note = addGroup(f);
     adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(note),
-                                          "Average masses; pI from EMBOSS pKa values; extinction after Pace et al. (1995)");
+                                          "Average masses; pI from EMBOSS pKa values; extinction after Pace et al. "
+                                          "(1995); instability after Guruprasad et al. (1990); GRAVY after Kyte and "
+                                          "Doolittle (1982)");
     g_object_set_data_full(G_OBJECT(f.dialog), "protein", g_strdup(shown.c_str()), g_free);
     g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *b, gpointer d) {
                          AdwDialog *dialog = ADW_DIALOG(d);

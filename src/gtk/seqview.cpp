@@ -44,7 +44,8 @@ SequenceView::SequenceView(Document *doc) : m_doc(doc)
     GtkGesture *click = gtk_gesture_click_new();
     g_signal_connect(click, "pressed", G_CALLBACK(&SequenceView::pressed), this);
     gtk_widget_add_controller(m_area, GTK_EVENT_CONTROLLER(click));
-    // Right-click: Add Primer (from the selection, if any), as on the Mac.
+    // Right-click: Add Primer (from the selection, if any) and, with bases
+    // selected, Copy and Analyze Translation, as on the Mac.
     GtkGesture *menu = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(menu), GDK_BUTTON_SECONDARY);
     g_signal_connect(menu, "pressed", G_CALLBACK((+[](GtkGestureClick *, int, double x, double y, gpointer p) {
@@ -56,6 +57,9 @@ SequenceView::SequenceView(Document *doc) : m_doc(doc)
                          g_menu_append(model, sel ? "Add Primer from Selection…" : "Add Primer…", "win.add-primer");
                          if (sel)
                              g_menu_append(model, "Copy", "win.copy");
+                         // A codon or more selected: translate it, as on the Mac.
+                         if (sel && self->m_doc->selection().length >= 3)
+                             g_menu_append(model, "Analyze Translation…", "win.protein");
                          GtkWidget *pop = gtk_popover_menu_new_from_model(G_MENU_MODEL(model));
                          g_object_unref(model);
                          gtk_widget_set_parent(pop, self->m_area);

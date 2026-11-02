@@ -905,6 +905,7 @@ void Shell::rebuildMenu()
     g_menu_append(seqMenu, "Set Origin at Selection", "win.set-origin");
     g_menu_append(seqMenu, "Circular", "win.circular");
     g_menu_append(seqMenu, "Rename…", "win.rename");
+    g_menu_append(seqMenu, "Analyze Translation…", "win.protein");
     GMenu *featureMenu = g_menu_new();
     GMenu *featureEdit = g_menu_new();
     g_menu_append(featureEdit, "Add Feature…", "win.add-feature");
@@ -914,7 +915,6 @@ void Shell::rebuildMenu()
     GMenu *featureFind = g_menu_new();
     g_menu_append(featureFind, "Annotate Common Features", "win.annotate");
     addExp(featureFind, "Find ORFs…", "win.orfs");
-    addExp(featureFind, "Protein Properties…", "win.protein");
     g_menu_append_section(featureMenu, nullptr, G_MENU_MODEL(featureFind));
     GMenu *primerMenu = g_menu_new();
     GMenu *primerEdit = g_menu_new();

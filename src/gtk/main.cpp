@@ -239,6 +239,7 @@ void onStartup(GApplication *app, gpointer)
         {"win.edit-feature", {"<Control><Shift>k", nullptr}},
         {"win.digest", {"<Control><Shift>g", "<Control>d", nullptr}},
         {"win.go-to", {"<Control>l", nullptr}},
+        {"win.protein", {"<Control><Alt>t", nullptr}},
         {"win.copy-map", {"<Control><Alt>c", nullptr}},
         {"win.export-map", {"<Control>e", nullptr}},
         {"win.print", {"<Control>p", nullptr}},
