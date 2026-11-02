@@ -67,7 +67,8 @@ SequenceLayout::SequenceLayout(const oc::Sequence &seq, const std::vector<CutSit
         m_orfFwd.assign(size_t(m_n), 0);
         if (m_opt.frames == 6)
             m_orfRev.assign(size_t(m_n), 0);
-        for (const Orf &o : findOrfs(m_seq, std::max(1, m_opt.minOrfCodons))) {
+        m_orfs = findOrfs(m_seq, std::max(1, m_opt.minOrfCodons));
+        for (const Orf &o : m_orfs) {
             std::vector<char> &aa = o.strand == Strand::Reverse ? m_orfRev : m_orfFwd;
             if (aa.empty())
                 continue;
@@ -363,13 +364,36 @@ int SequenceLayout::baseAt(Point p) const
 
 int SequenceLayout::codonAt(Point p) const
 {
+    return codonHitAt(p).codon;
+}
+
+Span SequenceLayout::translationAt(Point p) const
+{
+    const CodonHit hit = codonHitAt(p);
+    if (hit.codon < 0)
+        return {};
+    if (hit.feature >= 0)
+        return m_seq.features[size_t(hit.feature)].span(m_n, m_seq.circular);
+    // The ORF of that strand and phase covering the codon; the longest first.
+    for (const Orf &o : m_orfs) {
+        if (o.strand != hit.strand)
+            continue;
+        const int rel = ((hit.codon - o.start) % m_n + m_n) % m_n;
+        if (rel < o.length && rel % 3 == 0)
+            return {o.start, o.length};
+    }
+    return {};
+}
+
+SequenceLayout::CodonHit SequenceLayout::codonHitAt(Point p) const
+{
     const int li = lineIndexAt(p.y);
     if (li < 0)
-        return -1;
+        return {};
     const Line &l = m_lines[size_t(li)];
     const int col = columnAt(p.x);
     if (col < 0 || col >= l.len)
-        return -1;
+        return {};
     const int pos = l.start + col;
     // ORF frame rows: the codon of that frame covering pos.
     for (int side = 0; side < 2; ++side) {
@@ -384,8 +408,8 @@ int SequenceLayout::codonAt(Point p) const
         const int phase = fwd ? k : ((m_n - k) % 3 + 3) % 3;
         const int start = pos - ((pos - phase) % 3 + 3) % 3;
         if (start >= 0 && start < m_n && aas[size_t(start)])
-            return start;
-        return -1;
+            return {start, fwd ? Strand::Forward : Strand::Reverse, -1};
+        return {};
     }
     // CDS translation rows, under their feature lanes.
     for (const LanePiece &pc : l.pieces) {
@@ -399,9 +423,9 @@ int SequenceLayout::codonAt(Point p) const
             continue;
         for (const CodonMark &m : mi->second)
             if (std::abs(m.position - pos) <= 1)
-                return m.position - 1;
+                return {m.position - 1, Strand::Forward, pc.feature};
     }
-    return -1;
+    return {};
 }
 
 double SequenceLayout::boundaryX(int b) const
@@ -618,6 +642,18 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
         if (c.enzyme)
             tint(c.matchStart, c.matchStart + c.enzyme->siteLength(), m_theme.cutMarker.withAlpha(0.15));
     }
+    // An amino acid lights up with the selection when its whole codon is
+    // selected and the selection starts in its frame: one for a clicked
+    // codon, the row for a double-clicked frame, nothing for a stretch of
+    // bases picked in another frame.
+    auto codonSelected = [&](int p) {
+        if (!st.hasSelection || st.selection.length < 3)
+            return false;
+        const int a = st.selection.start, e = st.selection.end();
+        if (p < a && m_seq.circular)
+            p += m_n;
+        return p >= a && p + 3 <= e && (p - a) % 3 == 0;
+    };
 
     const double asc = m_baseFont.size * 0.78;
     for (int li = lineIndexAt(scrollY); li >= 0 && li < int(m_lines.size()); ++li) {
@@ -702,6 +738,8 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
                     if (!aa || (fwd ? p % 3 : ((m_n - p) % 3 + 3) % 3) != k)
                         continue;
                     const double cx = colX(p + 1 - l.start) + m_charW / 2;
+                    if (codonSelected(p))
+                        s.rect({cx - m_charW * 1.5 + 0.5, fy, m_charW * 3 - 1, m_aaH - 1}, m_theme.selection);
                     // The stop codon's block points the way the frame reads.
                     s.polygon(codonBlock(cx - m_charW * 1.5 + 0.5, fy, m_charW * 3 - 1, m_aaH - 1,
                                          aa == '*' ? (fwd ? 1 : -1) : 0),
@@ -897,6 +935,8 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
                 for (; it != marks.end() && it->position < l.start + pc.b; ++it, ++k) {
                     const int c = it->position - l.start;
                     const double cx = colX(c) + m_charW / 2;
+                    if (codonSelected(it->position - 1))
+                        s.rect({cx - m_charW * 1.5, ay, m_charW * 3, m_aaH - 1}, m_theme.selection);
                     // The block at the 3' end of the reading frame points its way.
                     const bool fwdF = f.strand != Strand::Reverse;
                     const bool last = fwdF ? k + 1 == int(marks.size()) : k == 0;

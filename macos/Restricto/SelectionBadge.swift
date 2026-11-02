@@ -41,15 +41,22 @@ final class SelectionBadge {
         panel.contentView = box
     }
 
-    /// The text for the document's current selection, or nil when nothing is selected.
-    static func text(for document: CoreDocument) -> String? {
+    /// "start–end" (1-based) of the selection, or nil when nothing is selected.
+    static func positions(for document: CoreDocument) -> String? {
         guard document.hasSelection, document.selectionLength > 0 else { return nil }
         let n = document.length, length = document.selectionLength
         let start = document.selectionStart + 1
         var end = document.selectionStart + length
         if end > n { end -= n }
-        var parts = [length == 1 ? start.formatted() : "\(start.formatted())–\(end.formatted())",
-                     "\(length.formatted()) bp"]
+        return length == 1 ? start.formatted() : "\(start.formatted())–\(end.formatted())"
+    }
+
+    /// The text for the document's current selection, or nil when nothing is selected.
+    static func text(for document: CoreDocument) -> String? {
+        guard let positions = positions(for: document) else { return nil }
+        let length = document.selectionLength
+        // Between two enzyme sites: the fragment, named by its enzymes.
+        var parts = document.siteFragmentText.map { [$0, positions] } ?? [positions, "\(length.formatted()) bp"]
         // Below 8 bases the Tm formula means nothing (it goes negative).
         if length >= 8, length <= maxTmLength {
             var check = OCPrimerCheck()

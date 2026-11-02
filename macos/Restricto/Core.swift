@@ -47,6 +47,8 @@ struct EnzymeInfo {
     /// "Dcm", "Dam and Dcm"; empty when none).
     let methylationBlocked: Int
     let methylation: String
+    /// The features (not "source") its cuts fall inside: cloning there breaks them.
+    let cutFeatures: [String]
 }
 
 /// The document model shared with the Linux app (selection, enzyme filter, ...).
@@ -152,7 +154,9 @@ final class CoreDocument {
             return EnzymeInfo(name: String(cString: e.name), site: String(cString: e.site), cuts: Int(e.cuts),
                               hidden: e.hidden, passesFilter: e.passes_filter,
                               methylationBlocked: Int(e.methylation_blocked),
-                              methylation: e.methylation != nil ? String(cString: e.methylation) : "")
+                              methylation: e.methylation != nil ? String(cString: e.methylation) : "",
+                              cutFeatures: e.cut_features > 0 && e.cut_feature_names != nil
+                                  ? String(cString: e.cut_feature_names).components(separatedBy: "\n") : [])
         }
     }
 
@@ -177,6 +181,8 @@ final class CoreDocument {
             String(cString: oc_document_visible_site_enzyme(handle, Int32($0)))
         }
     }
+    /// Where a visible site cuts the top strand.
+    func visibleSiteCut(_ i: Int) -> Int { Int(oc_document_visible_site_cut(handle, Int32(i))) }
 
     /// Adds features for the common elements found in the sequence (one undo
     /// step); returns how many.
@@ -190,13 +196,31 @@ final class CoreDocument {
     var selectedReverseComplement: String { takeString(oc_document_selected_reverse_complement(handle)) }
     var activeFeature: Int { Int(oc_document_active_feature(handle)) }
     var activeSite: Int { Int(oc_document_active_site(handle)) }
+    /// The site shift-clicked after the active one, while that selection stands; else -1.
+    var secondSite: Int { Int(oc_document_second_site(handle)) }
+    /// The two enzymes whose cuts bound the selection, after a shift-click from one site to another.
+    var siteFragment: (first: String, second: String)? {
+        let a = activeSite, b = secondSite
+        guard a >= 0, b >= 0, hasSelection else { return nil }
+        return (String(cString: oc_document_visible_site_enzyme(handle, Int32(a))),
+                String(cString: oc_document_visible_site_enzyme(handle, Int32(b))))
+    }
+    /// "BamHI–XbaI: 1,234 bp" for a selection between two sites, else nil.
+    var siteFragmentText: String? {
+        siteFragment.map { "\($0.first)–\($0.second): \(selectionLength.formatted()) bp" }
+    }
     func activateFeature(_ i: Int) { oc_document_activate_feature(handle, Int32(i)) }
     func activateSite(_ i: Int) { oc_document_activate_site(handle, Int32(i)) }
+    func extendToSite(_ i: Int) { oc_document_extend_to_site(handle, Int32(i)) }
+    func extendToFeature(_ i: Int) { oc_document_extend_to_feature(handle, Int32(i)) }
+    func extendToPrimer(_ i: Int) { oc_document_extend_to_primer(handle, Int32(i)) }
 
-    /// 1-based match number, 0 for no match, -1 when the query isn't DNA.
-    func findNext(_ query: String) -> (match: Int, count: Int) {
+    /// Finds features, primers and enzymes named `query` first, then its
+    /// bases on both strands, and selects the next match. 1-based match
+    /// number, 0 for no match, -1 when nothing has the name and it isn't DNA.
+    func findNamed(_ query: String) -> (match: Int, count: Int) {
         var count: Int32 = 0
-        let n = oc_document_find_next(handle, query, &count)
+        let n = oc_document_find_named(handle, query, &count, nil)
         return (Int(n), Int(count))
     }
 }

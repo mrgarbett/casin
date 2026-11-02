@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <set>
 
 namespace oc {
@@ -294,6 +295,33 @@ std::string methylationName(int block)
     if (block == (MethylDam | MethylDcm))
         return "Dam and Dcm";
     return block == MethylDam ? "Dam" : block == MethylDcm ? "Dcm" : "";
+}
+
+std::vector<int> featuresCutBy(const Sequence &seq, const CutSite &site)
+{
+    const int n = seq.length();
+    // The cut runs from one strand's cut to the other's (the overhang), the
+    // short way round on a circle; one boundary when it is blunt.
+    int lo = std::min(site.cutTop, site.cutBottom), span = std::abs(site.cutTop - site.cutBottom);
+    if (seq.circular && n > 0 && span > n / 2) {
+        lo = std::max(site.cutTop, site.cutBottom);
+        span = n - span;
+    }
+    std::vector<int> out;
+    for (size_t i = 0; i < seq.features.size(); ++i) {
+        const Span fp = seq.features[i].span(n, seq.circular);
+        for (int k = 0; k <= span; ++k) {
+            // Inside means between two of the footprint's bases, not on its edge.
+            int offset = lo + k - fp.start;
+            if (seq.circular && n > 0)
+                offset = mod(offset, n);
+            if (offset > 0 && offset < fp.length) {
+                out.push_back(int(i));
+                break;
+            }
+        }
+    }
+    return out;
 }
 
 } // namespace oc

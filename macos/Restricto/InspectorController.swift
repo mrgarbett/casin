@@ -306,7 +306,7 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         onMapOnly.title = "On map only"
         onMapOnly.controlSize = .small
         onMapOnly.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        onMapOnly.toolTip = "Hide enzymes the cut filter leaves out or that are unticked"
+        onMapOnly.toolTip = "Hide enzymes the cut filter leaves out (unticked ones stay listed, to tick again)"
         onMapOnly.target = self
         onMapOnly.action = #selector(onMapOnlyChanged(_:))
         onMapOnly.state = UserDefaults.standard.bool(forKey: Self.onMapOnlyKey) ? .on : .off
@@ -368,14 +368,15 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
         applyEnzymeSearch()
     }
 
-    /// The cutters whose name contains the search text, and with "Only enzymes
-    /// on the map", only those the map shows.
+    /// The cutters whose name contains the search text, and with "On map
+    /// only", only those the cut filter lets onto the map. Unticked ones stay
+    /// listed, or there would be no way to tick them again.
     private func applyEnzymeSearch() {
         let query = enzymeSearch.stringValue.trimmingCharacters(in: .whitespaces)
         let mapOnly = onMapOnly.state == .on
         enzymes = cutters.filter { e in
             (query.isEmpty || e.name.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil)
-                && (!mapOnly || (e.passesFilter && !e.hidden))
+                && (!mapOnly || e.passesFilter)
         }
         enzymeTable.reloadData()
     }
@@ -534,18 +535,35 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
             label.lineBreakMode = .byTruncatingTail
             label.toolTip = e.name
             label.textColor = e.passesFilter ? .labelColor : .tertiaryLabelColor
-            guard e.methylationBlocked > 0 else { return label }
-            // Dam/Dcm: a small orange tag; the tooltip says how many sites it blocks.
-            let tag = NSTextField(labelWithString: e.methylation == "Dam and Dcm" ? "Dam·Dcm" : e.methylation)
-            tag.font = .systemFont(ofSize: 9, weight: .semibold)
-            tag.textColor = .systemOrange
-            let all = e.methylationBlocked >= e.cuts
-            let tip = "\(e.name): \(all ? "every site" : "\(e.methylationBlocked) of \(e.cuts) sites") blocked by "
-                + "\(e.methylation) methylation when the DNA comes from a dam+ dcm+ E. coli strain"
-            label.toolTip = tip
-            tag.toolTip = tip
-            tag.setContentCompressionResistancePriority(.required, for: .horizontal)
-            let stack = NSStackView(views: [label, tag])
+            var views: [NSView] = [label]
+            var tips: [String] = []
+            if !e.cutFeatures.isEmpty {
+                // Cuts inside a feature: a small tag naming it (and how many more);
+                // the tooltip lists them all.
+                let more = e.cutFeatures.count > 1 ? " +\(e.cutFeatures.count - 1)" : ""
+                let tag = NSTextField(labelWithString: e.cutFeatures[0] + more)
+                tag.font = .systemFont(ofSize: 9, weight: .semibold)
+                tag.textColor = .systemPurple
+                tag.lineBreakMode = .byTruncatingMiddle
+                tag.setContentCompressionResistancePriority(.defaultLow + 1, for: .horizontal)
+                views.append(tag)
+                tips.append("\(e.name) cuts inside \(e.cutFeatures.joined(separator: ", "))")
+            }
+            if e.methylationBlocked > 0 {
+                // Dam/Dcm: a small orange tag; the tooltip says how many sites it blocks.
+                let tag = NSTextField(labelWithString: e.methylation == "Dam and Dcm" ? "Dam·Dcm" : e.methylation)
+                tag.font = .systemFont(ofSize: 9, weight: .semibold)
+                tag.textColor = .systemOrange
+                let all = e.methylationBlocked >= e.cuts
+                tips.append("\(e.name): \(all ? "every site" : "\(e.methylationBlocked) of \(e.cuts) sites") blocked by "
+                    + "\(e.methylation) methylation when the DNA comes from a dam+ dcm+ E. coli strain")
+                tag.setContentCompressionResistancePriority(.required, for: .horizontal)
+                views.append(tag)
+            }
+            guard views.count > 1 else { return label }
+            let tip = tips.joined(separator: "\n")
+            for view in views { view.toolTip = tip }
+            let stack = NSStackView(views: views)
             stack.spacing = 4
             return stack
         case "site":

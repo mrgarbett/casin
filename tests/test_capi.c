@@ -25,7 +25,7 @@ int main(int argc, char **argv)
     if (argc < 2) return 2;
     snprintf(path, sizeof path, "%s/pOC-demo.dna", argv[1]);
 
-    CHECK(strcmp(oc_version(), "0.1.0-alpha") == 0);
+    CHECK(strncmp(oc_version(), "0.1.0-alpha+", 12) == 0 && strlen(oc_version()) > 12);
     OCDocument *doc = oc_document_new();
     oc_document_set_callback(doc, on_change, NULL);
     CHECK(oc_document_is_empty(doc));
@@ -61,6 +61,7 @@ int main(int argc, char **argv)
     for (int i = 0; i < oc_document_enzyme_count(doc); ++i) {
         OCEnzymeInfo e;
         oc_document_enzyme(doc, i, &e);
+        CHECK(e.cut_feature_names && (e.cut_features == 0) == (e.cut_feature_names[0] == '\0'));
         if (strcmp(e.name, "EcoRI") == 0) {
             sawEcoRI = true;
             CHECK(e.hidden && e.cuts == 1);
@@ -73,6 +74,13 @@ int main(int argc, char **argv)
     CHECK(oc_document_find_next(doc, "GGTCTC", &count) >= 1);
     CHECK(count >= 2);   /* at least the two BsaI sites of the cassette */
     CHECK(oc_document_find_next(doc, "hello", &count) == -1);
+    {
+        int kind = OC_HIT_NONE;
+        CHECK(oc_document_find_named(doc, "DEMOa", &count, &kind) == 1);
+        CHECK(count == 1 && kind == OC_HIT_FEATURE);
+        CHECK(oc_document_find_named(doc, "GGTCTC", &count, &kind) >= 1 && kind == OC_HIT_SEQUENCE);
+        CHECK(oc_document_find_named(doc, "hello", &count, &kind) == -1);
+    }
 
     /* Newer tools: map options, ORFs, enzyme sets, printing. */
     {
@@ -142,6 +150,13 @@ int main(int argc, char **argv)
 
     OCSeqLayout *seq = oc_seq_layout_new(doc, 800, true, true, measure, NULL);
     CHECK(oc_seq_layout_total_height(seq) > 1000);
+    {
+        /* The next line starts a line's worth of bases on. */
+        const int bpl = oc_seq_layout_bases_per_line(seq);
+        CHECK(bpl > 10 && bpl < oc_document_length(doc));
+        CHECK(oc_seq_layout_line_top(seq, bpl) > oc_seq_layout_line_top(seq, bpl - 1));
+        CHECK(oc_seq_layout_line_top(seq, 0) == oc_seq_layout_line_top(seq, bpl - 1));
+    }
     scene = oc_seq_layout_render(seq, doc, 0, 600);
     CHECK(oc_scene_item_count(scene) > 50);
     {
@@ -219,6 +234,7 @@ int main(int argc, char **argv)
     oc_string_free(chosen);
     oc_document_show_only_enzymes(doc, eb, 2, 1);
     CHECK(oc_document_visible_site_count(doc) == 2);
+    CHECK(oc_document_visible_site_cut(doc, 0) >= 0 && oc_document_visible_site_cut(doc, 2) == -1);
     /* Put the PCR product between EcoRI and BamHI: it has no sites, so expect a clear error. */
     OCDocument *product = oc_document_new();
     char *cerr = NULL;
@@ -341,6 +357,7 @@ int main(int argc, char **argv)
         oc_document_show_only_enzymes(doc, NULL, 3, 6);
         CHECK(!oc_document_new_sequence(blank, NULL, NULL, false));
         oc_document_find_next(doc, NULL, NULL);
+        oc_document_find_named(doc, NULL, NULL, NULL);
         oc_document_rename(doc, NULL);
         CHECK(oc_document_add_primer_sequence(doc, NULL, NULL, &err) == -1 && err);
         oc_string_free(err);
@@ -395,6 +412,58 @@ int main(int argc, char **argv)
     oc_document_free(trace);
     oc_document_free(product);
     oc_document_free(pcr);
+
+    /* A gel lane by lane: ladder, uncut, and a digest whose bands add up. */
+    OCGel *lanes = oc_gel_new(0);
+    oc_gel_add_lane(lanes, doc, NULL, 0);
+    const char *ecori[] = {"EcoRI"};
+    oc_gel_add_lane(lanes, doc, ecori, 1);
+    int bands[64];
+    CHECK(oc_gel_lane_bands(lanes, 0, bands, 64) > 5);
+    CHECK(oc_gel_lane_bands(lanes, 1, bands, 64) == 2 && bands[0] == 3188 && bands[1] == 3188);
+    int nb = oc_gel_lane_bands(lanes, 2, bands, 64), sum = 0;
+    for (int i = 0; i < nb; ++i) sum += bands[i];
+    CHECK(nb >= 1 && sum == 3188);
+    for (int i = 1; i < nb; ++i) CHECK(bands[i - 1] >= bands[i]);
+    CHECK(oc_gel_lane_bands(lanes, 3, bands, 64) == 0);
+    CHECK(oc_gel_lane_count(lanes) == 3 && oc_gel_lane_uncut_circular(lanes, 1) && !oc_gel_lane_uncut_circular(lanes, 2));
+    OCGelBand info[64];
+    CHECK(oc_gel_lane_band_info(lanes, 0, info, 64) > 5);
+    for (int i = 1; i < oc_gel_lane_band_info(lanes, 0, info, 64); ++i) CHECK(info[i - 1].run <= info[i].run);
+    /* Uncut: the nicked open circle (fainter) behind the supercoiled plasmid,
+       which runs ahead of a linear 3,188 bp. */
+    CHECK(oc_gel_lane_band_info(lanes, 1, info, 64) == 2 && info[0].form == OC_GEL_OPEN_CIRCULAR
+          && info[1].form == OC_GEL_SUPERCOILED && info[0].run < info[1].run && info[0].intensity < info[1].intensity
+          && info[1].run > oc_gel_run_fraction(3188, 1) && info[0].run < oc_gel_run_fraction(3188, 1));
+    CHECK(oc_gel_run_fraction(500, 1) > oc_gel_run_fraction(5000, 1) && oc_gel_run_fraction(500, 1) <= 1);
+    /* A denser gel holds the same band back; small ones run off a thin one. */
+    CHECK(oc_gel_run_fraction(1000, 2) < oc_gel_run_fraction(1000, 0.7));
+    CHECK(oc_gel_run_fraction(50, 0.7) > 1 && oc_gel_run_fraction(50, 3) < 1);
+    CHECK(oc_gel_run_fraction(15000, 1.2) < oc_gel_run_fraction(10000, 1.2));
+    CHECK(oc_gel_run_fraction(40000, 1) > 0 && oc_gel_run_fraction(30000, 1) > oc_gel_run_fraction(40000, 1));
+    CHECK(oc_gel_percent_count() >= 4 && oc_gel_percent(0) < oc_gel_percent(1));
+    oc_gel_set_percent(lanes, 2);
+    CHECK(oc_gel_lane_band_info(lanes, 1, info, 64) == 2 && info[0].run > 0);
+    OCScene *gs = oc_gel_scene(lanes, 400, 500, false, measure, NULL);
+    CHECK(gs != NULL && oc_scene_item_count(gs) > 10);
+    oc_scene_free(gs);
+    oc_gel_free(lanes);
+    /* Ladders anywhere: an empty gel, a sample, a ladder, a sample. */
+    lanes = oc_gel_new(-1);
+    CHECK(oc_gel_lane_count(lanes) == 0);
+    oc_gel_add_lane(lanes, doc, ecori, 1);
+    oc_gel_add_ladder(lanes, 0);
+    oc_gel_add_lane(lanes, doc, NULL, 0);
+    CHECK(oc_gel_lane_count(lanes) == 3 && oc_gel_lane_bands(lanes, 1, bands, 64) > 5
+          && oc_gel_lane_uncut_circular(lanes, 2) && !oc_gel_lane_uncut_circular(lanes, 1));
+    nb = oc_gel_lane_band_info(lanes, 1, info, 64);
+    int refs = 0;
+    for (int i = 0; i < nb; ++i) refs += info[i].reference ? 1 : 0;
+    CHECK(nb > 5 && refs >= 1 && refs < nb);
+    gs = oc_gel_scene(lanes, 400, 500, false, measure, NULL);
+    CHECK(gs != NULL && oc_scene_item_count(gs) > 10);
+    oc_scene_free(gs);
+    oc_gel_free(lanes);
 
     /* PCR cycling for pOC-demo's seq-fwd and mcs-rev, in Q5 buffer. */
     OCPcrProgram prog;

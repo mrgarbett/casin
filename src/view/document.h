@@ -50,6 +50,9 @@ public:
     bool isEnzymeHidden(const std::string &name) const { return m_hidden.count(name) > 0; }
     void setEnzymeHidden(const std::string &name, bool hidden);
     bool enzymePassesFilter(const std::string &name) const;
+    // The drawn features (not "source") that any of the enzyme's cuts fall
+    // inside, as feature indices in order: cloning there breaks them.
+    std::vector<int> featuresCutByEnzyme(const std::string &name) const;
     // Shows just these enzymes, with the cut filter set to `maxCuts`.
     void showOnlyEnzymes(const std::set<std::string> &names, int maxCuts);
 
@@ -68,15 +71,50 @@ public:
     std::string selectedBases() const;
     int activeFeature() const { return m_activeFeature; }
     int activeSite() const { return m_activeSite; }
+    // The site shift-clicked after the active one (extendToSite), while that
+    // selection stands; -1 otherwise.
+    int secondSite() const { return m_secondSite; }
     // Selects the feature's footprint and makes it active.
     void activateFeature(int index);
     // Selects the site's recognition sequence and makes it active.
     void activateSite(int visibleIndex);
+    // Go to Position: "1234" selects base 1234 (a bare caret sits between
+    // bases, so the status would name the one before it); "100..500" or
+    // "100-500" selects bases 100 to 500 (1-based, inclusive), across the
+    // origin of a circular sequence when the first is past the second.
+    // Commas and spaces are ignored. Returns false, changing nothing, for
+    // anything else or a base outside the sequence.
+    bool goToPosition(const std::string &text);
+    // Shift-click on a second site: selects the bases between the active
+    // site's top-strand cut and this one's (forward from the active site on a
+    // circle), keeping the first site active. With no active site, as
+    // activateSite.
+    void extendToSite(int visibleIndex);
+    // Shift-click on a feature or primer: grows the selection (or caret) to
+    // also cover `target`. On a circle it takes the shorter of the two arcs
+    // that cover both, so it grows towards the target the near way round.
+    // With no selection, selects the target.
+    void extendSelectionTo(Span target);
+    void extendToFeature(int index);
+    void extendToPrimer(int index);   // index into displaySequence().primers
 
     // Searches both strands for `query` (IUPAC) and selects the first match
     // starting after the current selection start, wrapping around. Returns the
     // 1-based match number, 0 if nothing matched, -1 if the query isn't DNA.
     int findNext(const std::string &query, int *count = nullptr, Strand *strand = nullptr);
+    // What findNamesOrBases selected.
+    enum class FindKind { None, Feature, Primer, Site, Bases };
+    // Find by name, then bases: the features (not "source"), primers and
+    // enzyme sites whose name is `query` (ignoring case and surrounding
+    // spaces), in sequence order, then, when the query is DNA, its matches
+    // on both strands as findNext finds them. A new query starts at the first
+    // name match after the selection start (or, with none, the first base
+    // match after it); repeating it while its last match is still selected
+    // steps on through the whole list, wrapping around. Selects the match
+    // (activating a feature or a site on the map) and returns its 1-based
+    // number, 0 if nothing matched, -1 if nothing is named so and the query
+    // isn't DNA.
+    int findNamesOrBases(const std::string &query, int *count = nullptr, FindKind *kind = nullptr);
 
     // ---- editing ----
     // Every change to the sequence goes through these. Each one is a step on
@@ -176,10 +214,15 @@ private:
     bool m_hasSelection = false;
     int m_activeFeature = -1;
     int m_activeSite = -1;
+    int m_secondSite = -1;
     std::vector<Step> m_undo, m_redo;
     unsigned m_state = 0, m_savedState = 0, m_nextState = 0;
     bool m_inEdit = false;
     bool m_typing = false;   // the last step was typed at the caret, so more typing joins it
+    // The last findNamesOrBases: its query, the match's place in the list and what it selected.
+    std::string m_findQuery;
+    int m_findIndex = -1;
+    Span m_findSelection;
     std::vector<Listener> m_seqListeners, m_selListeners, m_enzListeners, m_histListeners, m_readListeners,
         m_pendingListeners;
 };
