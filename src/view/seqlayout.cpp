@@ -622,6 +622,16 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
     }
     const CutSite *active = (m_opt.enzymes && st.activeSite >= 0 && st.activeSite < int(m_sites.size()))
                               ? &m_sites[size_t(st.activeSite)] : nullptr;
+    // An amino acid lights up with the selection when its whole codon is
+    // selected: one for a clicked codon, the row for a double-clicked frame.
+    auto codonSelected = [&](int p) {
+        if (!st.hasSelection || st.selection.length < 3)
+            return false;
+        const int a = st.selection.start, e = st.selection.end();
+        if (p >= a && p + 3 <= e)
+            return true;
+        return m_seq.circular && p + m_n >= a && p + m_n + 3 <= e;
+    };
 
     const double asc = m_baseFont.size * 0.78;
     for (int li = lineIndexAt(scrollY); li >= 0 && li < int(m_lines.size()); ++li) {
@@ -700,6 +710,8 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
                     if (!aa || (fwd ? p % 3 : ((m_n - p) % 3 + 3) % 3) != k)
                         continue;
                     const double cx = colX(p + 1 - l.start) + m_charW / 2;
+                    if (codonSelected(p))
+                        s.rect({cx - m_charW * 1.5 + 0.5, fy, m_charW * 3 - 1, m_aaH - 1}, m_theme.selection);
                     // The stop codon's block points the way the frame reads.
                     s.polygon(codonBlock(cx - m_charW * 1.5 + 0.5, fy, m_charW * 3 - 1, m_aaH - 1,
                                          aa == '*' ? (fwd ? 1 : -1) : 0),
@@ -894,6 +906,8 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
                 for (; it != marks.end() && it->position < l.start + pc.b; ++it, ++k) {
                     const int c = it->position - l.start;
                     const double cx = colX(c) + m_charW / 2;
+                    if (codonSelected(it->position - 1))
+                        s.rect({cx - m_charW * 1.5, ay, m_charW * 3, m_aaH - 1}, m_theme.selection);
                     // The block at the 3' end of the reading frame points its way.
                     const bool fwdF = f.strand != Strand::Reverse;
                     const bool last = fwdF ? k + 1 == int(marks.size()) : k == 0;

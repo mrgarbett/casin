@@ -275,6 +275,15 @@ int main(int argc, char **argv)
                     whole = six.translationAt({x, y});
             CHECK(whole.start == 0 && whole.length == 9);
             CHECK(six.translationAt({0, -50}).empty());
+            // Selecting a codon lights its amino acid: one more shape than the
+            // selection's own rectangle; the whole ORF lights all three.
+            SeqViewState one, all;
+            one.hasSelection = all.hasSelection = true;
+            one.selection = {3, 3};
+            all.selection = whole;
+            const size_t plainCount = six.render(0, 400, {}).items.size();
+            CHECK(six.render(0, 400, one).items.size() == plainCount + 2);
+            CHECK(six.render(0, 400, all).items.size() == plainCount + 4);
         }
         // Hovering it outlines the codon: one more shape on that line.
         SeqViewState hovering;
