@@ -703,6 +703,7 @@ int oc_document_active_feature(const OCDocument *doc) { return doc->doc.activeFe
 int oc_document_active_site(const OCDocument *doc) { return doc->doc.activeSite(); }
 void oc_document_activate_feature(OCDocument *doc, int index) { guarded([&] { doc->doc.activateFeature(index); }); }
 void oc_document_activate_site(OCDocument *doc, int visible_index) { guarded([&] { doc->doc.activateSite(visible_index); }); }
+void oc_document_extend_to_site(OCDocument *doc, int visible_index) { guarded([&] { doc->doc.extendToSite(visible_index); }); }
 
 int oc_document_find_next(OCDocument *doc, const char *query, int *count)
 {

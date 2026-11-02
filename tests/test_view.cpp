@@ -93,6 +93,45 @@ static void testUndo(const Sequence &seq)
 
 // The Edit Feature dialog sets a colour with replaceFeature: one undo step,
 // kept by GenBank and .dna.
+static void testShiftSelectSites()
+{
+    // EcoRI (G^AATTC) cuts at 5, BamHI (G^GATCC) at 21.
+    Sequence seq;
+    seq.bases = "AAAAGAATTCAAAAAAAAAAGGATCCAAAA";
+    Document doc;
+    doc.setSequence(seq);
+    doc.setMaxCuts(0);
+    int ecoRI = -1, bamHI = -1;
+    for (size_t i = 0; i < doc.visibleSites().size(); ++i) {
+        const std::string &name = doc.visibleSites()[i].enzyme->name;
+        if (name == "EcoRI")
+            ecoRI = int(i);
+        if (name == "BamHI")
+            bamHI = int(i);
+    }
+    CHECK(ecoRI >= 0 && bamHI >= 0);
+    if (ecoRI < 0 || bamHI < 0)
+        return;
+    // Without an active site, shift-click just activates it.
+    doc.extendToSite(bamHI);
+    CHECK(doc.activeSite() == bamHI);
+    doc.activateSite(ecoRI);
+    doc.extendToSite(bamHI);
+    CHECK(doc.selection().start == 5 && doc.selection().length == 16);
+    CHECK(doc.activeSite() == ecoRI);
+    // Either order on a linear sequence.
+    doc.activateSite(bamHI);
+    doc.extendToSite(ecoRI);
+    CHECK(doc.selection().start == 5 && doc.selection().length == 16);
+    // On a circle, forward from the first site, across the origin.
+    seq.circular = true;
+    doc.setSequence(seq);
+    doc.setMaxCuts(0);
+    doc.activateSite(bamHI);
+    doc.extendToSite(ecoRI);
+    CHECK(doc.selection().start == 21 && doc.selection().length == 14);
+}
+
 static void testEditingHistoryHidden()
 {
     // Geneious keeps edits as features: the original bases as one label, the
@@ -367,6 +406,7 @@ int main(int argc, char **argv)
     }
     testUndo(seq);
     testFeatureColor(seq);
+    testShiftSelectSites();
     testEditingHistoryHidden();
     {
         GelLayout gel({{"Ladder", {10000, 1000, 100}, {1000}, true, false, {}}, {"Cut", {3000, 500}, {}, false, false, {}}},

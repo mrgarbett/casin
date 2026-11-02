@@ -113,7 +113,14 @@ final class MapView: NSView {
             document.activateFeature(Int(index))
             if event.clickCount == 2 { onEditFeature?(Int(index)) }
         case Int32(OC_HIT_SITE):
-            document.activateSite(Int(index))
+            // Shift-click on a second enzyme selects the bases between the two cuts.
+            if event.modifierFlags.contains(.shift) {
+                document.extendToSite(Int(index))
+                SelectionBadge.shared.show(for: document, event: event, in: self)
+                SelectionBadge.shared.hideSoon()
+            } else {
+                document.activateSite(Int(index))
+            }
         case Int32(OC_HIT_PRIMER):
             if let pick = onPickPrimer {
                 pick(Int(index), event.modifierFlags.contains(.shift))
