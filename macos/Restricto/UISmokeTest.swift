@@ -5,8 +5,8 @@
 // it (as a restored frame can be), collapses and reopens the sidebar, stacks
 // and hides the map, walks the right panel's panes (the sequence among them
 // with the map beside it), hides and shows the inspector, opens Find (which
-// reopens a hidden panel on the sequence), selects bases (the status splits),
-// copies the map image, adds a His-tagged primer in the Primers
+// reopens a hidden panel on the sequence), selects bases (the status splits)
+// and the bases between two sites, copies the map image, adds a His-tagged primer in the Primers
 // pane, opens a PCR product from the PCR wizard, and saves a PNG of the window after each step. It exits 0 when every step got
 // through layout; a layout loop or other exception aborts the process instead.
 import AppKit
@@ -96,6 +96,14 @@ enum UISmokeTest {
             ("9e-find-closed-again", { controller?.toggleFindBar(nil) }),
             ("9g-selection-split-status", {
                 (controller?.document as? SequenceDocument)?.core.select(start: 99, length: 30)
+            }),
+            ("9g-site-fragment-status", {
+                // Click one enzyme, shift-click another: the fragment and its digest button.
+                let core = (controller?.document as? SequenceDocument)?.core
+                if (core?.visibleSiteEnzymes.count ?? 0) >= 2 {
+                    core?.activateSite(0)
+                    core?.extendToSite(1)
+                }
             }),
             ("9g-copy-map-image", { controller?.copyMapImage(nil) }),
             ("9g-caret", { (controller?.document as? SequenceDocument)?.core.select(start: 10, length: 0) }),

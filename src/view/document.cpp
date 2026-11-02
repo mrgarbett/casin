@@ -45,7 +45,7 @@ void Document::setSequence(Sequence seq, std::string path)
     m_hasSelection = false;
     m_selection = {};
     m_activeFeature = -1;
-    m_activeSite = -1;
+    m_activeSite = m_secondSite = -1;
     m_undo.clear();
     m_redo.clear();
     m_typing = false;
@@ -90,7 +90,7 @@ void Document::refilter()
             continue;
         m_visibleSites.push_back(s);
     }
-    m_activeSite = -1;
+    m_activeSite = m_secondSite = -1;
 }
 
 void Document::setMaxCuts(int maxCuts)
@@ -138,7 +138,7 @@ void Document::setSelection(Span s)
     m_selection = s;
     m_hasSelection = true;
     m_activeFeature = -1;
-    m_activeSite = -1;
+    m_activeSite = m_secondSite = -1;
     emit(m_selListeners);
 }
 
@@ -148,7 +148,7 @@ void Document::clearSelection()
     m_hasSelection = false;
     m_selection = {};
     m_activeFeature = -1;
-    m_activeSite = -1;
+    m_activeSite = m_secondSite = -1;
     emit(m_selListeners);
 }
 
@@ -167,7 +167,7 @@ void Document::activateFeature(int index)
     m_selection = m_seq.features[size_t(index)].span(m_seq.length(), m_seq.circular);
     m_hasSelection = true;
     m_activeFeature = index;
-    m_activeSite = -1;
+    m_activeSite = m_secondSite = -1;
     emit(m_selListeners);
 }
 
@@ -181,6 +181,7 @@ void Document::activateSite(int visibleIndex)
     m_hasSelection = true;
     m_activeFeature = -1;
     m_activeSite = visibleIndex;
+    m_secondSite = -1;
     emit(m_selListeners);
 }
 
@@ -201,6 +202,7 @@ void Document::extendToSite(int visibleIndex)
         m_selection = {std::min(a, b), std::abs(b - a)};
     m_hasSelection = true;
     m_activeFeature = -1;
+    m_secondSite = visibleIndex;
     emit(m_selListeners);
 }
 
@@ -281,7 +283,7 @@ void Document::sequenceEdited()
     m_hasPending = false;
     m_reads.clear();
     m_activeFeature = -1;
-    m_activeSite = -1;
+    m_activeSite = m_secondSite = -1;
     recomputeSites();
     m_inEdit = true;
     emit(m_seqListeners);

@@ -362,8 +362,12 @@ extension DocumentWindowController {
         guard let d = doc, !d.isEmpty else { return }
         let shown = Array(Set(d.visibleSiteEnzymes)).sorted()
         let form = Form("Digest and Gel", "Enzymes shown on the map, cut together.")
-        let first = form.popup("Enzyme", shown)
-        let second = form.popup("And", ["(none)"] + shown)
+        // A selection between two sites pre-fills its two enzymes.
+        let fragment = d.siteFragment
+        let firstIndex = fragment.flatMap { shown.firstIndex(of: $0.first) } ?? 0
+        let secondIndex = fragment.flatMap { f in f.second == f.first ? nil : shown.firstIndex(of: f.second) }
+        let first = form.popup("Enzyme", shown, selected: firstIndex)
+        let second = form.popup("And", ["(none)"] + shown, selected: secondIndex.map { $0 + 1 } ?? 0)
         let ladders = (0..<Int(oc_ladder_count())).map { String(cString: oc_ladder_name(Int32($0))) }
         let ladder = form.popup("Ladder", ladders)
         guard !shown.isEmpty else {

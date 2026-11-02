@@ -8,6 +8,7 @@ versions may change file handling, menus and the C API.
 - **macOS:** the app now needs macOS 26 Tahoe or later (built with Xcode 26). Support for macOS 13 to 15 and the plain, non-glass layout were dropped.
 - **Focus:** the menus now show the core cloning tools only (primers, PCR, digest and gel, insertion by PCR, Gibson) plus opening, saving and editing. The other tools from the first alpha are hidden until each gets its own tested step; turn on **Experimental Tools** (main menu on Linux, the Restricto menu on the Mac) to show them again. Nothing was removed.
 - **Enzymes:** click one enzyme, then shift-click a second, on the map or in the sequence, to select the bases between their cuts (forward from the first on a circular sequence).
+- **Enzymes (Mac):** a selection made that way names its fragment (e.g. "BamHI–XbaI: 1,234 bp") in the status and the selection badge, with a **Digest and Gel…** button beside it; Cloning ▸ Digest and Gel… opens with those two enzymes picked.
 
 ## 0.1.0-alpha (2026-10-27)
 

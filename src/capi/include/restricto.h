@@ -120,6 +120,8 @@ void oc_document_activate_feature(OCDocument *doc, int index);
 void oc_document_activate_site(OCDocument *doc, int visible_index);
 /* Shift-click on a second site: selects from the active site's cut to this one's. */
 void oc_document_extend_to_site(OCDocument *doc, int visible_index);
+/* The site shift-clicked after the active one, while that selection stands; else -1. */
+int oc_document_second_site(const OCDocument *doc);
 
 /* Searches both strands from just after the current selection start and
  * selects the next match. Returns the 1-based match number, 0 when there is
