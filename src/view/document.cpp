@@ -45,7 +45,7 @@ void Document::setSequence(Sequence seq, std::string path)
     m_hasSelection = false;
     m_selection = {};
     m_activeFeature = -1;
-    m_activeSite = -1;
+    m_activeSite = m_secondSite = -1;
     m_undo.clear();
     m_redo.clear();
     m_typing = false;
@@ -90,7 +90,7 @@ void Document::refilter()
             continue;
         m_visibleSites.push_back(s);
     }
-    m_activeSite = -1;
+    m_activeSite = m_secondSite = -1;
 }
 
 void Document::setMaxCuts(int maxCuts)
@@ -138,7 +138,7 @@ void Document::setSelection(Span s)
     m_selection = s;
     m_hasSelection = true;
     m_activeFeature = -1;
-    m_activeSite = -1;
+    m_activeSite = m_secondSite = -1;
     emit(m_selListeners);
 }
 
@@ -148,7 +148,7 @@ void Document::clearSelection()
     m_hasSelection = false;
     m_selection = {};
     m_activeFeature = -1;
-    m_activeSite = -1;
+    m_activeSite = m_secondSite = -1;
     emit(m_selListeners);
 }
 
@@ -167,7 +167,7 @@ void Document::activateFeature(int index)
     m_selection = m_seq.features[size_t(index)].span(m_seq.length(), m_seq.circular);
     m_hasSelection = true;
     m_activeFeature = index;
-    m_activeSite = -1;
+    m_activeSite = m_secondSite = -1;
     emit(m_selListeners);
 }
 
@@ -181,6 +181,7 @@ void Document::activateSite(int visibleIndex)
     m_hasSelection = true;
     m_activeFeature = -1;
     m_activeSite = visibleIndex;
+    m_secondSite = -1;
     emit(m_selListeners);
 }
 
@@ -201,7 +202,49 @@ void Document::extendToSite(int visibleIndex)
         m_selection = {std::min(a, b), std::abs(b - a)};
     m_hasSelection = true;
     m_activeFeature = -1;
+    m_secondSite = visibleIndex;
     emit(m_selListeners);
+}
+
+void Document::extendSelectionTo(Span target)
+{
+    const int n = m_seq.length();
+    if (n == 0)
+        return;
+    m_typing = false;
+    if (!m_hasSelection) {
+        m_selection = target;
+    } else if (!m_seq.circular) {
+        const int start = std::min(m_selection.start, target.start);
+        m_selection = {start, std::max(m_selection.end(), target.end()) - start};
+    } else {
+        // From one start forward to cover the other span; the shorter way wins.
+        const auto cover = [n](Span a, Span b) {
+            const int d = ((b.start - a.start) % n + n) % n;
+            return Span{(a.start % n + n) % n, std::min(n, std::max(a.length, d + b.length))};
+        };
+        const Span fwd = cover(m_selection, target), back = cover(target, m_selection);
+        m_selection = fwd.length <= back.length ? fwd : back;
+    }
+    m_hasSelection = true;
+    m_activeFeature = -1;
+    m_activeSite = -1;
+    emit(m_selListeners);
+}
+
+void Document::extendToFeature(int index)
+{
+    if (index >= 0 && index < int(m_seq.features.size()))
+        extendSelectionTo(m_seq.features[size_t(index)].span(m_seq.length(), m_seq.circular));
+}
+
+void Document::extendToPrimer(int index)
+{
+    const std::vector<Primer> &primers = displaySequence().primers;
+    if (index >= 0 && index < int(primers.size()) && primers[size_t(index)].binding.length() > 0) {
+        const Range &b = primers[size_t(index)].binding;
+        extendSelectionTo({b.start, b.length()});
+    }
 }
 
 int Document::findNext(const std::string &raw, int *count, Strand *strand)
@@ -281,7 +324,7 @@ void Document::sequenceEdited()
     m_hasPending = false;
     m_reads.clear();
     m_activeFeature = -1;
-    m_activeSite = -1;
+    m_activeSite = m_secondSite = -1;
     recomputeSites();
     m_inEdit = true;
     emit(m_seqListeners);

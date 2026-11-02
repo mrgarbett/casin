@@ -12,6 +12,8 @@ versions may change file handling, menus and the C API.
 - **Mac:** Window ▸ New Window (⌘⇧N) opens a second window on the same file, e.g. the map in one and the sequence in the other. Both show the same sequence, selection and edits; the file stays open until its last window closes.
 - **Geneious files:** the editing-history records Geneious exports as features ("nonstandard type: Editing History Insertion/Deletion/Replacement") are no longer drawn on the map or in the sequence. They stay in the file and are saved back unchanged.
 - **Enzymes (Mac):** right-click an enzyme site on the map or in the sequence for **Select to** (the bases between its cut and another site's), **Hide** the enzyme, or **Digest with** it (opens Digest and Gel with that enzyme picked).
+- **Enzymes (Mac):** a selection made that way names its fragment (e.g. "BamHI–XbaI: 1,234 bp") in the status and the selection badge, with a **Digest and Gel…** button beside it; Cloning ▸ Digest and Gel… opens with those two enzymes picked.
+- **Selection:** shift-click a feature or primer, on the map or in the sequence, to grow the selection to cover it (the shorter way round on a circular sequence).
 
 ## 0.1.0-alpha (2026-10-27)
 

@@ -26,6 +26,9 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private var detailItem: NSSplitViewItem?
     private var splitController: NSSplitViewController?
     private let status = NSTextField(labelWithString: "")
+    /// Beside the status while the selection runs between two enzyme sites.
+    private let digestFragment = NSButton(title: "Digest and Gel…", target: nil,
+                                          action: #selector(DocumentWindowController.digestAndGel(_:)))
     /// View toggles beside the status: complement strand, translation, and
     /// enzymes and features on the map.
     private var viewToggles: [NSButton] = []
@@ -404,12 +407,24 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             toggles.centerYAnchor.constraint(equalTo: togglesInner.centerYAnchor),
         ])
         let infoInner = NSView()
-        status.translatesAutoresizingMaskIntoConstraints = false
-        infoInner.addSubview(status)
+        digestFragment.target = self
+        digestFragment.bezelStyle = .inline
+        digestFragment.controlSize = .small
+        digestFragment.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        digestFragment.isHidden = true
+        // In a narrow window the button truncates before the status and the toggles.
+        digestFragment.setContentCompressionResistancePriority(.defaultHigh - 1, for: .horizontal)
+        digestFragment.toolTip = "Digest and gel with the two enzymes at the ends of the selection"
+        digestFragment.setAccessibilityLabel("Digest and gel with these two")
+        let infoRow = NSStackView(views: [status, digestFragment])
+        infoRow.orientation = .horizontal
+        infoRow.spacing = 8
+        infoRow.translatesAutoresizingMaskIntoConstraints = false
+        infoInner.addSubview(infoRow)
         NSLayoutConstraint.activate([
-            status.leadingAnchor.constraint(equalTo: infoInner.leadingAnchor, constant: 14),
-            status.trailingAnchor.constraint(equalTo: infoInner.trailingAnchor, constant: -14),
-            status.centerYAnchor.constraint(equalTo: infoInner.centerYAnchor),
+            infoRow.leadingAnchor.constraint(equalTo: infoInner.leadingAnchor, constant: 14),
+            infoRow.trailingAnchor.constraint(equalTo: infoInner.trailingAnchor, constant: -14),
+            infoRow.centerYAnchor.constraint(equalTo: infoInner.centerYAnchor),
         ])
         let togglesCapsule = Glass.capsule(around: togglesInner, height: 30)
         let info = Glass.capsule(around: infoInner, height: 30)
@@ -528,11 +543,17 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         if let message = statusMessage {
             parts.append(message)
         } else {
-            let selection = core.selectionText
-            if !selection.isEmpty { parts.append(selection) }
+            if let fragment = core.siteFragmentText, let positions = SelectionBadge.positions(for: core) {
+                // Short, to leave room for the digest button.
+                parts += [fragment, positions]
+            } else {
+                let selection = core.selectionText
+                if !selection.isEmpty { parts.append(selection) }
+            }
             if hoverBase >= 0 && hoverBase < core.length { parts.append("Base \((hoverBase + 1).formatted())") }
         }
         status.stringValue = parts.joined(separator: "  ·  ")
+        digestFragment.isHidden = statusMessage != nil || core.siteFragment == nil
         guard let info = infoCapsule else { return }
         let show = !parts.isEmpty
         guard info.isHidden == show else { return }
