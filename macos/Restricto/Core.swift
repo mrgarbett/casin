@@ -187,6 +187,8 @@ final class CoreDocument {
     func activateFeature(_ i: Int) { oc_document_activate_feature(handle, Int32(i)) }
     func activateSite(_ i: Int) { oc_document_activate_site(handle, Int32(i)) }
     func extendToSite(_ i: Int) { oc_document_extend_to_site(handle, Int32(i)) }
+    func extendToFeature(_ i: Int) { oc_document_extend_to_feature(handle, Int32(i)) }
+    func extendToPrimer(_ i: Int) { oc_document_extend_to_primer(handle, Int32(i)) }
 
     /// 1-based match number, 0 for no match, -1 when the query isn't DNA.
     func findNext(_ query: String) -> (match: Int, count: Int) {
