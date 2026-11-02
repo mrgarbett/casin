@@ -93,32 +93,145 @@ static void testUndo(const Sequence &seq)
 
 // The Edit Feature dialog sets a colour with replaceFeature: one undo step,
 // kept by GenBank and .dna.
-static void testFeatureColor(const Sequence &seq)
+// Go to Position: a base or a range, 1-based.
+static void testGoToPosition()
 {
+    Sequence seq;
+    seq.bases = std::string(2000, 'A');
     Document doc;
     doc.setSequence(seq);
-    CHECK(!doc.sequence().features.empty());
-    if (doc.sequence().features.empty())
-        return;
-    Feature f = doc.sequence().features[0];
-    const std::string before = f.color;
-    f.color = "#813d9c";
-    doc.replaceFeature(0, f);
-    CHECK_EQ(doc.sequence().features[0].color, std::string("#813d9c"));
-    for (const std::string &file : {writeGenBank(doc.sequence()), writeSnapGene(doc.sequence())}) {
-        Sequence r;
-        CHECK(readGenBank(file, &r) || readSnapGene(file, &r));
-        CHECK(!r.features.empty() && r.features[0].color == "#813d9c");
+    CHECK(doc.goToPosition("1234") && doc.selection() == (Span{1233, 1}));
+    CHECK(doc.goToPosition(" 1,500 ") && doc.selection() == (Span{1499, 1}));
+    CHECK(doc.goToPosition("100..500") && doc.selection() == (Span{99, 401}));
+    CHECK(doc.goToPosition("100-500") && doc.selection() == (Span{99, 401}));
+    CHECK(doc.goToPosition("100\u2013500") && doc.selection() == (Span{99, 401}));
+    CHECK(doc.goToPosition("7..7") && doc.selection() == (Span{6, 1}));
+    CHECK(doc.goToPosition("1..2000") && doc.selection() == (Span{0, 2000}));
+    for (const char *bad : {"", "0", "2001", "abc", "-5", "10..", "..10", "5..x", "1..2001", "500..100", "1.5"})
+        CHECK(!doc.goToPosition(bad));
+    CHECK(doc.selection() == (Span{0, 2000}));   // unchanged by the bad ones
+    // Across the origin on a circle.
+    seq.circular = true;
+    doc.setSequence(seq);
+    CHECK(doc.goToPosition("1901..100") && doc.selection() == (Span{1900, 200}));
+}
+
+static void testShiftSelectSites()
+{
+    // EcoRI (G^AATTC) cuts at 5, BamHI (G^GATCC) at 21.
+    Sequence seq;
+    seq.bases = "AAAAGAATTCAAAAAAAAAAGGATCCAAAA";
+    Document doc;
+    doc.setSequence(seq);
+    doc.setMaxCuts(0);
+    int ecoRI = -1, bamHI = -1;
+    for (size_t i = 0; i < doc.visibleSites().size(); ++i) {
+        const std::string &name = doc.visibleSites()[i].enzyme->name;
+        if (name == "EcoRI")
+            ecoRI = int(i);
+        if (name == "BamHI")
+            bamHI = int(i);
     }
-    doc.undo();
-    CHECK_EQ(doc.sequence().features[0].color, before);
-    CHECK(!doc.canUndo());
-    // Back to the type's default.
-    f.color.clear();
-    doc.replaceFeature(0, f);
-    Sequence r;
-    CHECK(readGenBank(writeGenBank(doc.sequence()), &r));
-    CHECK(!r.features.empty() && r.features[0].color.empty());
+    CHECK(ecoRI >= 0 && bamHI >= 0);
+    if (ecoRI < 0 || bamHI < 0)
+        return;
+    // Without an active site, shift-click just activates it.
+    doc.extendToSite(bamHI);
+    CHECK(doc.activeSite() == bamHI);
+    CHECK(doc.secondSite() == -1);
+    doc.activateSite(ecoRI);
+    doc.extendToSite(bamHI);
+    CHECK(doc.selection().start == 5 && doc.selection().length == 16);
+    CHECK(doc.activeSite() == ecoRI);
+    // The second site names the fragment until the selection changes.
+    CHECK(doc.secondSite() == bamHI);
+    doc.setSelection({2, 4});
+    CHECK(doc.activeSite() == -1 && doc.secondSite() == -1);
+    doc.activateSite(ecoRI);
+    doc.extendToSite(bamHI);
+    doc.activateSite(bamHI);
+    CHECK(doc.secondSite() == -1);
+    doc.activateSite(ecoRI);
+    doc.extendToSite(bamHI);
+    doc.clearSelection();
+    CHECK(doc.secondSite() == -1);
+    // Either order on a linear sequence.
+    doc.activateSite(bamHI);
+    doc.extendToSite(ecoRI);
+    CHECK(doc.selection().start == 5 && doc.selection().length == 16);
+    // On a circle, forward from the first site, across the origin.
+    seq.circular = true;
+    doc.setSequence(seq);
+    doc.setMaxCuts(0);
+    doc.activateSite(bamHI);
+    doc.extendToSite(ecoRI);
+    CHECK(doc.selection().start == 21 && doc.selection().length == 14);
+}
+
+static void testEditingHistoryHidden()
+{
+    // Geneious keeps edits as features: the original bases as one label, the
+    // kind of edit as another. They stay in the file but aren't drawn.
+    Feature edit;
+    edit.type = "misc_feature";
+    edit.name = "AC";
+    edit.qualifiers = {{"label", "AC"}, {"label", "nonstandard type: Editing History Deletion"}};
+    CHECK(FeatureStyle::isEditingHistory(edit));
+    CHECK(!FeatureStyle::isDrawn(edit));
+    Feature insertion;
+    insertion.type = "misc_feature";
+    insertion.name = "nonstandard type: Editing History Insertion";
+    CHECK(!FeatureStyle::isDrawn(insertion));
+    // A real feature with a Geneious type label is still drawn.
+    Feature spr;
+    spr.type = "misc_feature";
+    spr.name = "SpR";
+    spr.qualifiers = {{"label", "SpR"}, {"label", "nonstandard type: Bacterial Selection"}};
+    CHECK(FeatureStyle::isDrawn(spr));
+}
+
+// Shift-click on a feature or primer grows the selection to cover it.
+static void testShiftSelectFeatures()
+{
+    Sequence seq;
+    seq.bases = std::string(100, 'A');
+    Feature a, b;
+    a.name = "a";
+    a.type = "misc_feature";
+    a.ranges = {{10, 20}};
+    b = a;
+    b.name = "b";
+    b.ranges = {{60, 70}};
+    seq.features = {a, b};
+    seq.primers.push_back({"p", std::string(10, 'A'), {40, 50}, Strand::Forward});
+    Document doc;
+    doc.setSequence(seq);
+    doc.clearSelection();
+    doc.extendToFeature(1);   // nothing selected: just the feature
+    CHECK(doc.hasSelection() && doc.selection() == (Span{60, 10}));
+    doc.activateFeature(0);
+    doc.extendToFeature(1);
+    CHECK(doc.selection() == (Span{10, 60}));
+    doc.extendToPrimer(0);    // already inside
+    CHECK(doc.selection() == (Span{10, 60}));
+    doc.setSelection({80, 0});   // from a caret, backwards
+    doc.extendToPrimer(0);
+    CHECK(doc.selection() == (Span{40, 40}));
+    doc.extendToPrimer(5);    // no such primer: unchanged
+    CHECK(doc.selection() == (Span{40, 40}));
+    // On a circle, the near way round, across the origin, in either order.
+    seq.circular = true;
+    seq.features[0].ranges = {{5, 15}};
+    seq.features[1].ranges = {{85, 95}};
+    doc.setSequence(seq);
+    doc.activateFeature(0);
+    doc.extendToFeature(1);
+    CHECK(doc.selection() == (Span{85, 30}));
+    doc.activateFeature(1);
+    doc.extendToFeature(0);
+    CHECK(doc.selection() == (Span{85, 30}));
+    doc.extendToPrimer(0);    // 85 on to 50 is shorter than 40 round to 15
+    CHECK(doc.selection() == (Span{85, 65}));
 }
 
 // Find matches feature, primer and enzyme names first, then bases.
@@ -184,6 +297,58 @@ static void testFindNames()
     // Not a name (a "source" feature doesn't count) and not DNA.
     CHECK_EQ(doc.findNamesOrBases("whole", &count, &kind), -1);
     CHECK_EQ(doc.findNamesOrBases("   ", &count, &kind), -1);
+}
+
+static void testFeatureColor(const Sequence &seq)
+{
+    Document doc;
+    doc.setSequence(seq);
+    CHECK(!doc.sequence().features.empty());
+    if (doc.sequence().features.empty())
+        return;
+    Feature f = doc.sequence().features[0];
+    const std::string before = f.color;
+    f.color = "#813d9c";
+    doc.replaceFeature(0, f);
+    CHECK_EQ(doc.sequence().features[0].color, std::string("#813d9c"));
+    for (const std::string &file : {writeGenBank(doc.sequence()), writeSnapGene(doc.sequence())}) {
+        Sequence r;
+        CHECK(readGenBank(file, &r) || readSnapGene(file, &r));
+        CHECK(!r.features.empty() && r.features[0].color == "#813d9c");
+    }
+    doc.undo();
+    CHECK_EQ(doc.sequence().features[0].color, before);
+    CHECK(!doc.canUndo());
+    // Back to the type's default.
+    f.color.clear();
+    doc.replaceFeature(0, f);
+    Sequence r;
+    CHECK(readGenBank(writeGenBank(doc.sequence()), &r));
+    CHECK(!r.features.empty() && r.features[0].color.empty());
+}
+
+// The enzymes list marks enzymes that cut inside a feature; "source" doesn't count.
+static void testCutsInsideFeatures()
+{
+    Sequence s;
+    s.bases = std::string(20, 'A') + "GAATTC" + std::string(20, 'A') + "GGATCC" + std::string(20, 'A');
+    s.circular = true;
+    auto feature = [&](const std::string &type, const std::string &name, int start, int end) {
+        Feature f;
+        f.type = type;
+        f.name = name;
+        f.ranges = {{start, end}};
+        s.features.push_back(f);
+    };
+    feature("source", "", 0, int(s.bases.size()));
+    feature("CDS", "insert", 10, 30);    // EcoRI cuts inside
+    feature("promoter", "P7", 21, 25);   // inside EcoRI's overhang
+    feature("CDS", "AmpR", 52, 60);      // BamHI cuts at 47/51, just before it
+    Document doc;
+    doc.setSequence(s);
+    CHECK(doc.featuresCutByEnzyme("EcoRI") == (std::vector<int>{1, 2}));
+    CHECK(doc.featuresCutByEnzyme("BamHI").empty());
+    CHECK(doc.featuresCutByEnzyme("NotAnEnzyme").empty());
 }
 
 int main(int argc, char **argv)
@@ -332,6 +497,29 @@ int main(int argc, char **argv)
             for (double x = 0; x < 300 && hit < 0; x += 2)
                 hit = six.codonAt({x, y});
         CHECK(hit == 0 || hit == 3 || hit == 6);
+        // Its whole translation is the ORF, from the ATG through the stop.
+        {
+            Span whole;
+            for (double y = 0; y < six.totalHeight() && whole.empty(); y += 1)
+                for (double x = 0; x < 300 && whole.empty(); x += 2)
+                    whole = six.translationAt({x, y});
+            CHECK(whole.start == 0 && whole.length == 9);
+            CHECK(six.translationAt({0, -50}).empty());
+            // Selecting a codon lights its amino acid: one more shape than the
+            // selection's own rectangle; the whole ORF lights all three.
+            SeqViewState one, all;
+            one.hasSelection = all.hasSelection = true;
+            one.selection = {3, 3};
+            all.selection = whole;
+            const size_t plainCount = six.render(0, 400, {}).items.size();
+            CHECK(six.render(0, 400, one).items.size() == plainCount + 2);
+            CHECK(six.render(0, 400, all).items.size() == plainCount + 4);
+            // A stretch picked in another frame lights nothing.
+            SeqViewState off;
+            off.hasSelection = true;
+            off.selection = {1, 8};
+            CHECK(six.render(0, 400, off).items.size() == plainCount + 1);
+        }
         // Hovering it outlines the codon: one more shape on that line.
         SeqViewState hovering;
         hovering.hoverCodon = hit;
@@ -387,7 +575,12 @@ int main(int argc, char **argv)
     }
     testUndo(seq);
     testFeatureColor(seq);
+    testCutsInsideFeatures();
     testFindNames();
+    testGoToPosition();
+    testShiftSelectSites();
+    testEditingHistoryHidden();
+    testShiftSelectFeatures();
     {
         GelLayout gel({{"Ladder", {10000, 1000, 100}, {1000}, true, false, {}}, {"Cut", {3000, 500}, {}, false, false, {}}},
                       theme, tm, 500, 400);

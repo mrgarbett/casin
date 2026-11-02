@@ -662,6 +662,14 @@ bool oc_document_enzyme(OCDocument *doc, int index, OCEnzymeInfo *out)
     out->methylation_blocked = blocked;
     static const char *const names[] = {"", "Dam", "Dcm", "Dam and Dcm"};
     out->methylation = names[kinds & 3];
+    const std::vector<int> cut = doc->doc.featuresCutByEnzyme(e.name);
+    doc->scratch1.clear();
+    for (int fi : cut) {
+        const Feature &f = doc->doc.sequence().features[size_t(fi)];
+        doc->scratch1 += (doc->scratch1.empty() ? "" : "\n") + (f.name.empty() ? f.type : f.name);
+    }
+    out->cut_features = int(cut.size());
+    out->cut_feature_names = doc->scratch1.c_str();
     return true;
 }
 
@@ -685,11 +693,18 @@ const char *oc_document_visible_site_enzyme(const OCDocument *doc, int index)
     return v[size_t(index)].enzyme->name.c_str();
 }
 
+int oc_document_visible_site_cut(const OCDocument *doc, int index)
+{
+    const auto &v = doc->doc.visibleSites();
+    return index < 0 || index >= int(v.size()) ? -1 : v[size_t(index)].cutTop;
+}
+
 bool oc_document_has_selection(const OCDocument *doc) { return doc->doc.hasSelection(); }
 int oc_document_selection_start(const OCDocument *doc) { return doc->doc.selection().start; }
 int oc_document_selection_length(const OCDocument *doc) { return doc->doc.selection().length; }
 void oc_document_set_selection(OCDocument *doc, int start, int length) { guarded([&] { doc->doc.setSelection({start, length}); }); }
 void oc_document_clear_selection(OCDocument *doc) { doc->doc.clearSelection(); }
+bool oc_document_go_to_position(OCDocument *doc, const char *text) { return guarded<bool>(false, nullptr, [&] { return text && doc->doc.goToPosition(text); }); }
 char *oc_document_selected_bases(const OCDocument *doc) { return guarded<char *>(nullptr, nullptr, [&]() -> char * { return dupString(doc->doc.selectedBases()); }); }
 
 char *oc_document_selected_reverse_complement(const OCDocument *doc)
@@ -701,8 +716,12 @@ char *oc_document_selected_reverse_complement(const OCDocument *doc)
 
 int oc_document_active_feature(const OCDocument *doc) { return doc->doc.activeFeature(); }
 int oc_document_active_site(const OCDocument *doc) { return doc->doc.activeSite(); }
+int oc_document_second_site(const OCDocument *doc) { return doc->doc.secondSite(); }
 void oc_document_activate_feature(OCDocument *doc, int index) { guarded([&] { doc->doc.activateFeature(index); }); }
 void oc_document_activate_site(OCDocument *doc, int visible_index) { guarded([&] { doc->doc.activateSite(visible_index); }); }
+void oc_document_extend_to_site(OCDocument *doc, int visible_index) { guarded([&] { doc->doc.extendToSite(visible_index); }); }
+void oc_document_extend_to_feature(OCDocument *doc, int index) { guarded([&] { doc->doc.extendToFeature(index); }); }
+void oc_document_extend_to_primer(OCDocument *doc, int index) { guarded([&] { doc->doc.extendToPrimer(index); }); }
 
 int oc_document_find_next(OCDocument *doc, const char *query, int *count)
 {
@@ -777,6 +796,107 @@ OCScene *oc_gel_render(const OCDocument *doc, const char *const *enzymes, int en
         view::GelLayout layout(lanes, dark ? view::Theme::darkTheme() : view::Theme::light(), tm, width, height);
         return new OCScene{layout.render()};
     });
+}
+
+struct OCGel {
+    std::vector<view::GelLane> lanes;
+    double percent = 1.0;
+};
+
+OCGel *oc_gel_new(int ladder)
+{
+    auto *g = new OCGel;
+    if (ladder >= 0)
+        oc_gel_add_ladder(g, ladder);
+    return g;
+}
+
+void oc_gel_add_ladder(OCGel *gel, int ladder)
+{
+    if (!gel)
+        return;
+    const Ladder &l = commonLadders()[size_t(std::clamp(ladder, 0, oc_ladder_count() - 1))];
+    gel->lanes.push_back({"L", l.bands, l.bright, true, false, {}});
+}
+
+void oc_gel_free(OCGel *gel) { delete gel; }
+
+void oc_gel_add_lane(OCGel *gel, const OCDocument *doc, const char *const *enzymes, int enzyme_count)
+{
+    if (!gel || !doc)
+        return;
+    const Sequence &seq = doc->doc.sequence();
+    // Samples are numbered among themselves: a ladder between them is "L".
+    const size_t samples = size_t(std::count_if(gel->lanes.begin(), gel->lanes.end(),
+                                                [](const view::GelLane &l) { return !l.ladder; }));
+    view::GelLane lane{std::to_string(samples + 1), {}, {}, false, false, {}};
+    const std::vector<Enzyme> use = enzymesNamed(enzymes, enzyme_count);
+    const bool uncut = use.empty() || digest(seq, use).uncut;
+    if (uncut) {
+        lane.bands = {seq.length()};
+        if (seq.circular) {
+            // The nicked open circle trails the supercoiled plasmid.
+            lane.uncutCircular = true;
+            lane.bands = {seq.length(), seq.length()};
+            lane.forms = {view::GelForm::OpenCircular, view::GelForm::Supercoiled};
+        }
+    } else {
+        for (const DigestFragment &f : digest(seq, use).fragments)
+            lane.bands.push_back(f.length);
+        std::sort(lane.bands.rbegin(), lane.bands.rend());
+    }
+    gel->lanes.push_back(std::move(lane));
+}
+
+int oc_gel_lane_bands(const OCGel *gel, int lane, int *out, int max)
+{
+    if (!gel || lane < 0 || lane >= int(gel->lanes.size()))
+        return 0;
+    const std::vector<int> &b = gel->lanes[size_t(lane)].bands;
+    for (int i = 0; out && i < max && i < int(b.size()); ++i)
+        out[i] = b[size_t(i)];
+    return int(b.size());
+}
+
+int oc_gel_lane_count(const OCGel *gel) { return gel ? int(gel->lanes.size()) : 0; }
+
+int oc_gel_lane_band_info(const OCGel *gel, int lane, OCGelBand *out, int max)
+{
+    if (!gel || lane < 0 || lane >= int(gel->lanes.size()))
+        return 0;
+    const view::GelLane &l = gel->lanes[size_t(lane)];
+    for (int i = 0; out && i < max && i < int(l.bands.size()); ++i) {
+        const int bp = l.bands[size_t(i)];
+        const view::GelForm form = view::gelBandForm(l, size_t(i));
+        out[i] = {bp, view::gelRunFraction(bp, form, gel->percent), view::gelBandIntensity(l, size_t(i)),
+                  std::find(l.bright.begin(), l.bright.end(), bp) != l.bright.end(), int(form)};
+    }
+    return int(l.bands.size());
+}
+
+bool oc_gel_lane_uncut_circular(const OCGel *gel, int lane)
+{
+    return gel && lane >= 0 && lane < int(gel->lanes.size()) && gel->lanes[size_t(lane)].uncutCircular;
+}
+
+double oc_gel_run_fraction(int bp, double percent) { return view::gelRunFraction(bp, false, percent); }
+
+void oc_gel_set_percent(OCGel *gel, double percent)
+{
+    if (gel && percent > 0)
+        gel->percent = percent;
+}
+
+int oc_gel_percent_count(void) { return view::gelPercentCount(); }
+double oc_gel_percent(int index) { return view::gelPercent(index); }
+
+OCScene *oc_gel_scene(const OCGel *gel, double width, double height, bool dark, OCMeasureText measure, void *context)
+{
+    if (!gel)
+        return nullptr;
+    CallbackMeasurer tm(measure, context);
+    view::GelLayout layout(gel->lanes, dark ? view::Theme::darkTheme() : view::Theme::light(), tm, width, height);
+    return new OCScene{layout.render()};
 }
 
 /* ---- primers ---- */
@@ -1344,6 +1464,17 @@ int oc_seq_layout_feature_at(const OCSeqLayout *l, double x, double y) { return 
 int oc_seq_layout_site_at(const OCSeqLayout *l, double x, double y) { return l->layout->siteAt({x, y}); }
 int oc_seq_layout_primer_at(const OCSeqLayout *l, double x, double y) { return l->layout->primerAt({x, y}); }
 int oc_seq_layout_codon_at(const OCSeqLayout *l, double x, double y) { return l->layout->codonAt({x, y}); }
+bool oc_seq_layout_translation_at(const OCSeqLayout *l, double x, double y, int *start, int *length)
+{
+    const Span s = l->layout->translationAt({x, y});
+    if (s.empty())
+        return false;
+    if (start)
+        *start = s.start;
+    if (length)
+        *length = s.length;
+    return true;
+}
 int oc_seq_layout_base_at(const OCSeqLayout *l, double x, double y) { return l->layout->baseAt({x, y}); }
 double oc_seq_layout_line_top(const OCSeqLayout *l, int position) { return l->layout->lineTopFor(position); }
 double oc_seq_layout_line_height(const OCSeqLayout *l, int position) { return l->layout->lineHeightFor(position); }

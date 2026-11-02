@@ -56,6 +56,10 @@ enum MethylationBlock { MethylNone = 0, MethylDam = 1, MethylDcm = 2 };
 int methylationBlock(const Sequence &seq, const CutSite &site);
 std::string methylationName(int block);   // "", "Dam", "Dcm", "Dam and Dcm"
 
+// Indices of the features a site cuts into: either strand's cut falls
+// strictly inside the feature's footprint (a cut on its edge leaves it whole).
+std::vector<int> featuresCutBy(const Sequence &seq, const CutSite &site);
+
 // Commercial suppliers (REBASE codes) and which of them sell an enzyme.
 struct Supplier {
     char code;

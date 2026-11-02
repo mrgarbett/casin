@@ -97,6 +97,8 @@ typedef struct {
     bool passes_filter;
     int methylation_blocked;   /* of its sites, how many Dam/Dcm methylation blocks */
     const char *methylation;   /* "Dam", "Dcm", "Dam and Dcm", or "" */
+    int cut_features;          /* drawn features (not "source") its cuts fall inside */
+    const char *cut_feature_names;   /* their names, one per line, or "" */
 } OCEnzymeInfo;
 
 int oc_document_enzyme_count(const OCDocument *doc);           /* every known enzyme */
@@ -106,18 +108,32 @@ int oc_document_max_cuts(const OCDocument *doc);
 void oc_document_set_max_cuts(OCDocument *doc, int max_cuts);  /* 1, 2, 3 or 0 = all */
 int oc_document_visible_site_count(const OCDocument *doc);
 const char *oc_document_visible_site_enzyme(const OCDocument *doc, int index);
+/* Where the site cuts the top strand (0..length), or -1 for a bad index. */
+int oc_document_visible_site_cut(const OCDocument *doc, int index);
 
 bool oc_document_has_selection(const OCDocument *doc);
 int oc_document_selection_start(const OCDocument *doc);
 int oc_document_selection_length(const OCDocument *doc);
 void oc_document_set_selection(OCDocument *doc, int start, int length);
 void oc_document_clear_selection(OCDocument *doc);
+/* Go to Position: "1234" (selects that base) or "100..500" / "100-500"
+ * (1-based, inclusive; across the origin of a circular sequence when the first
+ * is past the second). Returns false, changing nothing, when it isn't one. */
+bool oc_document_go_to_position(OCDocument *doc, const char *text);
 char *oc_document_selected_bases(const OCDocument *doc);
 char *oc_document_selected_reverse_complement(const OCDocument *doc);
 int oc_document_active_feature(const OCDocument *doc);
 int oc_document_active_site(const OCDocument *doc);
 void oc_document_activate_feature(OCDocument *doc, int index);
 void oc_document_activate_site(OCDocument *doc, int visible_index);
+/* Shift-click on a second site: selects from the active site's cut to this one's. */
+void oc_document_extend_to_site(OCDocument *doc, int visible_index);
+/* The site shift-clicked after the active one, while that selection stands; else -1. */
+int oc_document_second_site(const OCDocument *doc);
+/* Shift-click on a feature or primer: grows the selection to cover it too
+ * (the shorter way round on a circular sequence). */
+void oc_document_extend_to_feature(OCDocument *doc, int index);
+void oc_document_extend_to_primer(OCDocument *doc, int index);
 
 /* Searches both strands from just after the current selection start and
  * selects the next match. Returns the 1-based match number, 0 when there is
@@ -298,6 +314,11 @@ int oc_seq_layout_site_at(const OCSeqLayout *layout, double x, double y);
 int oc_seq_layout_primer_at(const OCSeqLayout *layout, double x, double y);
 /* First base of the codon whose amino acid is at (x, y) in a translation row, or -1. */
 int oc_seq_layout_codon_at(const OCSeqLayout *layout, double x, double y);
+/* The whole translation whose amino acid is at (x, y): the open reading frame
+   (start to stop) in a frame row, or the CDS feature's footprint in its
+   translation row. *start and *length get the span (it may wrap a circle);
+   false, with nothing stored, when (x, y) isn't on an amino acid. */
+bool oc_seq_layout_translation_at(const OCSeqLayout *layout, double x, double y, int *start, int *length);
 /* The base (0-based) at (x, y) on either strand, or -1. */
 int oc_seq_layout_base_at(const OCSeqLayout *layout, double x, double y);
 /* Outlines the codon starting at codon_start on the strands in later renders
@@ -323,6 +344,45 @@ typedef struct {
 int oc_digest(const OCDocument *doc, const char *const *enzymes, int enzyme_count, OCFragmentInfo *out, int max);
 int oc_ladder_count(void);
 const char *oc_ladder_name(int index);
+/* A gel built lane by lane: ladders and samples in any order, each sample a
+   sequence cut with some enzymes (none: the uncut molecule). Samples are
+   named by their number among the samples; a ladder lane is "L".
+   `oc_gel_new(ladder)` starts with that ladder in lane 0; a negative ladder
+   starts empty, for `oc_gel_add_ladder` to place ladders where wanted. */
+typedef struct OCGel OCGel;
+OCGel *oc_gel_new(int ladder);
+void oc_gel_free(OCGel *gel);
+void oc_gel_add_ladder(OCGel *gel, int ladder);
+void oc_gel_add_lane(OCGel *gel, const OCDocument *doc, const char *const *enzymes, int enzyme_count);
+/* The lane's band sizes, largest first; returns how many (up to `max`). */
+int oc_gel_lane_bands(const OCGel *gel, int lane, int *out, int max);
+/* The agarose percentage the gel is cast at (1% by default); it sets how far
+   each size runs. The percentages offered, lowest first: */
+void oc_gel_set_percent(OCGel *gel, double percent);
+int oc_gel_percent_count(void);
+double oc_gel_percent(int index);
+/* A band as a front end draws it: `run` is how far it ran, 0 at the wells to 1
+   at the bottom of a full run (more than 1: it ran off the gel); `intensity` is 0..1; `reference` marks a ladder's
+   brighter reference bands. */
+typedef struct {
+    int bp;
+    double run;
+    double intensity;
+    bool reference;
+    int form;               /* OC_GEL_LINEAR, OC_GEL_SUPERCOILED or OC_GEL_OPEN_CIRCULAR */
+} OCGelBand;
+/* An uncut plasmid runs as two bands: open circular (nicked, fainter) first,
+   then supercoiled. */
+enum { OC_GEL_LINEAR = 0, OC_GEL_SUPERCOILED = 1, OC_GEL_OPEN_CIRCULAR = 2 };
+int oc_gel_lane_count(const OCGel *gel);
+int oc_gel_lane_band_info(const OCGel *gel, int lane, OCGelBand *out, int max);
+/* True when the lane is an uncut circular molecule (it runs supercoiled). */
+bool oc_gel_lane_uncut_circular(const OCGel *gel, int lane);
+/* Where a linear band of `bp` runs on a `percent` gel, as OCGelBand.run. */
+double oc_gel_run_fraction(int bp, double percent);
+OCScene *oc_gel_scene(const OCGel *gel, double width, double height, bool dark, OCMeasureText measure,
+                      void *context);
+
 /* A virtual gel with three lanes: ladder, uncut, and the digest. */
 OCScene *oc_gel_render(const OCDocument *doc, const char *const *enzymes, int enzyme_count, int ladder, double width,
                        double height, bool dark, OCMeasureText measure, void *context);

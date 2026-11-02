@@ -21,6 +21,8 @@ final class MapView: NSView {
     /// Called with a primer's index when it is clicked, and whether shift
     /// was down. Without it, a click on a primer selects where it binds.
     var onPickPrimer: ((Int, Bool) -> Void)?
+    /// Right-click on a site > Digest with…: called with the enzyme.
+    var onDigest: ((String) -> Void)?
 
     init(document: CoreDocument) {
         self.document = document
@@ -102,6 +104,18 @@ final class MapView: NSView {
 
     // MARK: Mouse
 
+    /// Right-click on an enzyme site: the site menu.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let digest = onDigest, let layout = ensureLayout(), !document.isEmpty else {
+            return super.menu(for: event)
+        }
+        let p = mapPoint(event)
+        var kind: Int32 = 0, index: Int32 = 0, position: Int32 = 0
+        oc_map_layout_hit(layout, p.x, p.y, &kind, &index, &position)
+        guard kind == Int32(OC_HIT_SITE) else { return super.menu(for: event) }
+        return SiteMenu.menu(for: Int(index), in: document, onDigest: digest)
+    }
+
     override func mouseDown(with event: NSEvent) {
         guard let layout = ensureLayout(), !document.isEmpty else { return }
         let p = mapPoint(event)
@@ -110,13 +124,31 @@ final class MapView: NSView {
         selecting = false
         switch kind {
         case Int32(OC_HIT_FEATURE):
-            document.activateFeature(Int(index))
-            if event.clickCount == 2 { onEditFeature?(Int(index)) }
+            // Shift-click grows the selection to cover the feature too.
+            if event.modifierFlags.contains(.shift) {
+                document.extendToFeature(Int(index))
+                SelectionBadge.shared.show(for: document, event: event, in: self)
+                SelectionBadge.shared.hideSoon()
+            } else {
+                document.activateFeature(Int(index))
+                if event.clickCount == 2 { onEditFeature?(Int(index)) }
+            }
         case Int32(OC_HIT_SITE):
-            document.activateSite(Int(index))
+            // Shift-click on a second enzyme selects the bases between the two cuts.
+            if event.modifierFlags.contains(.shift) {
+                document.extendToSite(Int(index))
+                SelectionBadge.shared.show(for: document, event: event, in: self)
+                SelectionBadge.shared.hideSoon()
+            } else {
+                document.activateSite(Int(index))
+            }
         case Int32(OC_HIT_PRIMER):
             if let pick = onPickPrimer {
                 pick(Int(index), event.modifierFlags.contains(.shift))
+            } else if event.modifierFlags.contains(.shift) {
+                document.extendToPrimer(Int(index))
+                SelectionBadge.shared.show(for: document, event: event, in: self)
+                SelectionBadge.shared.hideSoon()
             } else if let p = document.primers.first(where: { $0.index == Int(index) }), p.length > 0 {
                 document.select(start: p.start, length: p.length)
             }

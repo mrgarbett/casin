@@ -5,6 +5,7 @@
 #include "style.h"
 #include "../core/align.h"
 #include "../core/enzymes.h"
+#include "../core/orf.h"
 #include "../core/sequence.h"
 
 #include <map>
@@ -62,6 +63,10 @@ public:
     // First base of the codon whose amino acid is under p (in an ORF frame
     // row or a CDS translation row), or -1.
     int codonAt(Point p) const;
+    // The whole translation whose amino acid is under p: the open reading
+    // frame (start to stop codon) in an ORF frame row, or the CDS feature's
+    // footprint in its translation row. Empty when p isn't on an amino acid.
+    Span translationAt(Point p) const;
     // The base under p on either strand, or -1.
     int baseAt(Point p) const;
     int readAt(Point p) const;         // -1 if none
@@ -125,6 +130,15 @@ private:
     bool m_complement;
     SeqOptions m_opt;
     std::vector<char> m_orfFwd, m_orfRev;   // amino acid at each ORF codon's first top-strand base, else 0
+    std::vector<Orf> m_orfs;                // the frames' ORFs, longest first
+    // What codonAt found: the codon's first base, and where (an ORF frame
+    // row on a strand, or a CDS feature's translation row).
+    struct CodonHit {
+        int codon = -1;
+        Strand strand = Strand::Forward;
+        int feature = -1;
+    };
+    CodonHit codonHitAt(Point p) const;
     std::vector<ReadTrack> m_reads;
     int m_n = 0;
     int m_bpl = 10;
