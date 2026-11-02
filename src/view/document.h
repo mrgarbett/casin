@@ -77,6 +77,13 @@ public:
     // circle), keeping the first site active. With no active site, as
     // activateSite.
     void extendToSite(int visibleIndex);
+    // Shift-click on a feature or primer: grows the selection (or caret) to
+    // also cover `target`. On a circle it takes the shorter of the two arcs
+    // that cover both, so it grows towards the target the near way round.
+    // With no selection, selects the target.
+    void extendSelectionTo(Span target);
+    void extendToFeature(int index);
+    void extendToPrimer(int index);   // index into displaySequence().primers
 
     // Searches both strands for `query` (IUPAC) and selects the first match
     // starting after the current selection start, wrapping around. Returns the

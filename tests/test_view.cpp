@@ -154,6 +154,50 @@ static void testEditingHistoryHidden()
     CHECK(FeatureStyle::isDrawn(spr));
 }
 
+// Shift-click on a feature or primer grows the selection to cover it.
+static void testShiftSelectFeatures()
+{
+    Sequence seq;
+    seq.bases = std::string(100, 'A');
+    Feature a, b;
+    a.name = "a";
+    a.type = "misc_feature";
+    a.ranges = {{10, 20}};
+    b = a;
+    b.name = "b";
+    b.ranges = {{60, 70}};
+    seq.features = {a, b};
+    seq.primers.push_back({"p", std::string(10, 'A'), {40, 50}, Strand::Forward});
+    Document doc;
+    doc.setSequence(seq);
+    doc.clearSelection();
+    doc.extendToFeature(1);   // nothing selected: just the feature
+    CHECK(doc.hasSelection() && doc.selection() == (Span{60, 10}));
+    doc.activateFeature(0);
+    doc.extendToFeature(1);
+    CHECK(doc.selection() == (Span{10, 60}));
+    doc.extendToPrimer(0);    // already inside
+    CHECK(doc.selection() == (Span{10, 60}));
+    doc.setSelection({80, 0});   // from a caret, backwards
+    doc.extendToPrimer(0);
+    CHECK(doc.selection() == (Span{40, 40}));
+    doc.extendToPrimer(5);    // no such primer: unchanged
+    CHECK(doc.selection() == (Span{40, 40}));
+    // On a circle, the near way round, across the origin, in either order.
+    seq.circular = true;
+    seq.features[0].ranges = {{5, 15}};
+    seq.features[1].ranges = {{85, 95}};
+    doc.setSequence(seq);
+    doc.activateFeature(0);
+    doc.extendToFeature(1);
+    CHECK(doc.selection() == (Span{85, 30}));
+    doc.activateFeature(1);
+    doc.extendToFeature(0);
+    CHECK(doc.selection() == (Span{85, 30}));
+    doc.extendToPrimer(0);    // 85 on to 50 is shorter than 40 round to 15
+    CHECK(doc.selection() == (Span{85, 65}));
+}
+
 static void testFeatureColor(const Sequence &seq)
 {
     Document doc;
@@ -408,6 +452,7 @@ int main(int argc, char **argv)
     testFeatureColor(seq);
     testShiftSelectSites();
     testEditingHistoryHidden();
+    testShiftSelectFeatures();
     {
         GelLayout gel({{"Ladder", {10000, 1000, 100}, {1000}, true, false, {}}, {"Cut", {3000, 500}, {}, false, false, {}}},
                       theme, tm, 500, 400);
