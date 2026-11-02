@@ -309,10 +309,22 @@ final class SequenceView: NSView {
             return
         }
         // An amino acid in a translation row selects its codon; dragging on
-        // across amino acids selects their codons too.
+        // across amino acids selects their codons too. A double-click takes
+        // the whole translation: the open reading frame, or the CDS.
         let codon = Int(oc_seq_layout_codon_at(layout, p.x, p.y))
         if codon >= 0 {
             window?.makeFirstResponder(self)
+            if event.clickCount == 2 {
+                var start: Int32 = 0, length: Int32 = 0
+                if oc_seq_layout_translation_at(layout, p.x, p.y, &start, &length) {
+                    dragging = false
+                    codonAnchor = nil
+                    anchor = Int(start)
+                    document.select(start: Int(start), length: Int(length))
+                    SelectionBadge.shared.show(for: document, event: event, in: self)
+                    return
+                }
+            }
             dragging = true
             codonAnchor = codon
             anchor = codon
