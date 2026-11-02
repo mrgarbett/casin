@@ -107,6 +107,13 @@ int main(int argc, char **argv)
         OCProteinInfo pinfo;
         char *protein = oc_document_selection_protein(doc, &pinfo);
         CHECK(protein && strncmp(protein, "MARCVG", 6) == 0 && pinfo.length == 180 && pinfo.pI > 11);
+        CHECK(pinfo.strand == OC_STRAND_REVERSE && pinfo.codons >= 180 && pinfo.counts['M' - 'A'] >= 1);
+        {
+            int total = 0;
+            for (int i = 0; i < 26; ++i)
+                total += pinfo.counts[i];
+            CHECK(total == pinfo.length);
+        }
         oc_string_free(protein);
         oc_document_clear_selection(doc);
         CHECK(oc_document_selection_protein(doc, NULL) == NULL);

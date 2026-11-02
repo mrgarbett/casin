@@ -78,6 +78,10 @@ public:
     void activateFeature(int index);
     // Selects the site's recognition sequence and makes it active.
     void activateSite(int visibleIndex);
+    // The strand a selection of whole codons reads on: the active feature's
+    // when it is selected; else reverse when the selection sits in the frame
+    // of a reverse CDS or ORF (of at least `minOrfCodons`); else forward.
+    Strand selectionReadingStrand(int minOrfCodons = 75) const;
     // Go to Position: "1234" selects base 1234 (a bare caret sits between
     // bases, so the status would name the one before it); "100..500" or
     // "100-500" selects bases 100 to 500 (1-based, inclusive), across the

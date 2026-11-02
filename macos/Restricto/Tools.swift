@@ -102,8 +102,8 @@ enum ToolMenus {
                     item("Annotate Common Features", #selector(W.annotateCommonFeatures(_:))),
                     exp(.separator()),
                     exp(item("Find ORFs…", #selector(W.findOrfs(_:)))),
-                    exp(item("Protein Properties…", #selector(W.proteinProperties(_:)))),
                 ]),
+                item("Analyze Translation…", #selector(W.analyzeTranslation(_:)), "t", [.command, .option]),
                 menu("Primers", [
                     item("Add Primer…", #selector(W.addPrimer(_:))),
                     item("Delete Primer…", #selector(W.deletePrimer(_:))),
@@ -517,28 +517,6 @@ extension DocumentWindowController {
                 }
             }
         }
-    }
-
-    @objc func proteinProperties(_ sender: Any?) {
-        guard let d = doc else { return }
-        var info = OCProteinInfo()
-        guard let p = oc_document_selection_protein(d.handle, &info) else {
-            tell("Protein Properties", "Select the coding bases, or a CDS feature, first.")
-            return
-        }
-        let protein = takeString(p)
-        var lines = [
-            "Length              \(info.length) aa",
-            "Molecular weight    \(String(format: "%.2f", info.mass / 1000)) kDa",
-            "Isoelectric point   \(String(format: "%.2f", info.pI))",
-            "Charged residues    \(info.positive) + (K, R), \(info.negative) − (D, E)",
-            "Extinction, 280 nm  \(Int(info.extinction_reduced).formatted()) M⁻¹cm⁻¹ (Cys reduced)",
-        ]
-        if info.extinction_cystines != info.extinction_reduced {
-            lines.append("  with cystines     \(Int(info.extinction_cystines).formatted()) M⁻¹cm⁻¹")
-        }
-        if info.truncated { lines.append("A stop codon ends the protein early; figures are up to it.") }
-        showText("Protein Properties", lines.joined(separator: "\n"), protein, in: window)
     }
 
     // MARK: Primers

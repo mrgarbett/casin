@@ -23,6 +23,9 @@ final class MapView: NSView {
     var onPickPrimer: ((Int, Bool) -> Void)?
     /// Right-click on a site > Digest with…: called with the enzyme.
     var onDigest: ((String) -> Void)?
+    /// Right-click > Analyze Translation…, with where the popover points.
+    var onAnalyzeTranslation: ((NSRect) -> Void)?
+    private var menuPoint = NSRect.zero
 
     init(document: CoreDocument) {
         self.document = document
@@ -106,17 +109,28 @@ final class MapView: NSView {
 
     // MARK: Mouse
 
-    /// Right-click on an enzyme site: the site menu.
+    /// Right-click on an enzyme site: the site menu. Elsewhere, on a
+    /// selection of a codon or more: Analyze Translation.
     override func menu(for event: NSEvent) -> NSMenu? {
-        guard let digest = onDigest, let layout = ensureLayout(), !document.isEmpty else {
+        if let digest = onDigest, let layout = ensureLayout(), !document.isEmpty {
+            let p = mapPoint(event)
+            var kind: Int32 = 0, index: Int32 = 0, position: Int32 = 0
+            oc_map_layout_hit(layout, p.x, p.y, &kind, &index, &position)
+            if kind == Int32(OC_HIT_SITE) { return SiteMenu.menu(for: Int(index), in: document, onDigest: digest) }
+        }
+        guard onAnalyzeTranslation != nil, document.hasSelection, document.selectionLength >= 3 else {
             return super.menu(for: event)
         }
-        let p = mapPoint(event)
-        var kind: Int32 = 0, index: Int32 = 0, position: Int32 = 0
-        oc_map_layout_hit(layout, p.x, p.y, &kind, &index, &position)
-        guard kind == Int32(OC_HIT_SITE) else { return super.menu(for: event) }
-        return SiteMenu.menu(for: Int(index), in: document, onDigest: digest)
+        let p = convert(event.locationInWindow, from: nil)
+        menuPoint = NSRect(x: p.x - 2, y: p.y - 2, width: 4, height: 4)
+        let menu = NSMenu()
+        let item = NSMenuItem(title: "Analyze Translation…", action: #selector(analyzeFromMenu(_:)), keyEquivalent: "")
+        item.target = self
+        menu.addItem(item)
+        return menu
     }
+
+    @objc private func analyzeFromMenu(_ sender: Any?) { onAnalyzeTranslation?(menuPoint) }
 
     override func mouseDown(with event: NSEvent) {
         guard let layout = ensureLayout(), !document.isEmpty else { return }

@@ -93,6 +93,29 @@ static void testUndo(const Sequence &seq)
 
 // The Edit Feature dialog sets a colour with replaceFeature: one undo step,
 // kept by GenBank and .dna.
+// A selection in a reverse CDS's frame reads on the reverse strand.
+static void testReadingStrand()
+{
+    Sequence seq;
+    seq.bases = std::string(40, 'A');
+    Feature cds;
+    cds.type = "CDS";
+    cds.name = "rev";
+    cds.strand = Strand::Reverse;
+    cds.ranges = {{3, 15}};
+    seq.features.push_back(cds);
+    Document doc;
+    doc.setSequence(seq);
+    doc.setSelection({6, 9});
+    CHECK(doc.selectionReadingStrand() == Strand::Reverse);
+    doc.setSelection({4, 9});    // out of its frame
+    CHECK(doc.selectionReadingStrand() == Strand::Forward);
+    doc.setSelection({20, 9});   // outside it
+    CHECK(doc.selectionReadingStrand() == Strand::Forward);
+    doc.activateFeature(0);
+    CHECK(doc.selectionReadingStrand() == Strand::Reverse);
+}
+
 // Go to Position: a base or a range, 1-based.
 static void testGoToPosition()
 {
@@ -626,6 +649,7 @@ int main(int argc, char **argv)
         CHECK_EQ(printPages(seq, sites, {}, tm, ps).size(), pages.size() - 1);
     }
     testUndo(seq);
+    testReadingStrand();
     testFeatureColor(seq);
     testCutsInsideFeatures();
     testFindNames();

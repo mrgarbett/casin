@@ -1341,6 +1341,18 @@ static void testProtein()
     const ProteinStats t = proteinStats("MKX*AA");
     CHECK(t.truncated && t.length == 3 && t.unknown == 1 && t.positive == 1);
     CHECK_EQ(proteinStats("").length, 0);
+    // Instability and GRAVY as Biopython's ProteinAnalysis gives them.
+    CHECK(std::fabs(u.instability - 36.0553) < 0.001 && std::fabs(u.gravy - -0.4895) < 0.0001);
+    CHECK(std::fabs(g.instability - -21.6333) < 0.001 && std::fabs(g.gravy - 1.8667) < 0.0001);
+    CHECK(std::fabs(w.instability - 7.5) < 1e-9 && std::fabs(w.gravy - 0.7) < 1e-9);
+    const ProteinStats ka = proteinStats("AV");
+    CHECK(std::fabs(ka.gravy - 3.0) < 1e-9);
+    CHECK(std::fabs(ka.aliphatic - 100.0 * (1 + 2.9) / 2) < 1e-9);
+    CHECK(std::fabs(ka.instability - 10.0 / 2 * 1.0) < 1e-9);   // DIWV[A][V] = 1
+    const ProteinStats wc = proteinStats("WC");
+    CHECK(std::fabs(wc.instability - 10.0 / 2 * 1.0) < 1e-9);   // DIWV[W][C] = 1
+    const ProteinStats cw = proteinStats("CW");
+    CHECK(std::fabs(cw.instability - 10.0 / 2 * 24.68) < 1e-9); // DIWV[C][W] = 24.68
 }
 
 static void testInsertionByPcr()

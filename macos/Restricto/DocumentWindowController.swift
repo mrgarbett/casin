@@ -216,6 +216,14 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         let digest: (String) -> Void = { [weak self] enzyme in self?.digestAndGel(with: enzyme) }
         sequenceView.onDigest = digest
         mapView.onDigest = digest
+        sequenceView.onAnalyzeTranslation = { [weak self] rect in
+            guard let self = self else { return }
+            TranslationPopover.show(for: self.core, relativeTo: rect, of: self.sequenceView)
+        }
+        mapView.onAnalyzeTranslation = { [weak self] rect in
+            guard let self = self else { return }
+            TranslationPopover.show(for: self.core, relativeTo: rect, of: self.mapView)
+        }
         inspector.onPcr = { [weak self] in self?.pcrProduct(nil) }
         mapView.onEditFeature = edit
         inspector.onPick = { [weak self] _, wasShowing in
@@ -859,6 +867,23 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             controller.window?.setFrame(frame.offsetBy(dx: 30, dy: -30), display: false)
         }
         controller.showWindow(nil)
+    }
+
+    /// The selection's protein in a popover beside it (see TranslationPopover):
+    /// at the sequence when it shows, else at the map.
+    @objc func analyzeTranslation(_ sender: Any?) {
+        let d = core
+        guard d.hasSelection, d.selectionLength >= 3 else {
+            statusMessage = "Select the coding bases, a CDS or an ORF to analyze its translation."
+            NSSound.beep()
+            return
+        }
+        if sequenceView.window != nil, !sequenceView.visibleRect.isEmpty {
+            TranslationPopover.show(for: d, relativeTo: sequenceView.selectionAnchorRect(), of: sequenceView)
+        } else {
+            let b = mapView.bounds
+            TranslationPopover.show(for: d, relativeTo: NSRect(x: b.midX, y: b.midY, width: 1, height: 1), of: mapView)
+        }
     }
 
     @objc func toggleMapHidden(_ sender: Any?) {

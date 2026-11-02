@@ -4,6 +4,7 @@
 #include "style.h"
 #include "../core/edit.h"
 #include "../core/featurelib.h"
+#include "../core/orf.h"
 #include "../core/tm.h"
 
 #include <algorithm>
@@ -195,6 +196,33 @@ void Document::activateSite(int visibleIndex)
     m_activeSite = visibleIndex;
     m_secondSite = -1;
     emit(m_selListeners);
+}
+
+Strand Document::selectionReadingStrand(int minOrfCodons) const
+{
+    const int n = m_seq.length();
+    const Span sel = m_selection;
+    if (!m_hasSelection || sel.length < 3 || n == 0)
+        return Strand::Forward;
+    if (m_activeFeature >= 0 && m_activeFeature < int(m_seq.features.size())) {
+        const Feature &f = m_seq.features[size_t(m_activeFeature)];
+        if (f.span(n, m_seq.circular).start == sel.start && f.span(n, m_seq.circular).length == sel.length)
+            return f.strand == Strand::Reverse ? Strand::Reverse : Strand::Forward;
+    }
+    if (sel.length % 3 != 0)
+        return Strand::Forward;
+    // Inside `s`, in the frame its reverse strand reads (codons counted from its end).
+    const auto inReverseFrame = [&](Span s) {
+        const int off = ((sel.start - s.start) % n + n) % n;
+        return off + sel.length <= s.length && (s.length - off - sel.length) % 3 == 0;
+    };
+    for (const Feature &f : m_seq.features)
+        if (f.strand == Strand::Reverse && f.type == "CDS" && inReverseFrame(f.span(n, m_seq.circular)))
+            return Strand::Reverse;
+    for (const Orf &o : findOrfs(m_seq, minOrfCodons))
+        if (o.strand == Strand::Reverse && inReverseFrame({o.start, o.length}))
+            return Strand::Reverse;
+    return Strand::Forward;
 }
 
 bool Document::goToPosition(const std::string &text)
