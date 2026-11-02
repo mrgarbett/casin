@@ -12,8 +12,12 @@ struct FeatureStyle {
     static Color fill(const std::string &type, const std::string &explicitColor = {});
     // Black or white, whichever reads better on `fill`.
     static Color textOn(const Color &fill);
-    // "source" features cover the whole record and are not drawn.
+    // "source" features cover the whole record and are not drawn, nor are
+    // the editing-history records Geneious exports as features.
     static bool isDrawn(const Feature &f);
+    // A Geneious editing-history record ("nonstandard type: Editing History
+    // Insertion", "... Deletion", "... Replacement"), kept in the file but not shown.
+    static bool isEditingHistory(const Feature &f);
     static bool showsTranslation(const Feature &f) { return f.type == "CDS"; }
 };
 

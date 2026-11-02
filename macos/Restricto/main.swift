@@ -209,6 +209,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         ToolMenus.install(in: main)
         let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(item("New Window", #selector(DocumentWindowController.newWindowForDocument(_:)), "n",
+                                [.command, .shift]))
+        windowMenu.addItem(.separator())
         windowMenu.addItem(item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"))
         windowMenu.addItem(item("Zoom", #selector(NSWindow.performZoom(_:))))
         windowMenu.addItem(.separator())

@@ -872,7 +872,7 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
     renderOrfs(s);
 
     for (const FeatureGlyph &g : m_features) {
-        const bool active = g.feature == st.activeFeature;
+        const bool active = g.feature == st.activeFeature, hover = g.feature == st.hoverFeature;
         for (const auto &c : g.connectors) {
             PathItem p;
             p.points = c;
@@ -881,7 +881,8 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
             s.path(p);
         }
         for (const auto &poly : g.polys)
-            s.polygon(poly, g.fill, active ? m_theme.accent : m_theme.featureOutline, active ? 2.0 : 0.8);
+            s.polygon(poly, g.fill, active || hover ? m_theme.accent : m_theme.featureOutline,
+                      active ? 2.0 : hover ? 1.2 : 0.8);
         for (const TextItem &t : g.label)
             s.text(t);
     }
@@ -932,6 +933,8 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
             const bool activeF = g.feature >= 0 && g.feature == st.activeFeature;
             if (activeF)
                 s.rect(g.rect.adjusted(2), m_theme.accent.withAlpha(0.15));
+            else if (g.feature >= 0 && g.feature == st.hoverFeature)
+                s.rect(g.rect.adjusted(2), m_theme.accent.withAlpha(0.08));
             const double cy = g.rect.y + g.rect.h / 2;
             s.rect({g.rect.x + 1, cy - 4, 8, 8}, g.swatch, m_theme.featureOutline, 0.8);
             s.label(g.text, {g.rect.x + 12, cy}, g.font, g.color, HAlign::Left, VAlign::Middle);
@@ -940,6 +943,8 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
         const bool active = std::find(g.sites.begin(), g.sites.end(), st.activeSite) != g.sites.end();
         if (active)
             s.rect(g.rect.adjusted(2), m_theme.cutMarker.withAlpha(0.15));
+        else if (std::find(g.sites.begin(), g.sites.end(), st.hoverSite) != g.sites.end())
+            s.rect(g.rect.adjusted(2), m_theme.cutMarker.withAlpha(0.08));
         s.label(g.text, g.textPos, g.font, active ? m_theme.cutMarker : g.color, g.align, VAlign::Middle);
     }
 
@@ -971,11 +976,12 @@ void MapLayout::renderLinear(Scene &s, const MapState &st) const
         s.text(t);
     renderOrfs(s);
     for (const FeatureGlyph &g : m_features) {
-        const bool active = g.feature == st.activeFeature;
+        const bool active = g.feature == st.activeFeature, hover = g.feature == st.hoverFeature;
         for (const auto &c : g.connectors)
             s.line(c.front(), c.back(), g.fill.mix(m_theme.text, 0.3), 1.2);
         for (const auto &poly : g.polys)
-            s.polygon(poly, g.fill, active ? m_theme.accent : m_theme.featureOutline, active ? 2.0 : 0.8);
+            s.polygon(poly, g.fill, active || hover ? m_theme.accent : m_theme.featureOutline,
+                      active ? 2.0 : hover ? 1.2 : 0.8);
         for (const TextItem &t : g.label)
             s.text(t);
     }
@@ -1024,6 +1030,8 @@ void MapLayout::renderLinear(Scene &s, const MapState &st) const
         s.rect(g.rect.adjusted(1), m_theme.background);
         if (active)
             s.rect(g.rect.adjusted(2), m_theme.cutMarker.withAlpha(0.15));
+        else if (std::find(g.sites.begin(), g.sites.end(), st.hoverSite) != g.sites.end())
+            s.rect(g.rect.adjusted(2), m_theme.cutMarker.withAlpha(0.08));
         s.label(g.text, g.textPos, g.font, active ? m_theme.cutMarker : g.color, g.align, VAlign::Middle);
     }
     const std::string title = (m_seq.name.empty() ? std::string("Untitled") : m_seq.name) + "  ·  "
