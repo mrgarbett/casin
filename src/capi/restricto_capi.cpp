@@ -690,6 +690,7 @@ int oc_document_selection_start(const OCDocument *doc) { return doc->doc.selecti
 int oc_document_selection_length(const OCDocument *doc) { return doc->doc.selection().length; }
 void oc_document_set_selection(OCDocument *doc, int start, int length) { guarded([&] { doc->doc.setSelection({start, length}); }); }
 void oc_document_clear_selection(OCDocument *doc) { doc->doc.clearSelection(); }
+bool oc_document_go_to_position(OCDocument *doc, const char *text) { return guarded<bool>(false, nullptr, [&] { return text && doc->doc.goToPosition(text); }); }
 char *oc_document_selected_bases(const OCDocument *doc) { return guarded<char *>(nullptr, nullptr, [&]() -> char * { return dupString(doc->doc.selectedBases()); }); }
 
 char *oc_document_selected_reverse_complement(const OCDocument *doc)

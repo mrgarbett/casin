@@ -72,6 +72,13 @@ public:
     void activateFeature(int index);
     // Selects the site's recognition sequence and makes it active.
     void activateSite(int visibleIndex);
+    // Go to Position: "1234" selects base 1234 (a bare caret sits between
+    // bases, so the status would name the one before it); "100..500" or
+    // "100-500" selects bases 100 to 500 (1-based, inclusive), across the
+    // origin of a circular sequence when the first is past the second.
+    // Commas and spaces are ignored. Returns false, changing nothing, for
+    // anything else or a base outside the sequence.
+    bool goToPosition(const std::string &text);
 
     // Searches both strands for `query` (IUPAC) and selects the first match
     // starting after the current selection start, wrapping around. Returns the

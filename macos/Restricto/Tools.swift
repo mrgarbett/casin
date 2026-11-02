@@ -479,17 +479,20 @@ extension DocumentWindowController {
              + names.joined(separator: ", ") + ". Undo (⌘Z) takes them all off again.")
     }
 
-    /// ⌘L: selects the base at a base number and shows it (a bare caret
-    /// sits between bases, so the status would name the base before it).
+    /// ⌘L: selects the base at a base number, or a range of bases, and shows
+    /// it (a bare caret sits between bases, so the status would name the base
+    /// before it). The core reads the text.
     @objc func goToPosition(_ sender: Any?) {
         guard let d = doc, !d.isEmpty else { return }
-        let form = Form("Go to Position", "A base number from 1 to \(d.length.formatted()).")
-        let field = form.text("Base", d.hasSelection ? "\(d.selectionStart + 1)" : "1", width: 120)
+        let wrap = d.isCircular ? ", or across the origin as 9000..200" : ""
+        let form = Form("Go to Position",
+                        "A base number from 1 to \(d.length.formatted()), or a range such as 100..500 or 100-500\(wrap).")
+        let start = d.selectionStart + 1, end = (d.selectionStart + d.selectionLength - 1) % max(1, d.length) + 1
+        let current = !d.hasSelection ? "1" : d.selectionLength > 1 ? "\(start)..\(end)" : "\(start)"
+        let field = form.text("Position", current, placeholder: "1234 or 100..500", width: 160)
         form.run(in: window, ok: "Go") { [weak self] in
-            let digits = field.stringValue.filter { $0.isNumber }
-            guard let base = Int(digits), base >= 1, base <= d.length else { NSSound.beep(); return }
             self?.revealSequence()
-            d.select(start: base - 1, length: 1)
+            if !oc_document_go_to_position(d.handle, field.stringValue) { NSSound.beep() }
         }
     }
 
