@@ -10,9 +10,13 @@ import AppKit
 import RestrictoCore
 import UniformTypeIdentifiers
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let launchFiles: [String]
     private var launched = false
+    /// The UI smoke test neither reopens nor remembers the files left open.
+    private let smokeTest = CommandLine.arguments.contains("--ui-smoke")
+    /// The files open at the last quit, reopened at a plain launch.
+    private static let lastOpenFilesKey = "LastOpenFiles"
 
     init(launchFiles: [String]) {
         self.launchFiles = launchFiles
@@ -38,8 +42,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // still loading when didFinishLaunching runs. AppKit then opens an empty,
     // untitled main window (the folder sidebar lists files to open), which
     // the first file opened replaces while it is still untouched.
+    // At launch with nothing to open, the files open at the last quit come
+    // back instead, as tabs; the empty window only when none of them is left.
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
-        launchFiles.isEmpty || launched
+        guard launchFiles.isEmpty || launched else { return false }
+        if launched || smokeTest { return true }
+        let paths = (UserDefaults.standard.stringArray(forKey: Self.lastOpenFilesKey) ?? [])
+            .filter { FileManager.default.fileExists(atPath: $0) }
+        for path in paths {
+            // A file moved or broken since: skipped quietly.
+            NSDocumentController.shared.openDocument(withContentsOf: URL(fileURLWithPath: path), display: true) { _, _, _ in }
+        }
+        return paths.isEmpty
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        guard !smokeTest else { return }
+        var paths: [String] = []
+        for case let doc as SequenceDocument in NSDocumentController.shared.documents {
+            if let path = doc.fileURL?.path, !paths.contains(path) { paths.append(path) }
+        }
+        UserDefaults.standard.set(paths, forKey: Self.lastOpenFilesKey)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -54,6 +77,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .applicationVersion: String(cString: oc_version()),
             .credits: credits,
         ])
+    }
+
+    // MARK: Open Recent and window tabs
+
+    /// File > Open Recent, filled from the document controller's list each
+    /// time it opens, rather than relying on AppKit to find a menu built in code.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        for url in NSDocumentController.shared.recentDocumentURLs {
+            let item = NSMenuItem(title: FileManager.default.displayName(atPath: url.path),
+                                  action: #selector(openRecent(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = url
+            item.image = NSWorkspace.shared.icon(forFile: url.path)
+            item.image?.size = NSSize(width: 16, height: 16)
+            item.toolTip = url.path
+            menu.addItem(item)
+        }
+        if menu.numberOfItems > 0 { menu.addItem(.separator()) }
+        let clear = NSMenuItem(title: "Clear Menu", action: #selector(clearRecent(_:)), keyEquivalent: "")
+        clear.target = self
+        menu.addItem(clear)
+    }
+
+    @objc private func openRecent(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, error in
+            if let error = error { NSApp.presentError(error) }
+        }
+    }
+
+    @objc private func clearRecent(_ sender: Any?) {
+        NSDocumentController.shared.clearRecentDocuments(sender)
+    }
+
+    /// ⌘1 to ⌘8 show that tab of the front window, ⌘9 the last one.
+    @objc func selectTab(_ sender: NSMenuItem) {
+        guard let tabs = frontTabs, !tabs.isEmpty else { NSSound.beep(); return }
+        let i = sender.tag == 9 ? tabs.count - 1 : sender.tag - 1
+        guard i < tabs.count else { NSSound.beep(); return }
+        tabs[i].makeKeyAndOrderFront(nil)
+    }
+
+    private var frontTabs: [NSWindow]? {
+        guard let window = NSApp.mainWindow else { return nil }
+        return window.tabbedWindows ?? [window]
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(selectTab(_:)) {
+            let count = frontTabs?.count ?? 0
+            return menuItem.tag == 9 ? count > 0 : menuItem.tag <= count
+        }
+        if menuItem.action == #selector(clearRecent(_:)) {
+            return !NSDocumentController.shared.recentDocumentURLs.isEmpty
+        }
+        return true
     }
 
     private func buildMainMenu() -> NSMenu {
@@ -84,8 +164,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .separator(),
             item("Quit Restricto", #selector(NSApplication.terminate(_:)), "q"),
         ])
+        let recent = NSMenuItem(title: "Open Recent", action: nil, keyEquivalent: "")
+        recent.submenu = NSMenu(title: "Open Recent")
+        recent.submenu?.delegate = self
+        if let menu = recent.submenu { menuNeedsUpdate(menu) }
         submenu("File", [
             item("Open…", #selector(NSDocumentController.openDocument(_:)), "o"),
+            recent,
             item("Show Folder in Sidebar…", #selector(DocumentWindowController.chooseBrowserFolder(_:)), "o",
                  [.command, .shift]),
             .separator(),
@@ -126,6 +211,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"))
         windowMenu.addItem(item("Zoom", #selector(NSWindow.performZoom(_:))))
+        windowMenu.addItem(.separator())
+        for n in 1...9 {
+            let tab = item(n == 9 ? "Show Last Tab" : "Show Tab \(n)", #selector(selectTab(_:)), "\(n)")
+            tab.target = self
+            tab.tag = n
+            windowMenu.addItem(tab)
+        }
         let windowItem = NSMenuItem(title: "Window", action: nil, keyEquivalent: "")
         windowItem.submenu = windowMenu
         main.addItem(windowItem)
