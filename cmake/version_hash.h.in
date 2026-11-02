@@ -1,0 +1,2 @@
+// Generated from cmake/version_hash.h.in; see src/core/version.h.
+#define RESTRICTO_GIT_HASH "@RESTRICTO_GIT_HASH@"
