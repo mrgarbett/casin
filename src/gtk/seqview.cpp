@@ -566,10 +566,21 @@ void SequenceView::dragBegin(GtkGestureDrag *g, double x, double y, gpointer p)
     const view::Point at = self->content(x, y);
     const GdkModifierType mods = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(g));
     if (mods & GDK_SHIFT_MASK) {
-        // On a second enzyme: the bases between the two cuts.
+        // On a second enzyme: the bases between the two cuts. On a primer or
+        // feature: the selection grown to cover it.
         const int site = self->m_layout->siteAt(at);
         if (site >= 0) {
             self->m_doc->extendToSite(site);
+            return;
+        }
+        const int primer = self->m_layout->primerAt(at);
+        if (primer >= 0 && primer < int(self->m_doc->displaySequence().primers.size())) {
+            self->m_doc->extendToPrimer(primer);
+            return;
+        }
+        const int feature = self->m_layout->featureAt(at);
+        if (feature >= 0) {
+            self->m_doc->extendToFeature(feature);
             return;
         }
         // Shift-click extends from the existing anchor.
@@ -678,9 +689,33 @@ void SequenceView::leave(GtkEventControllerMotion *, gpointer p)
 void SequenceView::pressed(GtkGestureClick *, int n, double x, double y, gpointer p)
 {
     auto *self = static_cast<SequenceView *>(p);
-    if (n != 2 || !self->m_layout || !self->onEditFeature)
+    if (n != 2 || !self->m_layout)
         return;
-    const int feature = self->m_layout->featureAt(self->content(x, y));
+    const view::Point at = self->content(x, y);
+    // On an amino acid: the whole translation, the open reading frame or the
+    // CDS, in place of the codon the first click selected. The drag gesture
+    // sees this press too and selects that codon, so the whole translation
+    // is selected once both gestures have had the press.
+    const Span translation = self->m_layout->translationAt(at);
+    if (!translation.empty()) {
+        self->m_pendingTranslation = translation;
+        g_idle_add_once(
+            [](gpointer p) {
+                auto *view = static_cast<SequenceView *>(p);
+                if (view->m_pendingTranslation.empty())
+                    return;
+                view->m_dragging = false;
+                view->m_codonAnchor = -1;
+                view->m_anchor = view->m_pendingTranslation.start;
+                view->m_doc->setSelection(view->m_pendingTranslation);
+                view->m_pendingTranslation = Span{};
+            },
+            self);
+        return;
+    }
+    if (!self->onEditFeature)
+        return;
+    const int feature = self->m_layout->featureAt(at);
     if (feature >= 0)
         self->onEditFeature(feature);
 }

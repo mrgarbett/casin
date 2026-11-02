@@ -114,6 +114,9 @@ private:
     // A drag that started on an amino acid: its codon, so the selection grows
     // codon by codon while it stays on amino acids (-1 otherwise).
     int m_codonAnchor = -1;
+    // A double-clicked translation, applied once the drag gesture has had
+    // the same press (it would otherwise leave just the codon selected).
+    Span m_pendingTranslation;
     // The codon whose amino acid is under the mouse, outlined on the strands.
     int m_hoverCodon = -1;
     double m_x0 = 0, m_y0 = 0, m_lastX = 0, m_lastY = 0;

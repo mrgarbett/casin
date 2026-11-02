@@ -141,7 +141,11 @@ void MapView::dragBegin(GtkGestureDrag *drag, double x, double y, gpointer p)
     const view::MapHit hit = self->m_layout->hitTest(view::Point{x, y});
     switch (hit.kind) {
     case view::MapHit::Feature:
-        self->m_doc->activateFeature(hit.index);
+        // Shift-click grows the selection to cover the feature too.
+        if (gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(drag)) & GDK_SHIFT_MASK)
+            self->m_doc->extendToFeature(hit.index);
+        else
+            self->m_doc->activateFeature(hit.index);
         break;
     case view::MapHit::Site:
         // Shift-click on a second enzyme selects the bases between the two cuts.
@@ -154,6 +158,10 @@ void MapView::dragBegin(GtkGestureDrag *drag, double x, double y, gpointer p)
         if (self->onPickPrimer) {
             const GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(drag));
             self->onPickPrimer(hit.index, state & GDK_SHIFT_MASK);
+            break;
+        }
+        if (gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(drag)) & GDK_SHIFT_MASK) {
+            self->m_doc->extendToPrimer(hit.index);
             break;
         }
         [[fallthrough]];   // elsewhere a primer starts a selection, as other bases do
