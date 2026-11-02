@@ -32,6 +32,11 @@ public:
     std::function<void(int)> onHoverBase;
     std::function<void(double, double)> onSelectDrag;
     std::function<void(int)> onEditFeature;
+    // The feature or site under the mouse here (-1, -1 for none), so the
+    // sequence view can tint the same one.
+    std::function<void(int, int)> onHoverTarget;
+    // The feature and site hovered anywhere: lightly marked on the map too.
+    void setHover(int feature, int site);
     // When set, clicking a primer picks it (index, shift held) instead of
     // starting a selection, as on the PCR wizard's vector map.
     std::function<void(int, bool)> onPickPrimer;
@@ -55,6 +60,7 @@ private:
     int m_trailing = 0, m_bottom = 0;
     double m_zoom = 1;
     bool m_dark = false;
+    int m_hoverFeature = -1, m_hoverSite = -1;
     view::MapOptions m_options;
     // drag state
     bool m_selecting = false;

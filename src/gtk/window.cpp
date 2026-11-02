@@ -585,6 +585,13 @@ void Window::buildUi()
     };
     m_map->onHoverBase = hover;
     m_seq->onHoverBase = hover;
+    // A feature or site under the mouse in one view is marked in the other too.
+    auto hoverTarget = [this](int feature, int site) {
+        m_map->setHover(feature, site);
+        m_seq->setHover(feature, site);
+    };
+    m_map->onHoverTarget = hoverTarget;
+    m_seq->onHoverTarget = hoverTarget;
     m_map->onSelectDrag = [this](double x, double y) { showBadge(m_map->widget(), x, y); };
     m_seq->onSelectDrag = [this](double x, double y) { showBadge(m_seq->widget(), x, y); };
     auto edit = [this](int index) { featureDialog(index); };

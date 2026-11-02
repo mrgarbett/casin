@@ -52,6 +52,11 @@ public:
     std::function<void(int)> onHoverBase;
     std::function<void(double, double)> onSelectDrag;
     std::function<void(int)> onEditFeature;
+    // The feature or site under the mouse here (-1, -1 for none), so the map
+    // can mark the same one.
+    std::function<void(int, int)> onHoverTarget;
+    // The feature and site hovered anywhere: their bases lightly tinted.
+    void setHover(int feature, int site);
 
 private:
     static void draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer self);
@@ -119,6 +124,7 @@ private:
     Span m_pendingTranslation;
     // The codon whose amino acid is under the mouse, outlined on the strands.
     int m_hoverCodon = -1;
+    int m_hoverFeature = -1, m_hoverSite = -1;
     double m_x0 = 0, m_y0 = 0, m_lastX = 0, m_lastY = 0;
     guint m_timer = 0;
     // scroll state

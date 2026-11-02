@@ -114,6 +114,8 @@ SequenceView::~SequenceView()
 
 void SequenceView::invalidate()
 {
+    // The hovered feature and site are indices into lists this rebuilds.
+    m_hoverFeature = m_hoverSite = -1;
     m_layout.reset();
     ensureLayout();
     gtk_widget_queue_draw(m_area);
@@ -453,6 +455,8 @@ void SequenceView::draw(GtkDrawingArea *, cairo_t *cr, int, int h, gpointer p)
     st.activeFeature = self->m_doc->activeFeature();
     st.activeSite = self->m_doc->activeSite();
     st.hoverCodon = self->m_hoverCodon;
+    st.hoverFeature = self->m_hoverFeature;
+    st.hoverSite = self->m_hoverSite;
     const double z = self->m_zoom;
     const view::Scene scene = self->m_layout->render(self->m_offset / z, h / z, st);
     if (!scene.background.isNone()) {
@@ -474,6 +478,15 @@ void SequenceView::valueChanged(GtkAdjustment *adj, gpointer p)
         self->m_offset = gtk_adjustment_get_value(adj);
     }
     gtk_widget_queue_draw(self->m_area);
+}
+
+void SequenceView::setHover(int feature, int site)
+{
+    if (feature == m_hoverFeature && site == m_hoverSite)
+        return;
+    m_hoverFeature = feature;
+    m_hoverSite = site;
+    gtk_widget_queue_draw(m_area);
 }
 
 void SequenceView::setHoverCodon(int codon)
@@ -674,6 +687,11 @@ void SequenceView::motion(GtkEventControllerMotion *, double x, double y, gpoint
     const view::Point at = self->content(x, y);
     // An amino acid under the mouse outlines its codon.
     self->setHoverCodon(self->m_layout->codonAt(at));
+    // A site or feature under the mouse is marked on the map too.
+    if (self->onHoverTarget) {
+        const int site = self->m_layout->siteAt(at);
+        self->onHoverTarget(site >= 0 ? -1 : self->m_layout->featureAt(at), site);
+    }
     if (self->onHoverBase)
         self->onHoverBase(self->m_layout->baseAt(at));
 }
@@ -682,6 +700,8 @@ void SequenceView::leave(GtkEventControllerMotion *, gpointer p)
 {
     auto *self = static_cast<SequenceView *>(p);
     self->setHoverCodon(-1);
+    if (self->onHoverTarget)
+        self->onHoverTarget(-1, -1);
     if (self->onHoverBase)
         self->onHoverBase(-1);
 }
