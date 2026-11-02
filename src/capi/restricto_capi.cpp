@@ -119,11 +119,13 @@ struct OCDocument {
 
 struct OCMapLayout {
     std::unique_ptr<view::MapLayout> layout;
+    int hoverFeature = -1, hoverSite = -1;
 };
 
 struct OCSeqLayout {
     std::unique_ptr<view::SequenceLayout> layout;
     int hoverCodon = -1;
+    int hoverFeature = -1, hoverSite = -1;
 };
 
 struct OCScene {
@@ -1231,8 +1233,16 @@ OCScene *oc_map_layout_render(const OCMapLayout *layout, const OCDocument *doc)
         st.selection = doc->doc.selection();
         st.activeFeature = doc->doc.activeFeature();
         st.activeSite = doc->doc.activeSite();
+        st.hoverFeature = layout->hoverFeature;
+        st.hoverSite = layout->hoverSite;
         return new OCScene{layout->layout->render(st)};
     });
+}
+
+void oc_map_layout_set_hover(OCMapLayout *l, int feature, int site)
+{
+    l->hoverFeature = feature;
+    l->hoverSite = site;
 }
 
 void oc_map_layout_hit(const OCMapLayout *layout, double x, double y, int *kind, int *index, int *position)
@@ -1318,11 +1328,19 @@ OCScene *oc_seq_layout_render(const OCSeqLayout *layout, const OCDocument *doc, 
         st.activeFeature = doc->doc.activeFeature();
         st.activeSite = doc->doc.activeSite();
         st.hoverCodon = layout->hoverCodon;
+        st.hoverFeature = layout->hoverFeature;
+        st.hoverSite = layout->hoverSite;
         return new OCScene{layout->layout->render(scroll_y, view_height, st)};
     });
 }
 
 void oc_seq_layout_set_hover_codon(OCSeqLayout *l, int codon_start) { l->hoverCodon = codon_start; }
+
+void oc_seq_layout_set_hover(OCSeqLayout *l, int feature, int site)
+{
+    l->hoverFeature = feature;
+    l->hoverSite = site;
+}
 
 int oc_seq_layout_position_at(const OCSeqLayout *l, double x, double y) { return l->layout->positionAt({x, y}); }
 int oc_seq_layout_feature_at(const OCSeqLayout *l, double x, double y) { return l->layout->featureAt({x, y}); }

@@ -56,6 +56,7 @@ final class SequenceView: NSView {
             }
             self.needsDisplay = true
         }
+        document.observeHover { [weak self] in self?.needsDisplay = true }
         // ⌘+ and ⌘−: the width the layout gets changes, so it rewraps
         // around the base at the top, as a resize does.
         NotificationCenter.default.addObserver(forName: Zoom.changed, object: nil, queue: .main) { [weak self] _ in
@@ -197,8 +198,9 @@ final class SequenceView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard let ctx = NSGraphicsContext.current?.cgContext, let layout = ensureLayout(),
-              let scene = oc_seq_layout_render(layout, document.handle, dirtyRect.minY / zoom,
+        guard let ctx = NSGraphicsContext.current?.cgContext, let layout = ensureLayout() else { return }
+        oc_seq_layout_set_hover(layout, Int32(document.hoverFeature), Int32(document.hoverSite))
+        guard let scene = oc_seq_layout_render(layout, document.handle, dirtyRect.minY / zoom,
                                                dirtyRect.height / zoom) else { return }
         defer { oc_scene_free(scene) }
         ctx.saveGState()
@@ -352,7 +354,7 @@ final class SequenceView: NSView {
         document.select(start: min(pos, anchor), length: abs(pos - anchor))
     }
 
-    // MARK: Hover: codons and tooltips
+    // MARK: Hover: codons, tooltips, and the feature or site shown on the map too
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -373,10 +375,14 @@ final class SequenceView: NSView {
         if base >= 0 { onHoverBase?(base) }
         let tip = takeString(oc_seq_layout_tooltip(layout, p.x, p.y))
         toolTip = tip.isEmpty ? nil : tip
+        // A site or feature under the mouse is highlighted on the map too.
+        let site = Int(oc_seq_layout_site_at(layout, p.x, p.y))
+        document.setHover(feature: site >= 0 ? -1 : Int(oc_seq_layout_feature_at(layout, p.x, p.y)), site: site)
     }
 
     override func mouseExited(with event: NSEvent) {
         hoverCodon = -1
         onHoverBase?(-1)
+        document.setHover(feature: -1, site: -1)
     }
 }

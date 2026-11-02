@@ -59,6 +59,8 @@ final class CoreDocument {
         oc_document_set_callback(handle, { context, what in
             guard let context = context else { return }
             let me = Unmanaged<CoreDocument>.fromOpaque(context).takeUnretainedValue()
+            // Indices from before an edit or a new set of sites may point elsewhere.
+            if what & (Change.sequence | Change.enzymes) != 0 { me.hoverFeature = -1; me.hoverSite = -1 }
             for observer in me.observers { observer(what) }
         }, Unmanaged.passUnretained(self).toOpaque())
     }
@@ -89,6 +91,23 @@ final class CoreDocument {
     /// Views rebuild their layouts on an enzyme change, so report one.
     private func viewOptionsChanged() {
         for observer in observers { observer(Change.enzymes) }
+    }
+
+    // MARK: Hover (the map and the sequence view each highlight what the mouse is over in either)
+
+    /// The feature and visible site under the mouse, -1 for none. Transient:
+    /// the views redraw for a change without laying out again.
+    private(set) var hoverFeature = -1
+    private(set) var hoverSite = -1
+    private var hoverObservers: [() -> Void] = []
+
+    func observeHover(_ observer: @escaping () -> Void) { hoverObservers.append(observer) }
+
+    func setHover(feature: Int, site: Int) {
+        guard feature != hoverFeature || site != hoverSite else { return }
+        hoverFeature = feature
+        hoverSite = site
+        for observer in hoverObservers { observer() }
     }
 
     func load(path: String) throws {

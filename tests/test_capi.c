@@ -144,6 +144,17 @@ int main(int argc, char **argv)
     CHECK(oc_seq_layout_total_height(seq) > 1000);
     scene = oc_seq_layout_render(seq, doc, 0, 600);
     CHECK(oc_scene_item_count(scene) > 50);
+    {
+        /* A hovered site tints its bases: more items, same layout. */
+        const int plain = oc_scene_item_count(scene);
+        oc_seq_layout_set_hover(seq, -1, 0);
+        OCScene *hovered = oc_seq_layout_render(seq, doc, 0, 100000);
+        OCScene *unhovered = (oc_seq_layout_set_hover(seq, -1, -1), oc_seq_layout_render(seq, doc, 0, 100000));
+        CHECK(oc_scene_item_count(hovered) > oc_scene_item_count(unhovered));
+        CHECK(oc_scene_item_count(unhovered) >= plain);
+        oc_scene_free(hovered);
+        oc_scene_free(unhovered);
+    }
     oc_scene_free(scene);
     oc_seq_layout_free(seq);
     OCSeqOptions so = {6, true, false, true, false, "CDS"};

@@ -18,6 +18,8 @@ struct SeqViewState {
     int activeFeature = -1;
     int activeSite = -1;   // index into the sites passed to the layout
     int hoverCodon = -1;   // first base of a codon outlined on the strands (its amino acid is under the mouse)
+    int hoverFeature = -1; // feature under the mouse here or on the map: its bases lightly tinted
+    int hoverSite = -1;    // site under the mouse here or on the map: its recognition bases tinted
 };
 
 // What the sequence view shows besides the bases.

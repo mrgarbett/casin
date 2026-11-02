@@ -598,6 +598,26 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
     }
     const CutSite *active = (m_opt.enzymes && st.activeSite >= 0 && st.activeSite < int(m_sites.size()))
                               ? &m_sites[size_t(st.activeSite)] : nullptr;
+    // The feature or site hovered here or on the map: a light tint over its
+    // bases (a site's recognition sequence), up to two pieces across the origin.
+    std::vector<std::pair<Range, Color>> tints;
+    auto tint = [&](int a, int e, Color c) {
+        if (a < 0 || a >= m_n || e <= a)
+            return;
+        tints.push_back({{a, std::min(e, m_n)}, c});
+        if (e > m_n && m_seq.circular)
+            tints.push_back({{0, std::min(e - m_n, a)}, c});
+    };
+    if (m_opt.features && st.hoverFeature >= 0 && st.hoverFeature < int(m_seq.features.size())
+        && FeatureStyle::isDrawn(m_seq.features[size_t(st.hoverFeature)])
+        && !m_opt.hiddenTypes.count(m_seq.features[size_t(st.hoverFeature)].type))
+        for (const Range &r : m_seq.features[size_t(st.hoverFeature)].ranges)
+            tint(r.start, r.end, m_theme.accent.withAlpha(0.12));
+    if (m_opt.enzymes && st.hoverSite >= 0 && st.hoverSite < int(m_sites.size())) {
+        const CutSite &c = m_sites[size_t(st.hoverSite)];
+        if (c.enzyme)
+            tint(c.matchStart, c.matchStart + c.enzyme->siteLength(), m_theme.cutMarker.withAlpha(0.15));
+    }
 
     const double asc = m_baseFont.size * 0.78;
     for (int li = lineIndexAt(scrollY); li >= 0 && li < int(m_lines.size()); ++li) {
@@ -613,6 +633,12 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
             const int b = std::min(r.end, l.start + l.len) - l.start;
             if (b > a)
                 s.rect({boundaryX(a), top, boundaryX(b) - boundaryX(a), strandsEnd - top}, m_theme.selection);
+        }
+        for (const auto &t : tints) {
+            const int a = std::max(t.first.start, l.start) - l.start;
+            const int b = std::min(t.first.end, l.start + l.len) - l.start;
+            if (b > a)
+                s.rect({boundaryX(a), top, boundaryX(b) - boundaryX(a), strandsEnd - top}, t.second);
         }
         for (const Range &r : hover) {
             const int a = std::max(r.start, l.start) - l.start;
@@ -843,8 +869,9 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
                 poly = {{x0, ym}, {x0 + head, ly}, {x1, ly}, {x1, ly + m_laneH}, {x0 + head, ly + m_laneH}};
             else
                 poly = {{x0, ly}, {x1, ly}, {x1, ly + m_laneH}, {x0, ly + m_laneH}};
-            const bool isActive = pc.feature == st.activeFeature;
-            s.polygon(poly, fill, isActive ? m_theme.accent : m_theme.featureOutline, isActive ? 2 : 0.6);
+            const bool isActive = pc.feature == st.activeFeature, isHover = pc.feature == st.hoverFeature;
+            s.polygon(poly, fill, isActive || isHover ? m_theme.accent : m_theme.featureOutline,
+                      isActive ? 2 : isHover ? 1.2 : 0.6);
             Font nf{10, true, false};
             const double avail = x1 - x0 - head - 6;
             if (avail > 20) {

@@ -15,6 +15,8 @@ struct MapState {
     bool hasSelection = false;
     int activeFeature = -1;  // index into Sequence::features
     int activeSite = -1;     // index into the sites passed to the layout
+    int hoverFeature = -1;   // under the mouse here or in the sequence view: lightly outlined
+    int hoverSite = -1;      // likewise, its label lightly backed
 };
 
 // What the map shows. Hidden feature types are matched on Feature::type.

@@ -162,6 +162,58 @@ int main(int argc, char **argv)
         CHECK(h.kind == MapHit::Sequence);
     }
 
+    // Hovering a feature or a site (here or in the sequence view) lightly
+    // highlights it on the map and in the sequence, without a new layout.
+    {
+        const auto outlined = [](const Scene &sc, const Color &c, double width) {
+            int n = 0;
+            for (const Item &it : sc.items)
+                if (auto *p = std::get_if<PathItem>(&it))
+                    n += p->closed && p->lineWidth == width && p->stroke.r == c.r && p->stroke.g == c.g
+                         && p->stroke.b == c.b;
+            return n;
+        };
+        for (bool circular : {true, false}) {
+            Sequence s2 = seq;
+            s2.circular = circular;
+            const std::vector<CutSite> sites2 = findSites(s2, commonEnzymes());
+            MapLayout map(s2, sites2, theme, tm, 900, 700);
+            MapState plain, hover;
+            hover.hoverFeature = 1;   // the promoter (0 is the source, which isn't drawn)
+            CHECK(outlined(map.render(plain), theme.accent, 1.2) == 0);
+            CHECK(outlined(map.render(hover), theme.accent, 1.2) > 0);
+            // Some site's label gets a backing; none loses anything.
+            const size_t base = map.render(plain).items.size();
+            bool backed = false;
+            for (int i = 0; i < int(sites2.size()); ++i) {
+                hover = {};
+                hover.hoverSite = i;
+                const size_t n = map.render(hover).items.size();
+                CHECK(n >= base);
+                backed = backed || n == base + 1;
+            }
+            CHECK(backed);
+        }
+        SequenceLayout sl(seq, sites, theme, tm, 900, true);
+        const double all = sl.totalHeight();
+        const size_t base = sl.render(0, all, {}).items.size();
+        SeqViewState hover;
+        hover.hoverFeature = 1;
+        CHECK(sl.render(0, all, hover).items.size() > base);
+        CHECK(outlined(sl.render(0, all, hover), theme.accent, 1.2) > 0);
+        hover = {};
+        hover.hoverSite = 0;
+        CHECK(sl.render(0, all, hover).items.size() > base);
+        CHECK(sl.totalHeight() == all);
+        // The source (not drawn), or out of range: nothing extra.
+        hover = {};
+        hover.hoverFeature = 0;
+        CHECK(sl.render(0, all, hover).items.size() == base);
+        hover.hoverFeature = int(seq.features.size());
+        hover.hoverSite = int(sites.size());
+        CHECK(sl.render(0, all, hover).items.size() == base);
+    }
+
     // Primers can be clicked on the map, circular and linear; the rest of
     // the map still hits the sequence.
     {

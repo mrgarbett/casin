@@ -254,6 +254,8 @@ OCMapLayout *oc_map_layout_new_scaled(const OCDocument *doc, double width, doubl
 double oc_map_layout_radius(const OCMapLayout *layout);
 void oc_map_layout_free(OCMapLayout *layout);
 OCScene *oc_map_layout_render(const OCMapLayout *layout, const OCDocument *doc);
+/* As oc_seq_layout_set_hover: a feature and a site lightly highlighted, -1 for none. */
+void oc_map_layout_set_hover(OCMapLayout *layout, int feature, int site);
 /* kind = OC_HIT_*; index = feature, visible-site or primer index; position = base boundary. */
 void oc_map_layout_hit(const OCMapLayout *layout, double x, double y, int *kind, int *index, int *position);
 bool oc_map_layout_is_circular(const OCMapLayout *layout);
@@ -296,6 +298,9 @@ int oc_seq_layout_base_at(const OCSeqLayout *layout, double x, double y);
 /* Outlines the codon starting at codon_start on the strands in later renders
    (the one whose amino acid is under the mouse); -1 for none. */
 void oc_seq_layout_set_hover_codon(OCSeqLayout *layout, int codon_start);
+/* Lightly highlights a feature and a site (indices as the hit tests give,
+   -1 for none) in later renders: the ones under the mouse here or on the map. */
+void oc_seq_layout_set_hover(OCSeqLayout *layout, int feature, int site);
 double oc_seq_layout_line_top(const OCSeqLayout *layout, int position);
 double oc_seq_layout_line_height(const OCSeqLayout *layout, int position);
 char *oc_seq_layout_tooltip(const OCSeqLayout *layout, double x, double y);
