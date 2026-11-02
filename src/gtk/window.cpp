@@ -381,6 +381,7 @@ void Window::addActions(GActionMap *map, Shell *shell)
         OC_STATE("show-map", nullptr, "true", actShowMap),
         OC_STATE("stack-map", nullptr, "false", actStackMap),
         // The window's own: they need no document.
+        {"show-tab", &Window::actShowTab, "i", nullptr, nullptr, {0, 0, 0}},
         {"sidebar", nullptr, nullptr, "true", &Window::actToggleSidebar, {0, 0, 0}},
         {"show-folder", &Window::actShowFolder, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"fullscreen", nullptr, nullptr, "false", &Window::actFullscreen, {0, 0, 0}},
@@ -1130,6 +1131,17 @@ void Window::onDarkChanged(GObject *sm, GParamSpec *, gpointer page)
     self->m_seq->setDark(dark);
 }
 
+// A file opened or saved goes to the top of File > Open Recent, in every window.
+void Window::rememberFile(const std::string &path)
+{
+    if (path.empty())
+        return;
+    addRecentFile(path);
+    if (GtkApplication *app = gtk_window_get_application(gtkWindow()))
+        for (Shell *shell : Shell::all(app))
+            shell->rebuildMenu();
+}
+
 bool Window::load(const std::string &path, std::string *error)
 {
     Sequence seq;
@@ -1155,6 +1167,7 @@ bool Window::load(const std::string &path, std::string *error)
             trace.reset();
     }
     showTrace(std::move(trace));
+    rememberFile(path);
     return true;
 }
 
@@ -1865,6 +1878,21 @@ void Window::actClose(GSimpleAction *, GVariant *, gpointer p)
     self->m_shell->closePage(self);
 }
 
+// Ctrl+1–8 show that tab of this window, Ctrl+9 the last one.
+void Window::actShowTab(GSimpleAction *, GVariant *value, gpointer p)
+{
+    auto *shell = static_cast<Shell *>(p);
+    if (!shell || !value)
+        return;
+    const std::vector<Window *> pages = shell->pages();
+    if (pages.empty())
+        return;
+    const int which = g_variant_get_int32(value);
+    const size_t index = which >= 9 ? pages.size() - 1 : size_t(std::max(1, which) - 1);
+    if (index < pages.size())
+        shell->selectPage(pages[index]);
+}
+
 void Window::actToggleSidebar(GSimpleAction *, GVariant *state, gpointer shell)
 {
     const bool shown = g_variant_get_boolean(state);
@@ -2122,6 +2150,7 @@ bool Window::saveTo(const std::string &path, FileFormat format)
         m_doc.setPath(path);
         m_doc.markSaved();
     }
+    rememberFile(path);
     toast("Saved " + baseName(path));
     return true;
 }

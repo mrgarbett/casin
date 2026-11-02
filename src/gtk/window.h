@@ -118,6 +118,7 @@ private:
     static void onEnzymeRowActivated(GtkListBox *, GtkListBoxRow *row, gpointer self);
     static void onEnzymeToggled(GtkCheckButton *, gpointer self);
     static void onSearchActivate(GtkSearchEntry *, gpointer self);
+    static void actShowTab(GSimpleAction *, GVariant *value, gpointer shell);
     static void actToggleSidebar(GSimpleAction *, GVariant *, gpointer self);
     static void actShowFolder(GSimpleAction *, GVariant *, gpointer self);
     static void actShowPanel(GSimpleAction *, GVariant *, gpointer self);
@@ -201,6 +202,7 @@ private:
     void openGelWizard(const std::vector<std::string> &cutWith = {});
     std::vector<std::string> fragmentEnzymes() const;
     void siteMenu(GtkWidget *over, double x, double y, int site);
+    void rememberFile(const std::string &path);
     void openPcrWizard();
     void openGatewayWizard();
     void cloningDialog();
