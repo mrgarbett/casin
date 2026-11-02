@@ -267,6 +267,15 @@ int main(int argc, char **argv)
             for (double x = 0; x < 300 && hit < 0; x += 2)
                 hit = six.codonAt({x, y});
         CHECK(hit == 0 || hit == 3 || hit == 6);
+        // Its whole translation is the ORF, from the ATG through the stop.
+        {
+            Span whole;
+            for (double y = 0; y < six.totalHeight() && whole.empty(); y += 1)
+                for (double x = 0; x < 300 && whole.empty(); x += 2)
+                    whole = six.translationAt({x, y});
+            CHECK(whole.start == 0 && whole.length == 9);
+            CHECK(six.translationAt({0, -50}).empty());
+        }
         // Hovering it outlines the codon: one more shape on that line.
         SeqViewState hovering;
         hovering.hoverCodon = hit;

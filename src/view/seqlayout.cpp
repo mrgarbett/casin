@@ -67,7 +67,8 @@ SequenceLayout::SequenceLayout(const oc::Sequence &seq, const std::vector<CutSit
         m_orfFwd.assign(size_t(m_n), 0);
         if (m_opt.frames == 6)
             m_orfRev.assign(size_t(m_n), 0);
-        for (const Orf &o : findOrfs(m_seq, std::max(1, m_opt.minOrfCodons))) {
+        m_orfs = findOrfs(m_seq, std::max(1, m_opt.minOrfCodons));
+        for (const Orf &o : m_orfs) {
             std::vector<char> &aa = o.strand == Strand::Reverse ? m_orfRev : m_orfFwd;
             if (aa.empty())
                 continue;
@@ -363,13 +364,36 @@ int SequenceLayout::baseAt(Point p) const
 
 int SequenceLayout::codonAt(Point p) const
 {
+    return codonHitAt(p).codon;
+}
+
+Span SequenceLayout::translationAt(Point p) const
+{
+    const CodonHit hit = codonHitAt(p);
+    if (hit.codon < 0)
+        return {};
+    if (hit.feature >= 0)
+        return m_seq.features[size_t(hit.feature)].span(m_n, m_seq.circular);
+    // The ORF of that strand and phase covering the codon; the longest first.
+    for (const Orf &o : m_orfs) {
+        if (o.strand != hit.strand)
+            continue;
+        const int rel = ((hit.codon - o.start) % m_n + m_n) % m_n;
+        if (rel < o.length && rel % 3 == 0)
+            return {o.start, o.length};
+    }
+    return {};
+}
+
+SequenceLayout::CodonHit SequenceLayout::codonHitAt(Point p) const
+{
     const int li = lineIndexAt(p.y);
     if (li < 0)
-        return -1;
+        return {};
     const Line &l = m_lines[size_t(li)];
     const int col = columnAt(p.x);
     if (col < 0 || col >= l.len)
-        return -1;
+        return {};
     const int pos = l.start + col;
     // ORF frame rows: the codon of that frame covering pos.
     for (int side = 0; side < 2; ++side) {
@@ -384,8 +408,8 @@ int SequenceLayout::codonAt(Point p) const
         const int phase = fwd ? k : ((m_n - k) % 3 + 3) % 3;
         const int start = pos - ((pos - phase) % 3 + 3) % 3;
         if (start >= 0 && start < m_n && aas[size_t(start)])
-            return start;
-        return -1;
+            return {start, fwd ? Strand::Forward : Strand::Reverse, -1};
+        return {};
     }
     // CDS translation rows, under their feature lanes.
     for (const LanePiece &pc : l.pieces) {
@@ -399,9 +423,9 @@ int SequenceLayout::codonAt(Point p) const
             continue;
         for (const CodonMark &m : mi->second)
             if (std::abs(m.position - pos) <= 1)
-                return m.position - 1;
+                return {m.position - 1, Strand::Forward, pc.feature};
     }
-    return -1;
+    return {};
 }
 
 double SequenceLayout::boundaryX(int b) const

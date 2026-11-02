@@ -1329,6 +1329,17 @@ int oc_seq_layout_feature_at(const OCSeqLayout *l, double x, double y) { return 
 int oc_seq_layout_site_at(const OCSeqLayout *l, double x, double y) { return l->layout->siteAt({x, y}); }
 int oc_seq_layout_primer_at(const OCSeqLayout *l, double x, double y) { return l->layout->primerAt({x, y}); }
 int oc_seq_layout_codon_at(const OCSeqLayout *l, double x, double y) { return l->layout->codonAt({x, y}); }
+bool oc_seq_layout_translation_at(const OCSeqLayout *l, double x, double y, int *start, int *length)
+{
+    const Span s = l->layout->translationAt({x, y});
+    if (s.empty())
+        return false;
+    if (start)
+        *start = s.start;
+    if (length)
+        *length = s.length;
+    return true;
+}
 int oc_seq_layout_base_at(const OCSeqLayout *l, double x, double y) { return l->layout->baseAt({x, y}); }
 double oc_seq_layout_line_top(const OCSeqLayout *l, int position) { return l->layout->lineTopFor(position); }
 double oc_seq_layout_line_height(const OCSeqLayout *l, int position) { return l->layout->lineHeightFor(position); }
