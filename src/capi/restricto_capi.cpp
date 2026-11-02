@@ -701,6 +701,7 @@ char *oc_document_selected_reverse_complement(const OCDocument *doc)
 
 int oc_document_active_feature(const OCDocument *doc) { return doc->doc.activeFeature(); }
 int oc_document_active_site(const OCDocument *doc) { return doc->doc.activeSite(); }
+int oc_document_second_site(const OCDocument *doc) { return doc->doc.secondSite(); }
 void oc_document_activate_feature(OCDocument *doc, int index) { guarded([&] { doc->doc.activateFeature(index); }); }
 void oc_document_activate_site(OCDocument *doc, int visible_index) { guarded([&] { doc->doc.activateSite(visible_index); }); }
 void oc_document_extend_to_site(OCDocument *doc, int visible_index) { guarded([&] { doc->doc.extendToSite(visible_index); }); }

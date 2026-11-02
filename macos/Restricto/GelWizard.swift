@@ -179,9 +179,12 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
 
     /// Brings up the gel for `template`, opening one if there is none: the
     /// sequence uncut, and cut with the first enzyme shown on its map.
-    static func show(for template: CoreDocument, near parent: NSWindow?) {
+    /// With `cutWith`, also adds a lane cut by those enzymes, or selects one
+    /// that already is.
+    static func show(for template: CoreDocument, near parent: NSWindow?, cutWith enzymes: [String] = []) {
         if let open = visible.first(where: { $0.template === template }) {
             open.window?.makeKeyAndOrderFront(nil)
+            open.cut(with: enzymes)
             return
         }
         let wizard = GelWizard(template: template)
@@ -193,6 +196,20 @@ final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegat
         wizard.showWindow(nil)
         wizard.chrome?.attach()
         wizard.window?.makeFirstResponder(nil)
+        wizard.cut(with: enzymes)
+    }
+
+    private func cut(with enzymes: [String]) {
+        guard !enzymes.isEmpty else { return }
+        if let i = lanes.firstIndex(where: { $0.doc === template && $0.enzymes == enzymes }) {
+            selected = i
+            refresh()
+            return
+        }
+        guard lanes.count < comb.teeth else { return }
+        addLane(nil)
+        enzymeField.objectValue = enzymes
+        enzymesEdited(nil)
     }
 
     private init(template: CoreDocument) {

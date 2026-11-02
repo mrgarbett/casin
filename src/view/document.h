@@ -68,6 +68,9 @@ public:
     std::string selectedBases() const;
     int activeFeature() const { return m_activeFeature; }
     int activeSite() const { return m_activeSite; }
+    // The site shift-clicked after the active one (extendToSite), while that
+    // selection stands; -1 otherwise.
+    int secondSite() const { return m_secondSite; }
     // Selects the feature's footprint and makes it active.
     void activateFeature(int index);
     // Selects the site's recognition sequence and makes it active.
@@ -188,6 +191,7 @@ private:
     bool m_hasSelection = false;
     int m_activeFeature = -1;
     int m_activeSite = -1;
+    int m_secondSite = -1;
     std::vector<Step> m_undo, m_redo;
     unsigned m_state = 0, m_savedState = 0, m_nextState = 0;
     bool m_inEdit = false;

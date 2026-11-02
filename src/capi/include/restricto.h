@@ -120,6 +120,8 @@ void oc_document_activate_feature(OCDocument *doc, int index);
 void oc_document_activate_site(OCDocument *doc, int visible_index);
 /* Shift-click on a second site: selects from the active site's cut to this one's. */
 void oc_document_extend_to_site(OCDocument *doc, int visible_index);
+/* The site shift-clicked after the active one, while that selection stands; else -1. */
+int oc_document_second_site(const OCDocument *doc);
 /* Shift-click on a feature or primer: grows the selection to cover it too
  * (the shorter way round on a circular sequence). */
 void oc_document_extend_to_feature(OCDocument *doc, int index);

@@ -115,10 +115,23 @@ static void testShiftSelectSites()
     // Without an active site, shift-click just activates it.
     doc.extendToSite(bamHI);
     CHECK(doc.activeSite() == bamHI);
+    CHECK(doc.secondSite() == -1);
     doc.activateSite(ecoRI);
     doc.extendToSite(bamHI);
     CHECK(doc.selection().start == 5 && doc.selection().length == 16);
     CHECK(doc.activeSite() == ecoRI);
+    // The second site names the fragment until the selection changes.
+    CHECK(doc.secondSite() == bamHI);
+    doc.setSelection({2, 4});
+    CHECK(doc.activeSite() == -1 && doc.secondSite() == -1);
+    doc.activateSite(ecoRI);
+    doc.extendToSite(bamHI);
+    doc.activateSite(bamHI);
+    CHECK(doc.secondSite() == -1);
+    doc.activateSite(ecoRI);
+    doc.extendToSite(bamHI);
+    doc.clearSelection();
+    CHECK(doc.secondSite() == -1);
     // Either order on a linear sequence.
     doc.activateSite(bamHI);
     doc.extendToSite(ecoRI);
