@@ -5,6 +5,16 @@
 set -eu
 cd "$(dirname "$0")/.."
 
+# The commit being built, for the version (0.1.0-alpha+<short hash>); see
+# src/core/version.h. Rewritten only when it changes, so SwiftPM doesn't
+# recompile for nothing.
+HASH="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+HASH_H=src/core/version_hash.h
+HASH_LINE="#define RESTRICTO_GIT_HASH \"$HASH\""
+if [ "$(sed -n 2p "$HASH_H" 2>/dev/null)" != "$HASH_LINE" ]; then
+    printf '// Generated from cmake/version_hash.h.in; see src/core/version.h.\n%s\n' "$HASH_LINE" > "$HASH_H"
+fi
+
 swift build -c release --product Restricto
 swift build -c release --product RestrictoQuickLook
 BIN_DIR="$(swift build -c release --show-bin-path)"

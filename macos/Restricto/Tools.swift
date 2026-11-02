@@ -358,42 +358,21 @@ extension DocumentWindowController {
         }
     }
 
-    @objc func digestAndGel(_ sender: Any?) {
+    /// Opens the gel wizard on this sequence (see GelWizard).
+    @objc func digestAndGel(_ sender: Any?) { digestAndGel(with: nil) }
+
+    /// The gel wizard, with a lane cut by `enzyme`, or by the two enzymes of a
+    /// selection between two sites.
+    func digestAndGel(with enzyme: String?) {
         guard let d = doc, !d.isEmpty else { return }
-        let shown = Array(Set(d.visibleSiteEnzymes)).sorted()
-        let form = Form("Digest and Gel", "Enzymes shown on the map, cut together.")
-        let first = form.popup("Enzyme", shown)
-        let second = form.popup("And", ["(none)"] + shown)
-        let ladders = (0..<Int(oc_ladder_count())).map { String(cString: oc_ladder_name(Int32($0))) }
-        let ladder = form.popup("Ladder", ladders)
-        guard !shown.isEmpty else {
-            tell("Digest and Gel", "No enzymes are shown. Change the cut filter in the Enzymes sidebar.")
-            return
+        // `enzyme` when given, else the two enzymes of a selection between two sites.
+        var enzymes: [String] = []
+        if let enzyme = enzyme {
+            enzymes = [enzyme]
+        } else if let f = d.siteFragment {
+            enzymes = f.first == f.second ? [f.first] : [f.first, f.second]
         }
-        form.run(in: window, ok: "Digest") { [weak self] in
-            var enzymes = [shown[max(0, first.indexOfSelectedItem)]]
-            if second.indexOfSelectedItem > 0 { enzymes.append(shown[second.indexOfSelectedItem - 1]) }
-            var frags = [OCFragmentInfo](repeating: OCFragmentInfo(), count: 400)
-            let n = withCStrings(enzymes) { oc_digest(d.handle, $0, Int32(enzymes.count), &frags, Int32(frags.count)) }
-            var lines: [String] = []
-            for f in frags.prefix(Int(min(n, 400))) {
-                let left = tupleString(f.left_enzyme), right = tupleString(f.right_enzyme)
-                lines.append("\(Int(f.length).formatted()) bp".padding(toLength: 12, withPad: " ", startingAt: 0)
-                             + "\(f.start + 1)  \(left.isEmpty ? "end" : left) – \(right.isEmpty ? "end" : right)")
-            }
-            let scene = withCStrings(enzymes) {
-                oc_gel_render(d.handle, $0, Int32(enzymes.count), Int32(max(0, ladder.indexOfSelectedItem)), 360, 420,
-                              self?.window?.contentView?.isDarkAppearance ?? false, measureText, nil)
-            }
-            let title = "\(enzymes.joined(separator: " + ")): \(n) fragment\(n == 1 ? "" : "s")"
-            if let scene = scene {
-                let image = sceneImage(scene)
-                oc_scene_free(scene)
-                showImage(title, lines.joined(separator: "\n"), image, in: self?.window)
-            } else {
-                showText(title, "", lines.joined(separator: "\n"), in: self?.window)
-            }
-        }
+        GelWizard.show(for: d, near: window, cutWith: enzymes)
     }
 
     // MARK: Features
@@ -479,17 +458,20 @@ extension DocumentWindowController {
              + names.joined(separator: ", ") + ". Undo (⌘Z) takes them all off again.")
     }
 
-    /// ⌘L: selects the base at a base number and shows it (a bare caret
-    /// sits between bases, so the status would name the base before it).
+    /// ⌘L: selects the base at a base number, or a range of bases, and shows
+    /// it (a bare caret sits between bases, so the status would name the base
+    /// before it). The core reads the text.
     @objc func goToPosition(_ sender: Any?) {
         guard let d = doc, !d.isEmpty else { return }
-        let form = Form("Go to Position", "A base number from 1 to \(d.length.formatted()).")
-        let field = form.text("Base", d.hasSelection ? "\(d.selectionStart + 1)" : "1", width: 120)
+        let wrap = d.isCircular ? ", or across the origin as 9000..200" : ""
+        let form = Form("Go to Position",
+                        "A base number from 1 to \(d.length.formatted()), or a range such as 100..500 or 100-500\(wrap).")
+        let start = d.selectionStart + 1, end = (d.selectionStart + d.selectionLength - 1) % max(1, d.length) + 1
+        let current = !d.hasSelection ? "1" : d.selectionLength > 1 ? "\(start)..\(end)" : "\(start)"
+        let field = form.text("Position", current, placeholder: "1234 or 100..500", width: 160)
         form.run(in: window, ok: "Go") { [weak self] in
-            let digits = field.stringValue.filter { $0.isNumber }
-            guard let base = Int(digits), base >= 1, base <= d.length else { NSSound.beep(); return }
             self?.revealSequence()
-            d.select(start: base - 1, length: 1)
+            if !oc_document_go_to_position(d.handle, field.stringValue) { NSSound.beep() }
         }
     }
 

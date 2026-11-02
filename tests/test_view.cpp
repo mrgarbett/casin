@@ -116,6 +116,212 @@ static void testReadingStrand()
     CHECK(doc.selectionReadingStrand() == Strand::Reverse);
 }
 
+// Go to Position: a base or a range, 1-based.
+static void testGoToPosition()
+{
+    Sequence seq;
+    seq.bases = std::string(2000, 'A');
+    Document doc;
+    doc.setSequence(seq);
+    CHECK(doc.goToPosition("1234") && doc.selection() == (Span{1233, 1}));
+    CHECK(doc.goToPosition(" 1,500 ") && doc.selection() == (Span{1499, 1}));
+    CHECK(doc.goToPosition("100..500") && doc.selection() == (Span{99, 401}));
+    CHECK(doc.goToPosition("100-500") && doc.selection() == (Span{99, 401}));
+    CHECK(doc.goToPosition("100\u2013500") && doc.selection() == (Span{99, 401}));
+    CHECK(doc.goToPosition("7..7") && doc.selection() == (Span{6, 1}));
+    CHECK(doc.goToPosition("1..2000") && doc.selection() == (Span{0, 2000}));
+    for (const char *bad : {"", "0", "2001", "abc", "-5", "10..", "..10", "5..x", "1..2001", "500..100", "1.5"})
+        CHECK(!doc.goToPosition(bad));
+    CHECK(doc.selection() == (Span{0, 2000}));   // unchanged by the bad ones
+    // Across the origin on a circle.
+    seq.circular = true;
+    doc.setSequence(seq);
+    CHECK(doc.goToPosition("1901..100") && doc.selection() == (Span{1900, 200}));
+}
+
+static void testShiftSelectSites()
+{
+    // EcoRI (G^AATTC) cuts at 5, BamHI (G^GATCC) at 21.
+    Sequence seq;
+    seq.bases = "AAAAGAATTCAAAAAAAAAAGGATCCAAAA";
+    Document doc;
+    doc.setSequence(seq);
+    doc.setMaxCuts(0);
+    int ecoRI = -1, bamHI = -1;
+    for (size_t i = 0; i < doc.visibleSites().size(); ++i) {
+        const std::string &name = doc.visibleSites()[i].enzyme->name;
+        if (name == "EcoRI")
+            ecoRI = int(i);
+        if (name == "BamHI")
+            bamHI = int(i);
+    }
+    CHECK(ecoRI >= 0 && bamHI >= 0);
+    if (ecoRI < 0 || bamHI < 0)
+        return;
+    // Without an active site, shift-click just activates it.
+    doc.extendToSite(bamHI);
+    CHECK(doc.activeSite() == bamHI);
+    CHECK(doc.secondSite() == -1);
+    doc.activateSite(ecoRI);
+    doc.extendToSite(bamHI);
+    CHECK(doc.selection().start == 5 && doc.selection().length == 16);
+    CHECK(doc.activeSite() == ecoRI);
+    // The second site names the fragment until the selection changes.
+    CHECK(doc.secondSite() == bamHI);
+    doc.setSelection({2, 4});
+    CHECK(doc.activeSite() == -1 && doc.secondSite() == -1);
+    doc.activateSite(ecoRI);
+    doc.extendToSite(bamHI);
+    doc.activateSite(bamHI);
+    CHECK(doc.secondSite() == -1);
+    doc.activateSite(ecoRI);
+    doc.extendToSite(bamHI);
+    doc.clearSelection();
+    CHECK(doc.secondSite() == -1);
+    // Either order on a linear sequence.
+    doc.activateSite(bamHI);
+    doc.extendToSite(ecoRI);
+    CHECK(doc.selection().start == 5 && doc.selection().length == 16);
+    // On a circle, forward from the first site, across the origin.
+    seq.circular = true;
+    doc.setSequence(seq);
+    doc.setMaxCuts(0);
+    doc.activateSite(bamHI);
+    doc.extendToSite(ecoRI);
+    CHECK(doc.selection().start == 21 && doc.selection().length == 14);
+}
+
+static void testEditingHistoryHidden()
+{
+    // Geneious keeps edits as features: the original bases as one label, the
+    // kind of edit as another. They stay in the file but aren't drawn.
+    Feature edit;
+    edit.type = "misc_feature";
+    edit.name = "AC";
+    edit.qualifiers = {{"label", "AC"}, {"label", "nonstandard type: Editing History Deletion"}};
+    CHECK(FeatureStyle::isEditingHistory(edit));
+    CHECK(!FeatureStyle::isDrawn(edit));
+    Feature insertion;
+    insertion.type = "misc_feature";
+    insertion.name = "nonstandard type: Editing History Insertion";
+    CHECK(!FeatureStyle::isDrawn(insertion));
+    // A real feature with a Geneious type label is still drawn.
+    Feature spr;
+    spr.type = "misc_feature";
+    spr.name = "SpR";
+    spr.qualifiers = {{"label", "SpR"}, {"label", "nonstandard type: Bacterial Selection"}};
+    CHECK(FeatureStyle::isDrawn(spr));
+}
+
+// Shift-click on a feature or primer grows the selection to cover it.
+static void testShiftSelectFeatures()
+{
+    Sequence seq;
+    seq.bases = std::string(100, 'A');
+    Feature a, b;
+    a.name = "a";
+    a.type = "misc_feature";
+    a.ranges = {{10, 20}};
+    b = a;
+    b.name = "b";
+    b.ranges = {{60, 70}};
+    seq.features = {a, b};
+    seq.primers.push_back({"p", std::string(10, 'A'), {40, 50}, Strand::Forward});
+    Document doc;
+    doc.setSequence(seq);
+    doc.clearSelection();
+    doc.extendToFeature(1);   // nothing selected: just the feature
+    CHECK(doc.hasSelection() && doc.selection() == (Span{60, 10}));
+    doc.activateFeature(0);
+    doc.extendToFeature(1);
+    CHECK(doc.selection() == (Span{10, 60}));
+    doc.extendToPrimer(0);    // already inside
+    CHECK(doc.selection() == (Span{10, 60}));
+    doc.setSelection({80, 0});   // from a caret, backwards
+    doc.extendToPrimer(0);
+    CHECK(doc.selection() == (Span{40, 40}));
+    doc.extendToPrimer(5);    // no such primer: unchanged
+    CHECK(doc.selection() == (Span{40, 40}));
+    // On a circle, the near way round, across the origin, in either order.
+    seq.circular = true;
+    seq.features[0].ranges = {{5, 15}};
+    seq.features[1].ranges = {{85, 95}};
+    doc.setSequence(seq);
+    doc.activateFeature(0);
+    doc.extendToFeature(1);
+    CHECK(doc.selection() == (Span{85, 30}));
+    doc.activateFeature(1);
+    doc.extendToFeature(0);
+    CHECK(doc.selection() == (Span{85, 30}));
+    doc.extendToPrimer(0);    // 85 on to 50 is shorter than 40 round to 15
+    CHECK(doc.selection() == (Span{85, 65}));
+}
+
+// Find matches feature, primer and enzyme names first, then bases.
+static void testFindNames()
+{
+    Sequence s;
+    s.bases = std::string(20, 'A') + "GAATTC" + std::string(20, 'C') + "GGATCC" + std::string(40, 'C');
+    s.circular = true;
+    auto feature = [&](const std::string &type, const std::string &name, int start, int end) {
+        Feature f;
+        f.type = type;
+        f.name = name;
+        f.ranges = {{start, end}};
+        s.features.push_back(f);
+    };
+    feature("source", "whole", 0, int(s.bases.size()));
+    feature("misc_feature", "attB1", 5, 15);
+    feature("misc_feature", "GAT", 30, 33);   // a name that is also DNA
+    s.primers.push_back({"P7", s.bases.substr(60, 20), {60, 80}, Strand::Forward});
+    Document doc;
+    doc.setSequence(s);
+    using K = Document::FindKind;
+    int count = 0;
+    K kind = K::None;
+
+    CHECK_EQ(doc.findNamesOrBases(" ATTB1 ", &count, &kind), 1);
+    CHECK(count == 1 && kind == K::Feature && doc.activeFeature() == 1);
+    CHECK(doc.selection() == (Span{5, 10}));
+    CHECK_EQ(doc.findNamesOrBases("p7", &count, &kind), 1);
+    CHECK(kind == K::Primer && doc.selection() == (Span{60, 20}));
+    CHECK_EQ(doc.findNamesOrBases("ecori", &count, &kind), 1);
+    CHECK(count == 1 && kind == K::Site && doc.activeSite() >= 0 && doc.selection() == (Span{20, 6}));
+    // A site the cut filter hides is still found, as a plain selection.
+    doc.setEnzymeHidden("BamHI", true);
+    CHECK_EQ(doc.findNamesOrBases("BamHI", &count, &kind), 1);
+    CHECK(kind == K::Site && doc.activeSite() < 0 && doc.selection() == (Span{46, 6}));
+
+    // "GAT": the feature, then the base matches, then round to the feature.
+    int bases = 0;
+    doc.clearSelection();
+    doc.findNext("GAT", &bases);
+    CHECK(bases > 0);
+    doc.clearSelection();
+    CHECK_EQ(doc.findNamesOrBases("gat", &count, &kind), 1);
+    CHECK(count == bases + 1 && kind == K::Feature && doc.activeFeature() == 2);
+    CHECK_EQ(doc.findNamesOrBases("GAT", &count, &kind), 2);
+    CHECK(kind == K::Bases);
+    for (int i = 0; i < bases - 1; ++i)
+        doc.findNamesOrBases("GAT", &count, &kind);
+    CHECK(kind == K::Bases);
+    CHECK_EQ(doc.findNamesOrBases("GAT", &count, &kind), 1);
+    CHECK(kind == K::Feature);
+
+    // Plain DNA still searches bases, as findNext does.
+    doc.clearSelection();
+    int plain = 0;
+    const int first = doc.findNext("GAATTC", &plain);
+    doc.clearSelection();
+    CHECK_EQ(doc.findNamesOrBases("gaattc", &count, &kind), first);
+    CHECK(count == plain && kind == K::Bases && doc.selection() == (Span{20, 6}));
+    CHECK_EQ(doc.findNamesOrBases("ACACACAC", &count, &kind), 0);
+    CHECK(count == 0 && kind == K::None);
+    // Not a name (a "source" feature doesn't count) and not DNA.
+    CHECK_EQ(doc.findNamesOrBases("whole", &count, &kind), -1);
+    CHECK_EQ(doc.findNamesOrBases("   ", &count, &kind), -1);
+}
+
 static void testFeatureColor(const Sequence &seq)
 {
     Document doc;
@@ -142,6 +348,30 @@ static void testFeatureColor(const Sequence &seq)
     Sequence r;
     CHECK(readGenBank(writeGenBank(doc.sequence()), &r));
     CHECK(!r.features.empty() && r.features[0].color.empty());
+}
+
+// The enzymes list marks enzymes that cut inside a feature; "source" doesn't count.
+static void testCutsInsideFeatures()
+{
+    Sequence s;
+    s.bases = std::string(20, 'A') + "GAATTC" + std::string(20, 'A') + "GGATCC" + std::string(20, 'A');
+    s.circular = true;
+    auto feature = [&](const std::string &type, const std::string &name, int start, int end) {
+        Feature f;
+        f.type = type;
+        f.name = name;
+        f.ranges = {{start, end}};
+        s.features.push_back(f);
+    };
+    feature("source", "", 0, int(s.bases.size()));
+    feature("CDS", "insert", 10, 30);    // EcoRI cuts inside
+    feature("promoter", "P7", 21, 25);   // inside EcoRI's overhang
+    feature("CDS", "AmpR", 52, 60);      // BamHI cuts at 47/51, just before it
+    Document doc;
+    doc.setSequence(s);
+    CHECK(doc.featuresCutByEnzyme("EcoRI") == (std::vector<int>{1, 2}));
+    CHECK(doc.featuresCutByEnzyme("BamHI").empty());
+    CHECK(doc.featuresCutByEnzyme("NotAnEnzyme").empty());
 }
 
 int main(int argc, char **argv)
@@ -183,6 +413,58 @@ int main(int argc, char **argv)
         // Clicking the middle of the map (inside the circle) hits the sequence.
         MapHit h = map.hitTest({size.first / 2, size.second / 2});
         CHECK(h.kind == MapHit::Sequence);
+    }
+
+    // Hovering a feature or a site (here or in the sequence view) lightly
+    // highlights it on the map and in the sequence, without a new layout.
+    {
+        const auto outlined = [](const Scene &sc, const Color &c, double width) {
+            int n = 0;
+            for (const Item &it : sc.items)
+                if (auto *p = std::get_if<PathItem>(&it))
+                    n += p->closed && p->lineWidth == width && p->stroke.r == c.r && p->stroke.g == c.g
+                         && p->stroke.b == c.b;
+            return n;
+        };
+        for (bool circular : {true, false}) {
+            Sequence s2 = seq;
+            s2.circular = circular;
+            const std::vector<CutSite> sites2 = findSites(s2, commonEnzymes());
+            MapLayout map(s2, sites2, theme, tm, 900, 700);
+            MapState plain, hover;
+            hover.hoverFeature = 1;   // the promoter (0 is the source, which isn't drawn)
+            CHECK(outlined(map.render(plain), theme.accent, 1.2) == 0);
+            CHECK(outlined(map.render(hover), theme.accent, 1.2) > 0);
+            // Some site's label gets a backing; none loses anything.
+            const size_t base = map.render(plain).items.size();
+            bool backed = false;
+            for (int i = 0; i < int(sites2.size()); ++i) {
+                hover = {};
+                hover.hoverSite = i;
+                const size_t n = map.render(hover).items.size();
+                CHECK(n >= base);
+                backed = backed || n == base + 1;
+            }
+            CHECK(backed);
+        }
+        SequenceLayout sl(seq, sites, theme, tm, 900, true);
+        const double all = sl.totalHeight();
+        const size_t base = sl.render(0, all, {}).items.size();
+        SeqViewState hover;
+        hover.hoverFeature = 1;
+        CHECK(sl.render(0, all, hover).items.size() > base);
+        CHECK(outlined(sl.render(0, all, hover), theme.accent, 1.2) > 0);
+        hover = {};
+        hover.hoverSite = 0;
+        CHECK(sl.render(0, all, hover).items.size() > base);
+        CHECK(sl.totalHeight() == all);
+        // The source (not drawn), or out of range: nothing extra.
+        hover = {};
+        hover.hoverFeature = 0;
+        CHECK(sl.render(0, all, hover).items.size() == base);
+        hover.hoverFeature = int(seq.features.size());
+        hover.hoverSite = int(sites.size());
+        CHECK(sl.render(0, all, hover).items.size() == base);
     }
 
     // Primers can be clicked on the map, circular and linear; the rest of
@@ -290,6 +572,29 @@ int main(int argc, char **argv)
             for (double x = 0; x < 300 && hit < 0; x += 2)
                 hit = six.codonAt({x, y});
         CHECK(hit == 0 || hit == 3 || hit == 6);
+        // Its whole translation is the ORF, from the ATG through the stop.
+        {
+            Span whole;
+            for (double y = 0; y < six.totalHeight() && whole.empty(); y += 1)
+                for (double x = 0; x < 300 && whole.empty(); x += 2)
+                    whole = six.translationAt({x, y});
+            CHECK(whole.start == 0 && whole.length == 9);
+            CHECK(six.translationAt({0, -50}).empty());
+            // Selecting a codon lights its amino acid: one more shape than the
+            // selection's own rectangle; the whole ORF lights all three.
+            SeqViewState one, all;
+            one.hasSelection = all.hasSelection = true;
+            one.selection = {3, 3};
+            all.selection = whole;
+            const size_t plainCount = six.render(0, 400, {}).items.size();
+            CHECK(six.render(0, 400, one).items.size() == plainCount + 2);
+            CHECK(six.render(0, 400, all).items.size() == plainCount + 4);
+            // A stretch picked in another frame lights nothing.
+            SeqViewState off;
+            off.hasSelection = true;
+            off.selection = {1, 8};
+            CHECK(six.render(0, 400, off).items.size() == plainCount + 1);
+        }
         // Hovering it outlines the codon: one more shape on that line.
         SeqViewState hovering;
         hovering.hoverCodon = hit;
@@ -346,6 +651,12 @@ int main(int argc, char **argv)
     testUndo(seq);
     testReadingStrand();
     testFeatureColor(seq);
+    testCutsInsideFeatures();
+    testFindNames();
+    testGoToPosition();
+    testShiftSelectSites();
+    testEditingHistoryHidden();
+    testShiftSelectFeatures();
     {
         GelLayout gel({{"Ladder", {10000, 1000, 100}, {1000}, true, false, {}}, {"Cut", {3000, 500}, {}, false, false, {}}},
                       theme, tm, 500, 400);

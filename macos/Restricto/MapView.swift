@@ -21,25 +21,11 @@ final class MapView: NSView {
     /// Called with a primer's index when it is clicked, and whether shift
     /// was down. Without it, a click on a primer selects where it binds.
     var onPickPrimer: ((Int, Bool) -> Void)?
+    /// Right-click on a site > Digest with…: called with the enzyme.
+    var onDigest: ((String) -> Void)?
     /// Right-click > Analyze Translation…, with where the popover points.
     var onAnalyzeTranslation: ((NSRect) -> Void)?
     private var menuPoint = NSRect.zero
-
-    /// Right-click on a selection of a codon or more: its protein.
-    override func menu(for event: NSEvent) -> NSMenu? {
-        guard onAnalyzeTranslation != nil, document.hasSelection, document.selectionLength >= 3 else {
-            return super.menu(for: event)
-        }
-        let p = convert(event.locationInWindow, from: nil)
-        menuPoint = NSRect(x: p.x - 2, y: p.y - 2, width: 4, height: 4)
-        let menu = NSMenu()
-        let item = NSMenuItem(title: "Analyze Translation…", action: #selector(analyzeFromMenu(_:)), keyEquivalent: "")
-        item.target = self
-        menu.addItem(item)
-        return menu
-    }
-
-    @objc private func analyzeFromMenu(_ sender: Any?) { onAnalyzeTranslation?(menuPoint) }
 
     init(document: CoreDocument) {
         self.document = document
@@ -49,6 +35,7 @@ final class MapView: NSView {
             if what & (Change.sequence | Change.enzymes | Change.pending) != 0 { self.invalidateLayout() }
             self.needsDisplay = true
         }
+        document.observeHover { [weak self] in self?.needsDisplay = true }
         // ⌘+ and ⌘−: the map's text grows and shrinks; its geometry fits.
         NotificationCenter.default.addObserver(forName: Zoom.changed, object: nil, queue: .main) { [weak self] _ in
             self?.invalidateLayout()
@@ -113,13 +100,37 @@ final class MapView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard let ctx = NSGraphicsContext.current?.cgContext, let layout = ensureLayout(),
-              let scene = oc_map_layout_render(layout, document.handle) else { return }
+        guard let ctx = NSGraphicsContext.current?.cgContext, let layout = ensureLayout() else { return }
+        oc_map_layout_set_hover(layout, Int32(document.hoverFeature), Int32(document.hoverSite))
+        guard let scene = oc_map_layout_render(layout, document.handle) else { return }
         defer { oc_scene_free(scene) }
         drawScene(scene, in: ctx, trailing: trailingInset)
     }
 
     // MARK: Mouse
+
+    /// Right-click on an enzyme site: the site menu. Elsewhere, on a
+    /// selection of a codon or more: Analyze Translation.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        if let digest = onDigest, let layout = ensureLayout(), !document.isEmpty {
+            let p = mapPoint(event)
+            var kind: Int32 = 0, index: Int32 = 0, position: Int32 = 0
+            oc_map_layout_hit(layout, p.x, p.y, &kind, &index, &position)
+            if kind == Int32(OC_HIT_SITE) { return SiteMenu.menu(for: Int(index), in: document, onDigest: digest) }
+        }
+        guard onAnalyzeTranslation != nil, document.hasSelection, document.selectionLength >= 3 else {
+            return super.menu(for: event)
+        }
+        let p = convert(event.locationInWindow, from: nil)
+        menuPoint = NSRect(x: p.x - 2, y: p.y - 2, width: 4, height: 4)
+        let menu = NSMenu()
+        let item = NSMenuItem(title: "Analyze Translation…", action: #selector(analyzeFromMenu(_:)), keyEquivalent: "")
+        item.target = self
+        menu.addItem(item)
+        return menu
+    }
+
+    @objc private func analyzeFromMenu(_ sender: Any?) { onAnalyzeTranslation?(menuPoint) }
 
     override func mouseDown(with event: NSEvent) {
         guard let layout = ensureLayout(), !document.isEmpty else { return }
@@ -129,13 +140,31 @@ final class MapView: NSView {
         selecting = false
         switch kind {
         case Int32(OC_HIT_FEATURE):
-            document.activateFeature(Int(index))
-            if event.clickCount == 2 { onEditFeature?(Int(index)) }
+            // Shift-click grows the selection to cover the feature too.
+            if event.modifierFlags.contains(.shift) {
+                document.extendToFeature(Int(index))
+                SelectionBadge.shared.show(for: document, event: event, in: self)
+                SelectionBadge.shared.hideSoon()
+            } else {
+                document.activateFeature(Int(index))
+                if event.clickCount == 2 { onEditFeature?(Int(index)) }
+            }
         case Int32(OC_HIT_SITE):
-            document.activateSite(Int(index))
+            // Shift-click on a second enzyme selects the bases between the two cuts.
+            if event.modifierFlags.contains(.shift) {
+                document.extendToSite(Int(index))
+                SelectionBadge.shared.show(for: document, event: event, in: self)
+                SelectionBadge.shared.hideSoon()
+            } else {
+                document.activateSite(Int(index))
+            }
         case Int32(OC_HIT_PRIMER):
             if let pick = onPickPrimer {
                 pick(Int(index), event.modifierFlags.contains(.shift))
+            } else if event.modifierFlags.contains(.shift) {
+                document.extendToPrimer(Int(index))
+                SelectionBadge.shared.show(for: document, event: event, in: self)
+                SelectionBadge.shared.hideSoon()
             } else if let p = document.primers.first(where: { $0.index == Int(index) }), p.length > 0 {
                 document.select(start: p.start, length: p.length)
             }
@@ -198,9 +227,13 @@ final class MapView: NSView {
         var kind: Int32 = 0, index: Int32 = 0, position: Int32 = 0
         oc_map_layout_hit(layout, p.x, p.y, &kind, &index, &position)
         if kind == Int32(OC_HIT_SEQUENCE) { onHoverBase?(Int(position) % max(1, document.length)) }
+        // A feature or site under the mouse is highlighted in the sequence too.
+        document.setHover(feature: kind == Int32(OC_HIT_FEATURE) ? Int(index) : -1,
+                          site: kind == Int32(OC_HIT_SITE) ? Int(index) : -1)
     }
 
     override func mouseExited(with event: NSEvent) {
         onHoverBase?(-1)
+        document.setHover(feature: -1, site: -1)
     }
 }

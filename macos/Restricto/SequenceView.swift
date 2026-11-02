@@ -32,6 +32,8 @@ final class SequenceView: NSView {
     var onEditFeature: ((Int) -> Void)?
     /// Right-click > Add Primer… (with the selection, if any).
     var onAddPrimer: (() -> Void)?
+    /// Right-click on a site > Digest with…: called with the enzyme.
+    var onDigest: ((String) -> Void)?
     /// Right-click > Analyze Translation…, with where the popover points.
     var onAnalyzeTranslation: ((NSRect) -> Void)?
     /// False for a preview: typing, paste, cut and delete don't change it.
@@ -58,6 +60,7 @@ final class SequenceView: NSView {
             }
             self.needsDisplay = true
         }
+        document.observeHover { [weak self] in self?.needsDisplay = true }
         // ⌘+ and ⌘−: the width the layout gets changes, so it rewraps
         // around the base at the top, as a resize does.
         NotificationCenter.default.addObserver(forName: Zoom.changed, object: nil, queue: .main) { [weak self] _ in
@@ -199,8 +202,9 @@ final class SequenceView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard let ctx = NSGraphicsContext.current?.cgContext, let layout = ensureLayout(),
-              let scene = oc_seq_layout_render(layout, document.handle, dirtyRect.minY / zoom,
+        guard let ctx = NSGraphicsContext.current?.cgContext, let layout = ensureLayout() else { return }
+        oc_seq_layout_set_hover(layout, Int32(document.hoverFeature), Int32(document.hoverSite))
+        guard let scene = oc_seq_layout_render(layout, document.handle, dirtyRect.minY / zoom,
                                                dirtyRect.height / zoom) else { return }
         defer { oc_scene_free(scene) }
         ctx.saveGState()
@@ -210,11 +214,12 @@ final class SequenceView: NSView {
         ctx.restoreGState()
     }
 
-    // MARK: Keyboard: typing bases edits the sequence
+    // MARK: Keyboard: typing bases edits the sequence; arrows move the caret
 
     override var acceptsFirstResponder: Bool { true }
 
     override func keyDown(with event: NSEvent) {
+        if !document.isEmpty, moveCaret(with: event) { return }
         guard !document.isEmpty, isEditable else { super.keyDown(with: event); return }
         let flags = event.modifierFlags.intersection([.command, .control, .option])
         guard flags.isEmpty, let chars = event.charactersIgnoringModifiers, !chars.isEmpty else {
@@ -244,6 +249,53 @@ final class SequenceView: NSView {
         }
     }
 
+    /// The arrow keys move the caret by a base or a line, Shift+arrows grow
+    /// or shrink the selection from its anchor, and Escape drops a range to
+    /// a caret at its start (a bare caret goes). False for any other key.
+    private func moveCaret(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection([.command, .control, .option])
+        guard flags.isEmpty, let key = event.charactersIgnoringModifiers?.unicodeScalars.first?.value else { return false }
+        if key == 0x1B {   // Escape
+            guard document.hasSelection else { NSSound.beep(); return true }
+            if document.selectionLength > 0 {
+                document.select(start: document.selectionStart, length: 0)
+            } else {
+                oc_document_clear_selection(document.handle)
+            }
+            return true
+        }
+        let line = ensureLayout().map { max(1, Int(oc_seq_layout_bases_per_line($0))) } ?? 1
+        let step: Int
+        switch Int(key) {
+        case NSLeftArrowFunctionKey: step = -1
+        case NSRightArrowFunctionKey: step = 1
+        case NSUpArrowFunctionKey: step = -line
+        case NSDownArrowFunctionKey: step = line
+        default: return false
+        }
+        let n = document.length
+        let start = document.hasSelection ? document.selectionStart : 0
+        let end = start + (document.hasSelection ? document.selectionLength : 0)
+        if event.modifierFlags.contains(.shift) {
+            // The end away from the anchor moves; a selection made some other
+            // way is anchored at its start.
+            if anchor != start && anchor != end { anchor = start }
+            let moving = anchor == start ? end : start
+            let to = min(max(moving + step, 0), n)
+            document.select(start: min(to, anchor), length: abs(to - anchor))
+            scrollToPosition(to)
+        } else {
+            // A range drops to its near end, as in a text view, before a line move.
+            var to = step < 0 ? start : end
+            if start == end || abs(step) > 1 { to += step }
+            to = min(max(to, 0), n)
+            anchor = to
+            document.select(start: to, length: 0)
+            scrollToPosition(to)
+        }
+        return true
+    }
+
     @objc func paste(_ sender: Any?) {
         guard isEditable, let text = NSPasteboard.general.string(forType: .string), !document.isEmpty else { return }
         if !oc_document_type_bases(document.handle, text) { NSSound.beep() }
@@ -270,8 +322,14 @@ final class SequenceView: NSView {
 
     // MARK: Mouse
 
-    /// Right-click: Add Primer…, pre-filled with the selected bases.
+    /// Right-click: on an enzyme site, the site menu; elsewhere Add Primer…,
+    /// pre-filled with the selected bases.
     override func menu(for event: NSEvent) -> NSMenu? {
+        if let digest = onDigest, let layout = ensureLayout(), !document.isEmpty {
+            let p = layoutPoint(event)
+            let site = Int(oc_seq_layout_site_at(layout, p.x, p.y))
+            if site >= 0 { return SiteMenu.menu(for: site, in: document, onDigest: digest) }
+        }
         guard !document.isEmpty, onAddPrimer != nil || onAnalyzeTranslation != nil else { return super.menu(for: event) }
         let menu = NSMenu()
         if onAddPrimer != nil {
@@ -312,6 +370,23 @@ final class SequenceView: NSView {
         guard let layout = ensureLayout(), !document.isEmpty else { return }
         let p = layoutPoint(event)
         if event.modifierFlags.contains(.shift) {
+            // On a second enzyme: the bases between the two cuts. On a
+            // primer or feature: the selection grown to cover it.
+            let site = Int(oc_seq_layout_site_at(layout, p.x, p.y))
+            let primer = site < 0 ? Int(oc_seq_layout_primer_at(layout, p.x, p.y)) : -1
+            let feature = site < 0 && primer < 0 ? Int(oc_seq_layout_feature_at(layout, p.x, p.y)) : -1
+            if site >= 0 || primer >= 0 || feature >= 0 {
+                if site >= 0 {
+                    document.extendToSite(site)
+                } else if primer >= 0 {
+                    document.extendToPrimer(primer)
+                } else {
+                    document.extendToFeature(feature)
+                }
+                SelectionBadge.shared.show(for: document, event: event, in: self)
+                SelectionBadge.shared.hideSoon()
+                return
+            }
             if !document.hasSelection { anchor = 0 }
             dragging = true
             extendSelection(to: p)
@@ -319,10 +394,22 @@ final class SequenceView: NSView {
             return
         }
         // An amino acid in a translation row selects its codon; dragging on
-        // across amino acids selects their codons too.
+        // across amino acids selects their codons too. A double-click takes
+        // the whole translation: the open reading frame, or the CDS.
         let codon = Int(oc_seq_layout_codon_at(layout, p.x, p.y))
         if codon >= 0 {
             window?.makeFirstResponder(self)
+            if event.clickCount == 2 {
+                var start: Int32 = 0, length: Int32 = 0
+                if oc_seq_layout_translation_at(layout, p.x, p.y, &start, &length) {
+                    dragging = false
+                    codonAnchor = nil
+                    anchor = Int(start)
+                    document.select(start: Int(start), length: Int(length))
+                    SelectionBadge.shared.show(for: document, event: event, in: self)
+                    return
+                }
+            }
             dragging = true
             codonAnchor = codon
             anchor = codon
@@ -379,7 +466,7 @@ final class SequenceView: NSView {
         document.select(start: min(pos, anchor), length: abs(pos - anchor))
     }
 
-    // MARK: Hover: codons and tooltips
+    // MARK: Hover: codons, tooltips, and the feature or site shown on the map too
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -400,10 +487,14 @@ final class SequenceView: NSView {
         if base >= 0 { onHoverBase?(base) }
         let tip = takeString(oc_seq_layout_tooltip(layout, p.x, p.y))
         toolTip = tip.isEmpty ? nil : tip
+        // A site or feature under the mouse is highlighted on the map too.
+        let site = Int(oc_seq_layout_site_at(layout, p.x, p.y))
+        document.setHover(feature: site >= 0 ? -1 : Int(oc_seq_layout_feature_at(layout, p.x, p.y)), site: site)
     }
 
     override func mouseExited(with event: NSEvent) {
         hoverCodon = -1
         onHoverBase?(-1)
+        document.setHover(feature: -1, site: -1)
     }
 }
