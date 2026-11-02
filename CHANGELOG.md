@@ -5,6 +5,7 @@ versions may change file handling, menus and the C API.
 
 ## Unreleased
 
+- **macOS:** hovering a feature or an enzyme site on the map lightly highlights it in the sequence view, and the other way round.
 - **macOS:** in the sequence view the arrow keys move the caret (by a base, or a line up and down), Shift+arrows grow the selection and Escape clears it.
 - **Sequence view:** double-clicking an amino acid selects the whole translation: the open reading frame from its start codon through its stop, or the CDS feature under a feature's translation row (macOS; the Linux view follows). An amino acid lights up with the selection whenever its codon is selected, so a clicked codon and a double-clicked frame both show what they took.
 - **macOS:** the app now needs macOS 26 Tahoe or later (built with Xcode 26). Support for macOS 13 to 15 and the plain, non-glass layout were dropped.

@@ -32,6 +32,7 @@ final class MapView: NSView {
             if what & (Change.sequence | Change.enzymes | Change.pending) != 0 { self.invalidateLayout() }
             self.needsDisplay = true
         }
+        document.observeHover { [weak self] in self?.needsDisplay = true }
         // ⌘+ and ⌘−: the map's text grows and shrinks; its geometry fits.
         NotificationCenter.default.addObserver(forName: Zoom.changed, object: nil, queue: .main) { [weak self] _ in
             self?.invalidateLayout()
@@ -96,8 +97,9 @@ final class MapView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard let ctx = NSGraphicsContext.current?.cgContext, let layout = ensureLayout(),
-              let scene = oc_map_layout_render(layout, document.handle) else { return }
+        guard let ctx = NSGraphicsContext.current?.cgContext, let layout = ensureLayout() else { return }
+        oc_map_layout_set_hover(layout, Int32(document.hoverFeature), Int32(document.hoverSite))
+        guard let scene = oc_map_layout_render(layout, document.handle) else { return }
         defer { oc_scene_free(scene) }
         drawScene(scene, in: ctx, trailing: trailingInset)
     }
@@ -211,9 +213,13 @@ final class MapView: NSView {
         var kind: Int32 = 0, index: Int32 = 0, position: Int32 = 0
         oc_map_layout_hit(layout, p.x, p.y, &kind, &index, &position)
         if kind == Int32(OC_HIT_SEQUENCE) { onHoverBase?(Int(position) % max(1, document.length)) }
+        // A feature or site under the mouse is highlighted in the sequence too.
+        document.setHover(feature: kind == Int32(OC_HIT_FEATURE) ? Int(index) : -1,
+                          site: kind == Int32(OC_HIT_SITE) ? Int(index) : -1)
     }
 
     override func mouseExited(with event: NSEvent) {
         onHoverBase?(-1)
+        document.setHover(feature: -1, site: -1)
     }
 }
