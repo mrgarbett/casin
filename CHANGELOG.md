@@ -5,6 +5,7 @@ versions may change file handling, menus and the C API.
 
 ## Unreleased
 
+- **macOS:** the selection badge and the primer editor show the Q5 Tm in whole degrees, the same Tm the PCR wizard and the status line use, instead of a nearest-neighbour Tm that disagreed with them. The C API gains `oc_polymerase_tm`.
 - **Mac Quick Look:** the map preview (Space on a .gb or .dna file in Finder) is now drawn as vectors instead of a bitmap, so it is crisp at any size and on Retina screens.
 - **macOS:** File ▸ Open Recent; the files open at the last quit reopen when the app is launched with nothing to open; ⌘1 to ⌘9 switch window tabs.
 - **macOS:** hovering a feature or an enzyme site on the map lightly highlights it in the sequence view, and the other way round.
