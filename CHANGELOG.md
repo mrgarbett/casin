@@ -8,6 +8,7 @@ versions may change file handling, menus and the C API.
 - **Sequence view:** double-clicking an amino acid selects the whole translation: the open reading frame from its start codon through its stop, or the CDS feature under a feature's translation row (macOS; the Linux view follows). An amino acid lights up with the selection whenever its codon is selected, so a clicked codon and a double-clicked frame both show what they took.
 - **macOS:** the app now needs macOS 26 Tahoe or later (built with Xcode 26). Support for macOS 13 to 15 and the plain, non-glass layout were dropped.
 - **Focus:** the menus now show the core cloning tools only (primers, PCR, digest and gel, insertion by PCR, Gibson) plus opening, saving and editing. The other tools from the first alpha are hidden until each gets its own tested step; turn on **Experimental Tools** (main menu on Linux, the Restricto menu on the Mac) to show them again. Nothing was removed.
+- **macOS:** Go to Position (⌘L) also takes a range, `100..500` or `100-500`, and selects it; on a circular sequence a range can run across the origin (`9000..200`).
 - **Version:** the version now carries the commit it was built from, e.g. `0.1.0-alpha+1a2b3c4` (About box, `restricto --version`, `oc_version()`).
 - **Enzymes:** with **On map only** on, unticking an enzyme no longer removes it from the list, so it can be ticked again.
 - **Enzymes:** click one enzyme, then shift-click a second, on the map or in the sequence, to select the bases between their cuts (forward from the first on a circular sequence).

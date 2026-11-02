@@ -93,6 +93,29 @@ static void testUndo(const Sequence &seq)
 
 // The Edit Feature dialog sets a colour with replaceFeature: one undo step,
 // kept by GenBank and .dna.
+// Go to Position: a base or a range, 1-based.
+static void testGoToPosition()
+{
+    Sequence seq;
+    seq.bases = std::string(2000, 'A');
+    Document doc;
+    doc.setSequence(seq);
+    CHECK(doc.goToPosition("1234") && doc.selection() == (Span{1233, 1}));
+    CHECK(doc.goToPosition(" 1,500 ") && doc.selection() == (Span{1499, 1}));
+    CHECK(doc.goToPosition("100..500") && doc.selection() == (Span{99, 401}));
+    CHECK(doc.goToPosition("100-500") && doc.selection() == (Span{99, 401}));
+    CHECK(doc.goToPosition("100\u2013500") && doc.selection() == (Span{99, 401}));
+    CHECK(doc.goToPosition("7..7") && doc.selection() == (Span{6, 1}));
+    CHECK(doc.goToPosition("1..2000") && doc.selection() == (Span{0, 2000}));
+    for (const char *bad : {"", "0", "2001", "abc", "-5", "10..", "..10", "5..x", "1..2001", "500..100", "1.5"})
+        CHECK(!doc.goToPosition(bad));
+    CHECK(doc.selection() == (Span{0, 2000}));   // unchanged by the bad ones
+    // Across the origin on a circle.
+    seq.circular = true;
+    doc.setSequence(seq);
+    CHECK(doc.goToPosition("1901..100") && doc.selection() == (Span{1900, 200}));
+}
+
 static void testShiftSelectSites()
 {
     // EcoRI (G^AATTC) cuts at 5, BamHI (G^GATCC) at 21.
@@ -463,6 +486,7 @@ int main(int argc, char **argv)
     }
     testUndo(seq);
     testFeatureColor(seq);
+    testGoToPosition();
     testShiftSelectSites();
     testEditingHistoryHidden();
     testShiftSelectFeatures();

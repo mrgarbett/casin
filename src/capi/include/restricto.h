@@ -114,6 +114,10 @@ int oc_document_selection_start(const OCDocument *doc);
 int oc_document_selection_length(const OCDocument *doc);
 void oc_document_set_selection(OCDocument *doc, int start, int length);
 void oc_document_clear_selection(OCDocument *doc);
+/* Go to Position: "1234" (selects that base) or "100..500" / "100-500"
+ * (1-based, inclusive; across the origin of a circular sequence when the first
+ * is past the second). Returns false, changing nothing, when it isn't one. */
+bool oc_document_go_to_position(OCDocument *doc, const char *text);
 char *oc_document_selected_bases(const OCDocument *doc);
 char *oc_document_selected_reverse_complement(const OCDocument *doc);
 int oc_document_active_feature(const OCDocument *doc);

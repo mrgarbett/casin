@@ -185,6 +185,33 @@ void Document::activateSite(int visibleIndex)
     emit(m_selListeners);
 }
 
+bool Document::goToPosition(const std::string &text)
+{
+    std::string t;
+    for (char c : text)
+        if (!std::isspace(static_cast<unsigned char>(c)) && c != ',')
+            t += c;
+    std::string first = t, second;
+    for (const char *sep : {"..", "\u2013", "-"})
+        if (const size_t at = t.find(sep); at != std::string::npos) {
+            first = t.substr(0, at);
+            second = t.substr(at + std::strlen(sep));
+            break;
+        }
+    const int n = m_seq.length();
+    const auto base = [n](const std::string &s) {   // 1..n, or 0
+        if (s.empty() || s.size() > 9 || !std::all_of(s.begin(), s.end(), [](char c) { return c >= '0' && c <= '9'; }))
+            return 0;
+        const int v = std::stoi(s);
+        return v <= n ? v : 0;
+    };
+    const int a = base(first), b = first == t ? a : base(second);
+    if (a == 0 || b == 0 || (b < a && !m_seq.circular))
+        return false;
+    setSelection({a - 1, b >= a ? b - a + 1 : n - a + 1 + b});
+    return true;
+}
+
 void Document::extendToSite(int visibleIndex)
 {
     const int n = m_seq.length();
