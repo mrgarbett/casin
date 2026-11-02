@@ -1,0 +1,2 @@
+// Generated from version_hash.h.in; see version.h.
+#define RESTRICTO_GIT_HASH "@RESTRICTO_GIT_HASH@"

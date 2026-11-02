@@ -1,4 +1,5 @@
 /build/
+/src/core/version_hash.h
 /.build/
 /.swiftpm/
 *.xcodeproj/
