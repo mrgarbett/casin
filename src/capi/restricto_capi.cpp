@@ -764,6 +764,96 @@ OCScene *oc_gel_render(const OCDocument *doc, const char *const *enzymes, int en
     });
 }
 
+struct OCGel {
+    std::vector<view::GelLane> lanes;
+    double percent = 1.0;
+};
+
+OCGel *oc_gel_new(int ladder)
+{
+    auto *g = new OCGel;
+    const Ladder &l = commonLadders()[size_t(std::clamp(ladder, 0, oc_ladder_count() - 1))];
+    g->lanes.push_back({"L", l.bands, l.bright, true, false, {}});
+    return g;
+}
+
+void oc_gel_free(OCGel *gel) { delete gel; }
+
+void oc_gel_add_lane(OCGel *gel, const OCDocument *doc, const char *const *enzymes, int enzyme_count)
+{
+    if (!gel || !doc)
+        return;
+    const Sequence &seq = doc->doc.sequence();
+    view::GelLane lane{std::to_string(gel->lanes.size()), {}, {}, false, false, {}};
+    const std::vector<Enzyme> use = enzymesNamed(enzymes, enzyme_count);
+    const bool uncut = use.empty() || digest(seq, use).uncut;
+    if (uncut) {
+        lane.bands = {seq.length()};
+        if (seq.circular) {
+            // The nicked open circle trails the supercoiled plasmid.
+            lane.uncutCircular = true;
+            lane.bands = {seq.length(), seq.length()};
+            lane.forms = {view::GelForm::OpenCircular, view::GelForm::Supercoiled};
+        }
+    } else {
+        for (const DigestFragment &f : digest(seq, use).fragments)
+            lane.bands.push_back(f.length);
+        std::sort(lane.bands.rbegin(), lane.bands.rend());
+    }
+    gel->lanes.push_back(std::move(lane));
+}
+
+int oc_gel_lane_bands(const OCGel *gel, int lane, int *out, int max)
+{
+    if (!gel || lane < 0 || lane >= int(gel->lanes.size()))
+        return 0;
+    const std::vector<int> &b = gel->lanes[size_t(lane)].bands;
+    for (int i = 0; out && i < max && i < int(b.size()); ++i)
+        out[i] = b[size_t(i)];
+    return int(b.size());
+}
+
+int oc_gel_lane_count(const OCGel *gel) { return gel ? int(gel->lanes.size()) : 0; }
+
+int oc_gel_lane_band_info(const OCGel *gel, int lane, OCGelBand *out, int max)
+{
+    if (!gel || lane < 0 || lane >= int(gel->lanes.size()))
+        return 0;
+    const view::GelLane &l = gel->lanes[size_t(lane)];
+    for (int i = 0; out && i < max && i < int(l.bands.size()); ++i) {
+        const int bp = l.bands[size_t(i)];
+        const view::GelForm form = view::gelBandForm(l, size_t(i));
+        out[i] = {bp, view::gelRunFraction(bp, form, gel->percent), view::gelBandIntensity(l, size_t(i)),
+                  std::find(l.bright.begin(), l.bright.end(), bp) != l.bright.end(), int(form)};
+    }
+    return int(l.bands.size());
+}
+
+bool oc_gel_lane_uncut_circular(const OCGel *gel, int lane)
+{
+    return gel && lane >= 0 && lane < int(gel->lanes.size()) && gel->lanes[size_t(lane)].uncutCircular;
+}
+
+double oc_gel_run_fraction(int bp, double percent) { return view::gelRunFraction(bp, false, percent); }
+
+void oc_gel_set_percent(OCGel *gel, double percent)
+{
+    if (gel && percent > 0)
+        gel->percent = percent;
+}
+
+int oc_gel_percent_count(void) { return view::gelPercentCount(); }
+double oc_gel_percent(int index) { return view::gelPercent(index); }
+
+OCScene *oc_gel_scene(const OCGel *gel, double width, double height, bool dark, OCMeasureText measure, void *context)
+{
+    if (!gel)
+        return nullptr;
+    CallbackMeasurer tm(measure, context);
+    view::GelLayout layout(gel->lanes, dark ? view::Theme::darkTheme() : view::Theme::light(), tm, width, height);
+    return new OCScene{layout.render()};
+}
+
 /* ---- primers ---- */
 
 char *oc_primer_check(const char *bases, OCPrimerCheck *out)

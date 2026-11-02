@@ -385,6 +385,42 @@ int main(int argc, char **argv)
     oc_document_free(product);
     oc_document_free(pcr);
 
+    /* A gel lane by lane: ladder, uncut, and a digest whose bands add up. */
+    OCGel *lanes = oc_gel_new(0);
+    oc_gel_add_lane(lanes, doc, NULL, 0);
+    const char *ecori[] = {"EcoRI"};
+    oc_gel_add_lane(lanes, doc, ecori, 1);
+    int bands[64];
+    CHECK(oc_gel_lane_bands(lanes, 0, bands, 64) > 5);
+    CHECK(oc_gel_lane_bands(lanes, 1, bands, 64) == 2 && bands[0] == 3188 && bands[1] == 3188);
+    int nb = oc_gel_lane_bands(lanes, 2, bands, 64), sum = 0;
+    for (int i = 0; i < nb; ++i) sum += bands[i];
+    CHECK(nb >= 1 && sum == 3188);
+    for (int i = 1; i < nb; ++i) CHECK(bands[i - 1] >= bands[i]);
+    CHECK(oc_gel_lane_bands(lanes, 3, bands, 64) == 0);
+    CHECK(oc_gel_lane_count(lanes) == 3 && oc_gel_lane_uncut_circular(lanes, 1) && !oc_gel_lane_uncut_circular(lanes, 2));
+    OCGelBand info[64];
+    CHECK(oc_gel_lane_band_info(lanes, 0, info, 64) > 5);
+    for (int i = 1; i < oc_gel_lane_band_info(lanes, 0, info, 64); ++i) CHECK(info[i - 1].run <= info[i].run);
+    /* Uncut: the nicked open circle (fainter) behind the supercoiled plasmid,
+       which runs ahead of a linear 3,188 bp. */
+    CHECK(oc_gel_lane_band_info(lanes, 1, info, 64) == 2 && info[0].form == OC_GEL_OPEN_CIRCULAR
+          && info[1].form == OC_GEL_SUPERCOILED && info[0].run < info[1].run && info[0].intensity < info[1].intensity
+          && info[1].run > oc_gel_run_fraction(3188, 1) && info[0].run < oc_gel_run_fraction(3188, 1));
+    CHECK(oc_gel_run_fraction(500, 1) > oc_gel_run_fraction(5000, 1) && oc_gel_run_fraction(500, 1) <= 1);
+    /* A denser gel holds the same band back; small ones run off a thin one. */
+    CHECK(oc_gel_run_fraction(1000, 2) < oc_gel_run_fraction(1000, 0.7));
+    CHECK(oc_gel_run_fraction(50, 0.7) > 1 && oc_gel_run_fraction(50, 3) < 1);
+    CHECK(oc_gel_run_fraction(15000, 1.2) < oc_gel_run_fraction(10000, 1.2));
+    CHECK(oc_gel_run_fraction(40000, 1) > 0 && oc_gel_run_fraction(30000, 1) > oc_gel_run_fraction(40000, 1));
+    CHECK(oc_gel_percent_count() >= 4 && oc_gel_percent(0) < oc_gel_percent(1));
+    oc_gel_set_percent(lanes, 2);
+    CHECK(oc_gel_lane_band_info(lanes, 1, info, 64) == 2 && info[0].run > 0);
+    OCScene *gs = oc_gel_scene(lanes, 400, 500, false, measure, NULL);
+    CHECK(gs != NULL && oc_scene_item_count(gs) > 10);
+    oc_scene_free(gs);
+    oc_gel_free(lanes);
+
     /* PCR cycling for pOC-demo's seq-fwd and mcs-rev, in Q5 buffer. */
     OCPcrProgram prog;
     oc_pcr_program("ACGTACAATGTGTTCGAAACAGGT", "CGGCTCTCTTTACACGGCTC", 1530, OC_POLYMERASE_Q5, 30, &prog);

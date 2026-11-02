@@ -7,7 +7,7 @@
 // with the map beside it), hides and shows the inspector, opens Find (which
 // reopens a hidden panel on the sequence), selects bases (the status splits),
 // copies the map image, adds a His-tagged primer in the Primers
-// pane, opens a PCR product from the PCR wizard, and saves a PNG of the window after each step. It exits 0 when every step got
+// pane, opens a PCR product from the PCR wizard, runs a gel in the gel wizard, and saves a PNG of the window after each step. It exits 0 when every step got
 // through layout; a layout loop or other exception aborts the process instead.
 import AppKit
 import RestrictoCore
@@ -190,6 +190,51 @@ enum UISmokeTest {
                 note("close product")
                 product.close()
                 note("closed")
+                window.makeKeyAndOrderFront(nil)
+            }),
+            ("9k-gel-wizard", {
+                // Cloning > Digest and Gel…: the ladder, the plasmid uncut (two
+                // bands, nicked and supercoiled), and cut with the first enzyme
+                // shown; then a lane cut with EcoRI.
+                controller?.digestAndGel(nil)
+                let length = (controller?.document as? SequenceDocument)?.core.length ?? 0
+                let first = GelWizard.bands
+                GelWizard.addLane(enzymes: ["ecori"])
+                let after = GelWizard.bands
+                guard GelWizard.isAnyOpen, first.count >= 2, first[0].count > 5, first[1] == [length, length],
+                      after.count == first.count + 1, let cut = after.last, cut.count >= 1,
+                      cut.reduce(0, +) == length else {
+                    FileHandle.standardError.write("ui-smoke: the gel wizard showed the wrong bands \(after)\n"
+                                                       .data(using: .utf8)!)
+                    exit(8)
+                }
+            }),
+            ("9k-gel-agarose", {
+                // A 2% gel holds the uncut plasmid back more than a 0.7% one;
+                // then half a run, in black and white.
+                GelWizard.setAgarose(0.7)
+                let thin = GelWizard.runs.dropFirst().first?.first ?? 0
+                GelWizard.setAgarose(2)
+                let dense = GelWizard.runs.dropFirst().first?.first ?? 0
+                guard thin > 0, dense > 0, dense < thin else {
+                    FileHandle.standardError.write("ui-smoke: the gel's agarose didn't change how far bands ran\n"
+                                                       .data(using: .utf8)!)
+                    exit(8)
+                }
+                GelWizard.setAgarose(1)
+                GelWizard.setRun(0.5, stain: .blackAndWhite)
+            }),
+            ("9k-gel-half-run", {
+                if let wizard = GelWizard.openWindows.first {
+                    capture(wizard, to: out.appendingPathComponent("9k-gel-half-run-window.png"))
+                }
+                GelWizard.setRun(1, stain: .ethidiumUV)
+            }),
+            ("9k-gel-closed", {
+                if let wizard = GelWizard.openWindows.first {
+                    capture(wizard, to: out.appendingPathComponent("9k-gel-wizard-window.png"))
+                }
+                GelWizard.closeAll()
                 window.makeKeyAndOrderFront(nil)
             }),
             ("9j-zoomed-125", {
