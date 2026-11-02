@@ -60,7 +60,18 @@ Color FeatureStyle::textOn(const Color &fill)
 
 bool FeatureStyle::isDrawn(const Feature &f)
 {
-    return f.type != "source";
+    return f.type != "source" && !isEditingHistory(f);
+}
+
+bool FeatureStyle::isEditingHistory(const Feature &f)
+{
+    static const std::string mark = "nonstandard type: Editing History";
+    if (f.name.compare(0, mark.size(), mark) == 0)
+        return true;
+    for (const Qualifier &q : f.qualifiers)
+        if (q.key == "label" && q.value.compare(0, mark.size(), mark) == 0)
+            return true;
+    return false;
 }
 
 Theme Theme::light()
