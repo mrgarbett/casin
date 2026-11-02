@@ -6,7 +6,7 @@ import PackageDescription
 
 let package = Package(
     name: "Restricto",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS("26.0")],
     products: [
         .executable(name: "Restricto", targets: ["Restricto"]),
         // The Quick Look preview extension; build_macos_app.sh puts it in the app's PlugIns.

@@ -117,7 +117,7 @@ enum ToolMenus {
                 exp(item("Choose Enzymes…", #selector(W.chooseEnzymes(_:)))),
                 exp(item("Enzyme Set…", #selector(W.enzymeSet(_:)))),
                 .separator(),
-                item("PCR Product…", #selector(W.pcrProduct(_:))),
+                item("PCR…", #selector(W.pcrProduct(_:))),
                 item("Insertion by PCR…", #selector(W.insertionByPcr(_:))),
                 item("Gibson Assembly…", #selector(W.gibson(_:))),
                 exp(.separator()),
@@ -358,42 +358,10 @@ extension DocumentWindowController {
         }
     }
 
+    /// Opens the gel wizard on this sequence (see GelWizard).
     @objc func digestAndGel(_ sender: Any?) {
         guard let d = doc, !d.isEmpty else { return }
-        let shown = Array(Set(d.visibleSiteEnzymes)).sorted()
-        let form = Form("Digest and Gel", "Enzymes shown on the map, cut together.")
-        let first = form.popup("Enzyme", shown)
-        let second = form.popup("And", ["(none)"] + shown)
-        let ladders = (0..<Int(oc_ladder_count())).map { String(cString: oc_ladder_name(Int32($0))) }
-        let ladder = form.popup("Ladder", ladders)
-        guard !shown.isEmpty else {
-            tell("Digest and Gel", "No enzymes are shown. Change the cut filter in the Enzymes sidebar.")
-            return
-        }
-        form.run(in: window, ok: "Digest") { [weak self] in
-            var enzymes = [shown[max(0, first.indexOfSelectedItem)]]
-            if second.indexOfSelectedItem > 0 { enzymes.append(shown[second.indexOfSelectedItem - 1]) }
-            var frags = [OCFragmentInfo](repeating: OCFragmentInfo(), count: 400)
-            let n = withCStrings(enzymes) { oc_digest(d.handle, $0, Int32(enzymes.count), &frags, Int32(frags.count)) }
-            var lines: [String] = []
-            for f in frags.prefix(Int(min(n, 400))) {
-                let left = tupleString(f.left_enzyme), right = tupleString(f.right_enzyme)
-                lines.append("\(Int(f.length).formatted()) bp".padding(toLength: 12, withPad: " ", startingAt: 0)
-                             + "\(f.start + 1)  \(left.isEmpty ? "end" : left) – \(right.isEmpty ? "end" : right)")
-            }
-            let scene = withCStrings(enzymes) {
-                oc_gel_render(d.handle, $0, Int32(enzymes.count), Int32(max(0, ladder.indexOfSelectedItem)), 360, 420,
-                              self?.window?.contentView?.isDarkAppearance ?? false, measureText, nil)
-            }
-            let title = "\(enzymes.joined(separator: " + ")): \(n) fragment\(n == 1 ? "" : "s")"
-            if let scene = scene {
-                let image = sceneImage(scene)
-                oc_scene_free(scene)
-                showImage(title, lines.joined(separator: "\n"), image, in: self?.window)
-            } else {
-                showText(title, "", lines.joined(separator: "\n"), in: self?.window)
-            }
-        }
+        GelWizard.show(for: d, near: window)
     }
 
     // MARK: Features
@@ -479,7 +447,8 @@ extension DocumentWindowController {
              + names.joined(separator: ", ") + ". Undo (⌘Z) takes them all off again.")
     }
 
-    /// ⌘L: puts the caret at a base number and shows it.
+    /// ⌘L: selects the base at a base number and shows it (a bare caret
+    /// sits between bases, so the status would name the base before it).
     @objc func goToPosition(_ sender: Any?) {
         guard let d = doc, !d.isEmpty else { return }
         let form = Form("Go to Position", "A base number from 1 to \(d.length.formatted()).")
@@ -488,7 +457,7 @@ extension DocumentWindowController {
             let digits = field.stringValue.filter { $0.isNumber }
             guard let base = Int(digits), base >= 1, base <= d.length else { NSSound.beep(); return }
             self?.revealSequence()
-            d.select(start: base - 1, length: 0)
+            d.select(start: base - 1, length: 1)
         }
     }
 
@@ -560,32 +529,12 @@ extension DocumentWindowController {
 
     // MARK: Primers
 
-    /// One entry for both ways in: from the selection when there is one,
-    /// otherwise by pasting the primer's sequence.
+    /// Opens a new primer's inputs in the right panel's Primers pane, filled in
+    /// with the selected bases (top strand, so a forward primer) when there is
+    /// a selection.
     @objc func addPrimer(_ sender: Any?) {
-        guard let d = doc else { return }
-        guard hasRange else { addPrimerBySequence(); return }
-        let form = Form("Add Primer", "Binds \(d.selectionStart + 1)–\(d.selectionStart + d.selectionLength).")
-        let name = form.text("Name", "primer")
-        let strand = form.popup("Reads", ["Top strand (forward)", "Bottom strand (reverse)"])
-        form.run(in: window, ok: "Add") {
-            oc_document_add_primer_from_selection(d.handle, name.stringValue,
-                                                  Int32(strand.indexOfSelectedItem == 0 ? OC_STRAND_FORWARD
-                                                                                         : OC_STRAND_REVERSE))
-        }
-    }
-
-    private func addPrimerBySequence() {
         guard let d = doc, !d.isEmpty else { return }
-        let form = Form("Add Primer", "Paste the primer. It is placed where its 3′ end binds best; a 5′ tail is fine. To add one from bases instead, select them first.")
-        let name = form.text("Name", "primer")
-        let bases = form.text("Sequence", "", placeholder: "5′ → 3′", width: 320)
-        form.run(in: window, ok: "Add") { [weak self] in
-            var err: UnsafeMutablePointer<CChar>?
-            if oc_document_add_primer_sequence(d.handle, name.stringValue, bases.stringValue, &err) < 0 {
-                showError("Add Primer", err, in: self?.window)
-            }
-        }
+        beginAddingPrimer(bases: hasRange ? d.selectedBases : "")
     }
 
     @objc func deletePrimer(_ sender: Any?) {
@@ -644,22 +593,12 @@ extension DocumentWindowController {
 
     // MARK: Cloning
 
+    /// Opens the PCR wizard on this sequence (see PcrWizard).
     @objc func pcrProduct(_ sender: Any?) {
-        guard let d = doc else { return }
-        let primers = primerList(d)
-        guard primers.count >= 2 else {
-            tell("PCR Product", "Add a forward and a reverse primer to this sequence first.")
-            return
-        }
-        let form = Form("PCR Product")
-        let fwd = form.popup("Forward", primers.map { $0.label },
-                             selected: primers.firstIndex { $0.info.strand == Int32(OC_STRAND_FORWARD) } ?? 0)
-        let rev = form.popup("Reverse", primers.map { $0.label },
-                             selected: primers.firstIndex { $0.info.strand == Int32(OC_STRAND_REVERSE) } ?? 1)
-        form.run(in: window, ok: "Open Product") { [weak self] in
-            self?.product("PCR Product") {
-                oc_pcr_product(d.handle, Int32(fwd.indexOfSelectedItem), Int32(rev.indexOfSelectedItem), $0, $1)
-            }
+        guard let d = doc, !d.isEmpty else { return }
+        PcrWizard.show(for: d, near: window) { [weak self] in
+            self?.window?.makeKeyAndOrderFront(nil)
+            self?.beginAddingPrimer(bases: "")
         }
     }
 

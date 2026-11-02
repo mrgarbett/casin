@@ -28,10 +28,16 @@ typedef struct OCScene OCScene;
 typedef struct { double r, g, b, a; } OCColor;
 typedef struct { double x, y; } OCPoint;
 
-enum { OC_CHANGED_SEQUENCE = 1, OC_CHANGED_SELECTION = 2, OC_CHANGED_ENZYMES = 4, OC_CHANGED_HISTORY = 8 };
+enum {
+    OC_CHANGED_SEQUENCE = 1,
+    OC_CHANGED_SELECTION = 2,
+    OC_CHANGED_ENZYMES = 4,
+    OC_CHANGED_HISTORY = 8,
+    OC_CHANGED_PENDING = 16,   /* the pending primer was set or cleared: redraw */
+};
 enum { OC_FORMAT_GENBANK = 1, OC_FORMAT_FASTA = 2, OC_FORMAT_SNAPGENE = 3, OC_FORMAT_EMBL = 4 };
 enum { OC_STRAND_NONE = 0, OC_STRAND_FORWARD = 1, OC_STRAND_REVERSE = 2 };
-enum { OC_HIT_NONE = 0, OC_HIT_FEATURE = 1, OC_HIT_SITE = 2, OC_HIT_SEQUENCE = 3 };
+enum { OC_HIT_NONE = 0, OC_HIT_FEATURE = 1, OC_HIT_SITE = 2, OC_HIT_SEQUENCE = 3, OC_HIT_PRIMER = 4 };
 enum { OC_ITEM_PATH = 0, OC_ITEM_TEXT = 1 };
 enum { OC_HALIGN_LEFT = 0, OC_HALIGN_CENTER = 1, OC_HALIGN_RIGHT = 2 };
 enum { OC_VALIGN_BASELINE = 0, OC_VALIGN_MIDDLE = 1, OC_VALIGN_TOP = 2 };
@@ -55,6 +61,9 @@ bool oc_document_save(OCDocument *doc, const char *path, int format, char **erro
 /* Starts the document over with typed or pasted bases (cleaned to IUPAC).
  * The result counts as unsaved. Returns false when `bases` holds no DNA. */
 bool oc_document_new_sequence(OCDocument *doc, const char *name, const char *bases, bool circular);
+/* Copies `src`'s sequence (with its features and primers) and selection into
+ * `out`, as an unsaved document; for previews. */
+bool oc_document_copy(const OCDocument *src, OCDocument *out);
 
 bool oc_document_is_empty(const OCDocument *doc);
 const char *oc_document_name(OCDocument *doc);
@@ -159,6 +168,8 @@ typedef struct {
     int start;           /* binding site, 0-based; length 0 when it doesn't bind */
     int length;
     int strand;          /* OC_STRAND_FORWARD or OC_STRAND_REVERSE */
+    const char *color;   /* "#rrggbb", or "" for the default primer colour */
+    const char *description;
 } OCPrimerInfo;
 
 /* How the construct was made, oldest step first ("2026-10-27 PCR with ..."). */
@@ -173,6 +184,49 @@ void oc_document_remove_primer(OCDocument *doc, int index);
 /* Adds a primer by its sequence where its 3' part binds best (a 5' tail is
  * allowed); returns its index, or -1 with *error when it doesn't bind. */
 int oc_document_add_primer_sequence(OCDocument *doc, const char *name, const char *bases, char **error);
+
+typedef struct {
+    int start, length;   /* the annealing part, on the top strand, 0-based */
+    int strand;          /* OC_STRAND_FORWARD or OC_STRAND_REVERSE */
+    int mismatches;      /* in the annealing part */
+} OCPrimerSite;
+/* Where a primer (5'->3', a 5' tail allowed) anneals, best first; returns how
+ * many sites there are and fills up to `max`. */
+int oc_primer_sites(const OCDocument *doc, const char *bases, OCPrimerSite *out, int max);
+/* Adds a primer at a site from oc_primer_sites as one undo step; `color` and
+ * `description` may be NULL or "". Returns its index, or -1 for an empty
+ * primer or bad site. */
+int oc_document_add_primer_at(OCDocument *doc, const char *name, const char *bases, const char *color,
+                              const char *description, const OCPrimerSite *site);
+/* Draws a primer at a site as if it were added, while it is being designed.
+ * It isn't part of the document (not undoable, saved or listed); any change
+ * to the sequence drops it. Reports OC_CHANGED_PENDING. Returns false for an
+ * empty primer or bad site, and then clears it. */
+bool oc_document_set_pending_primer(OCDocument *doc, const char *name, const char *bases, const char *color,
+                                    const OCPrimerSite *site);
+void oc_document_clear_pending_primer(OCDocument *doc);
+bool oc_document_has_pending_primer(const OCDocument *doc);
+/* The primer with its annealing part at `site` grown or shrunk (its 5' end
+ * moving along the template; tail and 3' end kept) so the annealing part's
+ * Tm comes closest to target_tm, 15 to 40 bases. Sets *fitted. Free with
+ * oc_string_free. */
+char *oc_primer_fit_tm(const OCDocument *doc, const char *bases, const OCPrimerSite *site, double target_tm,
+                       OCPrimerSite *fitted);
+/* Length of the product of two primers at these sites, tails included, or -1
+ * when they don't face each other. */
+int oc_pcr_product_length(const OCDocument *doc, const OCPrimerSite *a, int tail_a, const OCPrimerSite *b,
+                          int tail_b);
+typedef struct {
+    bool applies;       /* a CDS meets the primer where its tail joins the annealing part */
+    bool against_cds;   /* the part reads the other way to it */
+    bool in_frame;
+    int fix;            /* bases to add between the part and the annealing part (1 or 2), else 0 */
+    char cds[64];       /* the CDS's name */
+} OCFrameCheck;
+/* Whether a part in a primer's tail (bases part_start.. from the 5' end)
+ * lands in frame with the CDS its annealing part joins. */
+void oc_primer_part_frame(const OCDocument *doc, const OCPrimerSite *site, int tail_length, int part_start,
+                          int part_length, bool part_forward, OCFrameCheck *out);
 
 /* ---- text metrics supplied by the frontend ------------------------------ */
 
@@ -191,9 +245,16 @@ OCMapLayout *oc_map_layout_new_options(const OCDocument *doc, double width, doub
 OCMapLayout *oc_map_layout_new_frames(const OCDocument *doc, double width, double height, bool dark,
                                       bool show_enzymes, bool show_primers, const char *hidden_types, int frames,
                                       OCMeasureText measure, void *context);
+/* Like oc_map_layout_new_frames, with the map's text (labels, ticks, names)
+   scaled by text_scale and its geometry left to fit: zoom without shrinking text. */
+OCMapLayout *oc_map_layout_new_scaled(const OCDocument *doc, double width, double height, bool dark,
+                                      bool show_enzymes, bool show_primers, const char *hidden_types, int frames,
+                                      double text_scale, OCMeasureText measure, void *context);
+/* Circular maps: the backbone's radius; 0 for linear ones. */
+double oc_map_layout_radius(const OCMapLayout *layout);
 void oc_map_layout_free(OCMapLayout *layout);
 OCScene *oc_map_layout_render(const OCMapLayout *layout, const OCDocument *doc);
-/* kind = OC_HIT_*; index = feature or visible-site index; position = base boundary. */
+/* kind = OC_HIT_*; index = feature, visible-site or primer index; position = base boundary. */
 void oc_map_layout_hit(const OCMapLayout *layout, double x, double y, int *kind, int *index, int *position);
 bool oc_map_layout_is_circular(const OCMapLayout *layout);
 double oc_map_layout_angle_at(const OCMapLayout *layout, double x, double y);
@@ -255,6 +316,42 @@ typedef struct {
 int oc_digest(const OCDocument *doc, const char *const *enzymes, int enzyme_count, OCFragmentInfo *out, int max);
 int oc_ladder_count(void);
 const char *oc_ladder_name(int index);
+/* A gel built lane by lane: a ladder, then any number of lanes, each a
+   sequence cut with some enzymes (none: the uncut molecule). Lanes are
+   named by their number; the ladder lane is "L". */
+typedef struct OCGel OCGel;
+OCGel *oc_gel_new(int ladder);
+void oc_gel_free(OCGel *gel);
+void oc_gel_add_lane(OCGel *gel, const OCDocument *doc, const char *const *enzymes, int enzyme_count);
+/* The lane's band sizes, largest first; returns how many (up to `max`). Lane 0 is the ladder. */
+int oc_gel_lane_bands(const OCGel *gel, int lane, int *out, int max);
+/* The agarose percentage the gel is cast at (1% by default); it sets how far
+   each size runs. The percentages offered, lowest first: */
+void oc_gel_set_percent(OCGel *gel, double percent);
+int oc_gel_percent_count(void);
+double oc_gel_percent(int index);
+/* A band as a front end draws it: `run` is how far it ran, 0 at the wells to 1
+   at the bottom of a full run (more than 1: it ran off the gel); `intensity` is 0..1; `reference` marks a ladder's
+   brighter reference bands. */
+typedef struct {
+    int bp;
+    double run;
+    double intensity;
+    bool reference;
+    int form;               /* OC_GEL_LINEAR, OC_GEL_SUPERCOILED or OC_GEL_OPEN_CIRCULAR */
+} OCGelBand;
+/* An uncut plasmid runs as two bands: open circular (nicked, fainter) first,
+   then supercoiled. */
+enum { OC_GEL_LINEAR = 0, OC_GEL_SUPERCOILED = 1, OC_GEL_OPEN_CIRCULAR = 2 };
+int oc_gel_lane_count(const OCGel *gel);
+int oc_gel_lane_band_info(const OCGel *gel, int lane, OCGelBand *out, int max);
+/* True when the lane is an uncut circular molecule (it runs supercoiled). */
+bool oc_gel_lane_uncut_circular(const OCGel *gel, int lane);
+/* Where a linear band of `bp` runs on a `percent` gel, as OCGelBand.run. */
+double oc_gel_run_fraction(int bp, double percent);
+OCScene *oc_gel_scene(const OCGel *gel, double width, double height, bool dark, OCMeasureText measure,
+                      void *context);
+
 /* A virtual gel with three lanes: ladder, uncut, and the digest. */
 OCScene *oc_gel_render(const OCDocument *doc, const char *const *enzymes, int enzyme_count, int ladder, double width,
                        double height, bool dark, OCMeasureText measure, void *context);
@@ -274,6 +371,35 @@ typedef struct {
 
 /* Returns the warnings, one per line ("" when the primer looks fine). */
 char *oc_primer_check(const char *bases, OCPrimerCheck *out);
+
+/* PCR cycling as NEB suggests it, with Tm and annealing temperature as NEB's
+   Tm calculator works them out for each polymerase's buffer. */
+enum { OC_POLYMERASE_Q5 = 0, OC_POLYMERASE_PHUSION = 1, OC_POLYMERASE_TAQ = 2, OC_POLYMERASE_COUNT = 3 };
+typedef struct {
+    char name[32];
+    int celsius;
+    int seconds;         /* 0 for a hold */
+    bool cycled;         /* repeated `cycles` times */
+} OCPcrStep;
+typedef struct {
+    int tm1, tm2;        /* the primers' annealing parts, whole degrees C */
+    int annealing;       /* Ta */
+    bool capped;         /* Ta held at the polymerase's highest */
+    bool two_step;       /* annealing and extension in one step */
+    int cycles;
+    int step_count;      /* 0 when a primer isn't plain DNA */
+    OCPcrStep steps[8];
+} OCPcrProgram;
+/* anneal1 and anneal2 are the primers' annealing parts (no tails). */
+void oc_pcr_program(const char *anneal1, const char *anneal2, int length, int polymerase, int cycles,
+                    OCPcrProgram *out);
+/* The same program as a Markdown table after `title`. Free with oc_string_free. */
+char *oc_pcr_program_markdown(const char *anneal1, const char *anneal2, int length, int polymerase, int cycles,
+                              const char *title);
+char *oc_polymerase_name(int polymerase);
+int oc_polymerase_max_length(int polymerase);
+/* "1 min 35 s", "30 s", "hold". */
+char *oc_format_seconds(int seconds);
 char *oc_primer_pair_check(const char *a, const char *b);
 /* Designs a pair that amplifies the selection and adds it as one undo step. */
 bool oc_document_design_primers(OCDocument *doc, double target_tm, char **error);

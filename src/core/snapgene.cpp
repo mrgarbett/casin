@@ -109,6 +109,8 @@ void parsePrimers(const std::string &xmlText, Sequence &seq)
         Primer p;
         p.name = pe->attr("name");
         p.bases = cleanPrimerBases(pe->attr("sequence"));
+        p.color = pe->attr("color");   // ours; SnapGene doesn't write one
+        p.description = xml::stripHtml(pe->attr("description"));
         const xml::Element *site = pe->child("BindingSite");
         if (!site)
             continue;
@@ -119,7 +121,7 @@ void parsePrimers(const std::string &xmlText, Sequence &seq)
         if (a <= b)
             p.binding = {a, b + 1};
         else
-            p.binding = {a, n};   // Range can't wrap; keep the part before the origin
+            p.binding = {a, b + 1 + n};   // across the origin: it runs past the end
         p.strand = site->attr("boundStrand") == "1" ? Strand::Reverse : Strand::Forward;
         seq.primers.push_back(p);
     }
@@ -200,7 +202,12 @@ std::string featuresXml(const Sequence &seq)
         for (size_t i = 0; i < f.ranges.size(); ++i) {
             const Range &r = f.ranges[i];
             int a = r.start + 1, b = r.end;
-            if (seq.circular && r.end == n && i + 1 < f.ranges.size() && f.ranges[i + 1].start == 0)
+            // SnapGene's ranges are inclusive, so a site between two bases
+            // (a = b + 1, which it would read as the whole circle) becomes
+            // the base after it.
+            if (r.length() == 0)
+                b = a = std::min(a, n);
+            else if (seq.circular && r.end == n && i + 1 < f.ranges.size() && f.ranges[i + 1].start == 0)
                 b = f.ranges[++i].end;
             x += "<Segment range=\"" + std::to_string(a) + "-" + std::to_string(b) + "\"";
             if (!f.color.empty())
@@ -231,9 +238,13 @@ std::string primersXml(const Sequence &seq)
     int id = 0;
     for (const Primer &p : seq.primers) {
         x += "<Primer recentID=\"" + std::to_string(id++) + "\" name=\"" + escapeXml(p.name) + "\" sequence=\""
-           + escapeXml(p.bases) + "\">";
+           + escapeXml(p.bases) + "\"" + (p.color.empty() ? "" : " color=\"" + escapeXml(p.color) + "\"")
+           + (p.description.empty()
+                  ? ""
+                  : " description=\"" + escapeXml("<html><body>" + escapeXml(p.description) + "</body></html>") + "\"")
+           + ">";
         if (p.binding.length() > 0)
-            x += "<BindingSite location=\"" + std::to_string(p.binding.start) + "-" + std::to_string(p.binding.end - 1)
+            x += "<BindingSite location=\"" + std::to_string(p.binding.start) + "-" + std::to_string((p.binding.end - 1) % std::max(1, seq.length()))
                + "\" boundStrand=\"" + (p.strand == Strand::Reverse ? "1" : "0") + "\"/>";
         x += "</Primer>";
     }
@@ -292,11 +303,13 @@ bool readSnapGene(const std::string &data, Sequence *out, std::string *error)
         case kFeatures: featuresXml = payload; break;
         case kPrimers: primersXml = payload; break;
         case kNotes: notesXml = payload; break;
-        default: break;   // unknown packets are ignored
+        default: seq.snapgeneExtra.push_back({type, payload}); break;   // kept for saving
         }
     }
     if (!haveDna)
         return fail("no DNA packet");
+    if (!seq.snapgeneExtra.empty())
+        seq.snapgeneExtraBases = seq.bases;
 
     // Features and primers need the sequence length, so parse them last.
     if (!featuresXml.empty())
@@ -333,6 +346,9 @@ std::string writeSnapGene(const Sequence &seq)
     }
     putPacket(out, kNotes, notes + "</Notes>");
     putPacket(out, kFeatures, featuresXml(seq));
+    if (seq.bases == seq.snapgeneExtraBases)
+        for (const Sequence::ExtraPacket &p : seq.snapgeneExtra)
+            putPacket(out, uint8_t(p.type), p.payload);
     return out;
 }
 

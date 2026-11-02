@@ -19,13 +19,15 @@ jobs:
     steps:
       - name: Install build dependencies
         run: |
-          dnf -y install git gcc-c++ cmake ninja-build pkgconfig gtk4-devel libadwaita-devel \
+          dnf -y install git gcc-c++ cmake ninja-build pkgconfig gtk4-devel libadwaita-devel libepoxy-devel \
                          cairo-devel pango-devel desktop-file-utils libappstream-glib \
                          rpm-build rpmdevtools xorg-x11-server-Xvfb google-noto-sans-fonts
       - uses: actions/checkout@v4
       - name: Build and test
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          # Warnings fail the build here (GCC 16's -Wnonnull from <algorithm> aside).
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_CXX_FLAGS="-Werror -Wno-error=nonnull"
           cmake --build build
           ctest --test-dir build --output-on-failure
       - name: Render the demo map and a window screenshot
@@ -49,6 +51,22 @@ jobs:
             demo-map.png
             window.png
             restricto-*.rpm
+
+  sanitizers:
+    # The core, view and C API under AddressSanitizer and UBSan, with every
+    # report fatal: the tests pass only if they read nothing out of bounds.
+    name: Sanitizers (ASan + UBSan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test
+        run: |
+          cmake -S . -B build -DRESTRICTO_FRONTEND=none -DCMAKE_BUILD_TYPE=Debug \
+              -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -Werror" \
+              -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build build -j "$(nproc)"
+          UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 ASAN_OPTIONS=halt_on_error=1 \
+              ctest --test-dir build --output-on-failure
 
   flatpak:
     name: Flatpak (GNOME runtime)
@@ -92,20 +110,9 @@ jobs:
           path: restricto.flatpak
 
   macos:
-    # Two SDKs: macos-14 builds without the Liquid Glass code (older Xcode),
-    # macos-26 builds it in with Xcode 26. Both binaries target macOS 13.
-    name: macOS ${{ matrix.label }} (Swift + AppKit)
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-14
-            label: pre-26 SDK
-            artifact: macos-build
-          - runner: macos-26
-            label: Xcode 26 SDK
-            artifact: macos-build-xcode26
+    # Xcode 26; the app needs macOS 26 or later.
+    name: macOS (Swift + AppKit)
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
@@ -115,15 +122,16 @@ jobs:
       - name: Core tests
         run: |
           brew install ninja
-          cmake -S . -B build -G Ninja -DRESTRICTO_FRONTEND=none
+          cmake -S . -B build -G Ninja -DRESTRICTO_FRONTEND=none -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_CXX_FLAGS=-Werror
           cmake --build build
           ctest --test-dir build --output-on-failure
       - name: Build Restricto.app
         run: scripts/build_macos_app.sh
-      - name: Check the deployment target is still Ventura
+      - name: Check the deployment target is macOS 26
         run: |
           vtool -show-build build/macos/Restricto.app/Contents/MacOS/Restricto | tee vtool.txt
-          grep -Eq 'minos 13\.0' vtool.txt
+          grep -Eq 'minos 26\.0' vtool.txt
           test -s build/macos/Restricto.app/Contents/Resources/Restricto.icns
           # AppKit picks the macOS 26 design from the SDK version in the binary.
           test "$(awk '$1 == "sdk" { print $2 }' vtool.txt)" = "$(xcrun --show-sdk-version)"
@@ -144,10 +152,35 @@ jobs:
           APP=build/macos/Restricto.app/Contents/MacOS/Restricto
           "$APP" --ui-smoke ui-first-launch samples/pOC-demo.dna
           "$APP" --ui-smoke ui-second-launch samples/pOC-demo.dna
+      - name: Crash report, if the app crashed
+        if: failure()
+        run: |
+          sleep 20   # ReportCrash writes the report a little after the crash
+          for f in ~/Library/Logs/DiagnosticReports/Restricto*; do
+            [ -e "$f" ] || continue
+            echo "== $f"
+            python3 - "$f" <<'PY'
+          import json, sys
+          text = open(sys.argv[1]).read()
+          head, _, body = text.partition("\n")
+          try:
+              r = json.loads(body)
+          except ValueError:
+              print(text[:20000]); sys.exit()
+          print(r.get("exception"), r.get("termination", {}).get("indicator"))
+          images = r.get("usedImages", [])
+          for t in r.get("threads", []):
+              if not t.get("triggered"):
+                  continue
+              for fr in t.get("frames", [])[:40]:
+                  img = images[fr["imageIndex"]].get("name", "?") if fr.get("imageIndex", -1) < len(images) else "?"
+                  print(f'{img:28} {fr.get("symbol", "?")} +{fr.get("symbolLocation", 0)}')
+          PY
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ${{ matrix.artifact }}
+          name: macos-build
           path: |
             demo-map-macos.png
             ui-first-launch

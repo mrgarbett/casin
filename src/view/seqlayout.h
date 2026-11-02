@@ -92,6 +92,7 @@ private:
         int nameCols;       // columns kept free past the 3' end for the name (0: no name here)
         bool head;  // 3' end is in this piece
         bool top;   // forward primers sit above the top strand, reverse ones below
+        int shift = 0;   // what to add to a base's position to place it on the primer: n or -n across the origin
     };
     struct Line {
         int start = 0, len = 0;

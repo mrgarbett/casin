@@ -4,6 +4,7 @@
 #include "restricto.h"
 
 #include <stdio.h>
+#include <limits.h>
 #include <string.h>
 
 static int failures = 0, checks = 0;
@@ -56,12 +57,16 @@ int main(int argc, char **argv)
     oc_document_set_max_cuts(doc, 1);
     oc_document_set_enzyme_hidden(doc, "EcoRI", true);
     CHECK(oc_document_visible_site_count(doc) == unique - 1);
+    bool sawEcoRI = false;
     for (int i = 0; i < oc_document_enzyme_count(doc); ++i) {
         OCEnzymeInfo e;
         oc_document_enzyme(doc, i, &e);
-        if (strcmp(e.name, "EcoRI") == 0)
+        if (strcmp(e.name, "EcoRI") == 0) {
+            sawEcoRI = true;
             CHECK(e.hidden && e.cuts == 1);
+        }
     }
+    CHECK(sawEcoRI);
 
     /* Find on both strands. */
     int count = 0;
@@ -261,6 +266,116 @@ int main(int argc, char **argv)
     const int ti = oc_document_add_primer_sequence(doc, "tailed", tailed, NULL);
     CHECK(ti >= 0 && oc_document_primer(doc, ti, &pinf) && strncmp(pinf.bases, "gaattc", 6) == 0
           && pinf.length == 22);
+    /* The wizard's path: sites first (a preview on a copy), then the add. */
+    OCPrimerSite sites[4];
+    CHECK(oc_primer_sites(doc, tailed, sites, 4) >= 1 && sites[0].start == 500 && sites[0].length == 22
+          && sites[0].strand == OC_STRAND_FORWARD && sites[0].mismatches == 0);
+    OCDocument *copy = oc_document_new();
+    CHECK(oc_document_copy(doc, copy) && oc_document_length(copy) == oc_document_length(doc)
+          && oc_document_primer_count(copy) == oc_document_primer_count(doc));
+    const int ci = oc_document_add_primer_at(copy, "wiz", tailed, "#ff8800", "His6 & TEV", &sites[0]);
+    CHECK(ci == oc_document_primer_count(doc) && oc_document_primer(copy, ci, &pinf)
+          && strcmp(pinf.color, "#ff8800") == 0 && strcmp(pinf.description, "His6 & TEV") == 0 && pinf.start == 500 && pinf.length == 22);
+    CHECK(oc_document_primer_count(doc) == ci);   /* the original is untouched */
+    oc_document_undo(copy);
+    CHECK(oc_document_primer_count(copy) == ci);
+    /* A site across the origin is a site on a circle; past the end of a linear sequence it isn't. */
+    OCPrimerSite wrap = {oc_document_length(doc) - 5, 22, OC_STRAND_FORWARD, 0};
+    const int wi = oc_document_add_primer_at(copy, "wrap", tailed, NULL, NULL, &wrap);
+    CHECK(wi >= 0 && oc_document_primer(copy, wi, &pinf) && pinf.start == oc_document_length(doc) - 5
+          && pinf.length == 22);
+    oc_document_set_circular(copy, false);
+    CHECK(oc_document_primer_count(copy) == wi);   /* a linear sequence can't hold it */
+    CHECK(oc_document_add_primer_at(copy, "bad", tailed, NULL, NULL, &wrap) == -1);
+    OCPrimerSite bad = {oc_document_length(doc), 22, OC_STRAND_FORWARD, 0};
+    CHECK(oc_document_add_primer_at(copy, "bad", tailed, NULL, NULL, &bad) == -1);
+    CHECK(oc_primer_sites(doc, "", sites, 4) == 0);
+    oc_document_free(copy);
+
+    /* A wild site (off the sequence, or so big that start + length overflows)
+       is refused everywhere, before any arithmetic on it. */
+    {
+        const OCPrimerSite wild[] = {{-1, 22, OC_STRAND_FORWARD, 0},
+                                     {oc_document_length(doc), 22, OC_STRAND_FORWARD, 0},
+                                     {5, 0, OC_STRAND_FORWARD, 0},
+                                     {5, -3, OC_STRAND_FORWARD, 0},
+                                     {INT_MAX - 5, 22, OC_STRAND_FORWARD, 0},
+                                     {5, INT_MAX, OC_STRAND_FORWARD, 0}};
+        for (size_t w = 0; w < sizeof wild / sizeof wild[0]; ++w) {
+            OCPrimerSite fitted = {1, 1, 0, 0};
+            OCFrameCheck frame;
+            CHECK(oc_document_add_primer_at(doc, "wild", tailed, NULL, NULL, &wild[w]) == -1);
+            CHECK(!oc_document_set_pending_primer(doc, "wild", tailed, NULL, &wild[w]));
+            char *same = oc_primer_fit_tm(doc, tailed, &wild[w], 65, &fitted);
+            CHECK(same && strcmp(same, tailed) == 0 && fitted.length == 0);
+            oc_string_free(same);
+            CHECK(oc_pcr_product_length(doc, &wild[w], 0, &sites[0], 0) == -1);
+            CHECK(oc_pcr_product_length(doc, &sites[0], 0, &wild[w], 0) == -1);
+            oc_primer_part_frame(doc, &wild[w], 6, 0, 3, true, &frame);
+            CHECK(!frame.applies);
+        }
+    }
+
+    /* A missing string is an empty one, never a crash. */
+    {
+        char *err = NULL;
+        OCDocument *blank = oc_document_new();
+        CHECK(!oc_document_load(blank, NULL, &err) && err);
+        oc_string_free(err);
+        err = NULL;
+        CHECK(!oc_document_save(doc, NULL, OC_FORMAT_GENBANK, &err) && err);
+        oc_string_free(err);
+        oc_document_set_enzyme_hidden(doc, NULL, true);
+        oc_document_show_enzyme_set(doc, NULL, 3);
+        oc_document_show_only_enzymes(doc, NULL, 3, 6);
+        CHECK(!oc_document_new_sequence(blank, NULL, NULL, false));
+        oc_document_find_next(doc, NULL, NULL);
+        oc_document_rename(doc, NULL);
+        CHECK(oc_document_add_primer_sequence(doc, NULL, NULL, &err) == -1 && err);
+        oc_string_free(err);
+        oc_document_free(blank);
+    }
+
+    /* Fitting to a Tm keeps the tail and the 3' end; a primer can't pair with itself. */
+    {
+        OCPrimerSite fitted;
+        char *hot = oc_primer_fit_tm(doc, tailed, &sites[0], 72, &fitted);
+        CHECK(hot && strlen(hot) > strlen(tailed) && strncmp(hot, tailed, 6) == 0
+              && fitted.start + fitted.length == sites[0].start + sites[0].length);
+        oc_string_free(hot);
+        CHECK(oc_pcr_product_length(doc, &sites[0], 0, &sites[0], 0) == -1);
+        OCFrameCheck frame;
+        oc_primer_part_frame(doc, &sites[0], 6, 0, 3, true, &frame);
+        CHECK(frame.applies && frame.cds[0] != '\0');   /* a CDS meets this primer's junction */
+    }
+
+    /* A pending primer is drawn but isn't part of the document. */
+    {
+        const int primers = oc_document_primer_count(doc);
+        const bool couldUndo = oc_document_can_undo(doc), wasModified = oc_document_is_modified(doc);
+        OCMapLayout *plain = oc_map_layout_new(doc, 900, 700, false, measure, NULL);
+        OCScene *before = oc_map_layout_render(plain, doc);
+        CHECK(oc_document_set_pending_primer(doc, "pending", tailed, "#00aa00", &sites[0])
+              && oc_document_has_pending_primer(doc));
+        OCMapLayout *pending = oc_map_layout_new(doc, 900, 700, false, measure, NULL);
+        OCScene *after = oc_map_layout_render(pending, doc);
+        CHECK(oc_scene_item_count(after) > oc_scene_item_count(before));
+        CHECK(oc_document_primer_count(doc) == primers && oc_document_can_undo(doc) == couldUndo
+              && oc_document_is_modified(doc) == wasModified);
+        CHECK(!oc_document_set_pending_primer(doc, "bad", tailed, NULL, &bad) && !oc_document_has_pending_primer(doc));
+        CHECK(oc_document_set_pending_primer(doc, "pending", tailed, NULL, &sites[0]));
+        oc_document_set_selection(doc, 0, 0);   /* a selection change keeps it */
+        CHECK(oc_document_has_pending_primer(doc));
+        oc_document_add_primer_at(doc, "real", tailed, NULL, NULL, &sites[0]);   /* a sequence change drops it */
+        CHECK(!oc_document_has_pending_primer(doc) && oc_document_primer_count(doc) == primers + 1);
+        oc_document_undo(doc);
+        CHECK(oc_document_primer_count(doc) == primers);
+        oc_document_clear_pending_primer(doc);
+        oc_scene_free(before);
+        oc_scene_free(after);
+        oc_map_layout_free(plain);
+        oc_map_layout_free(pending);
+    }
     oc_string_free(pb);
     CHECK(oc_document_add_primer_sequence(doc, "short", "ACGT", NULL) == -1);
     char *hits = oc_search_folder(argv[1], "GAATTC");
@@ -269,6 +384,54 @@ int main(int argc, char **argv)
     oc_document_free(trace);
     oc_document_free(product);
     oc_document_free(pcr);
+
+    /* A gel lane by lane: ladder, uncut, and a digest whose bands add up. */
+    OCGel *lanes = oc_gel_new(0);
+    oc_gel_add_lane(lanes, doc, NULL, 0);
+    const char *ecori[] = {"EcoRI"};
+    oc_gel_add_lane(lanes, doc, ecori, 1);
+    int bands[64];
+    CHECK(oc_gel_lane_bands(lanes, 0, bands, 64) > 5);
+    CHECK(oc_gel_lane_bands(lanes, 1, bands, 64) == 2 && bands[0] == 3188 && bands[1] == 3188);
+    int nb = oc_gel_lane_bands(lanes, 2, bands, 64), sum = 0;
+    for (int i = 0; i < nb; ++i) sum += bands[i];
+    CHECK(nb >= 1 && sum == 3188);
+    for (int i = 1; i < nb; ++i) CHECK(bands[i - 1] >= bands[i]);
+    CHECK(oc_gel_lane_bands(lanes, 3, bands, 64) == 0);
+    CHECK(oc_gel_lane_count(lanes) == 3 && oc_gel_lane_uncut_circular(lanes, 1) && !oc_gel_lane_uncut_circular(lanes, 2));
+    OCGelBand info[64];
+    CHECK(oc_gel_lane_band_info(lanes, 0, info, 64) > 5);
+    for (int i = 1; i < oc_gel_lane_band_info(lanes, 0, info, 64); ++i) CHECK(info[i - 1].run <= info[i].run);
+    /* Uncut: the nicked open circle (fainter) behind the supercoiled plasmid,
+       which runs ahead of a linear 3,188 bp. */
+    CHECK(oc_gel_lane_band_info(lanes, 1, info, 64) == 2 && info[0].form == OC_GEL_OPEN_CIRCULAR
+          && info[1].form == OC_GEL_SUPERCOILED && info[0].run < info[1].run && info[0].intensity < info[1].intensity
+          && info[1].run > oc_gel_run_fraction(3188, 1) && info[0].run < oc_gel_run_fraction(3188, 1));
+    CHECK(oc_gel_run_fraction(500, 1) > oc_gel_run_fraction(5000, 1) && oc_gel_run_fraction(500, 1) <= 1);
+    /* A denser gel holds the same band back; small ones run off a thin one. */
+    CHECK(oc_gel_run_fraction(1000, 2) < oc_gel_run_fraction(1000, 0.7));
+    CHECK(oc_gel_run_fraction(50, 0.7) > 1 && oc_gel_run_fraction(50, 3) < 1);
+    CHECK(oc_gel_run_fraction(15000, 1.2) < oc_gel_run_fraction(10000, 1.2));
+    CHECK(oc_gel_run_fraction(40000, 1) > 0 && oc_gel_run_fraction(30000, 1) > oc_gel_run_fraction(40000, 1));
+    CHECK(oc_gel_percent_count() >= 4 && oc_gel_percent(0) < oc_gel_percent(1));
+    oc_gel_set_percent(lanes, 2);
+    CHECK(oc_gel_lane_band_info(lanes, 1, info, 64) == 2 && info[0].run > 0);
+    OCScene *gs = oc_gel_scene(lanes, 400, 500, false, measure, NULL);
+    CHECK(gs != NULL && oc_scene_item_count(gs) > 10);
+    oc_scene_free(gs);
+    oc_gel_free(lanes);
+
+    /* PCR cycling for pOC-demo's seq-fwd and mcs-rev, in Q5 buffer. */
+    OCPcrProgram prog;
+    oc_pcr_program("ACGTACAATGTGTTCGAAACAGGT", "CGGCTCTCTTTACACGGCTC", 1530, OC_POLYMERASE_Q5, 30, &prog);
+    CHECK(prog.tm1 == 66 && prog.tm2 == 68 && prog.annealing == 67 && prog.step_count == 6);
+    CHECK(strcmp(prog.steps[2].name, "Annealing") == 0 && prog.steps[2].cycled);
+    char *md = oc_pcr_program_markdown("ACGTACAATGTGTTCGAAACAGGT", "CGGCTCTCTTTACACGGCTC", 1530, OC_POLYMERASE_TAQ,
+                                       30, "Taq");
+    CHECK(strncmp(md, "Taq\n\n| Step |", 13) == 0 && strstr(md, "| Annealing | 54 °C | 30 s |") != NULL);
+    oc_string_free(md);
+    oc_pcr_program("ACGN", "CGGCTCTCTTTACACGGCTC", 1530, OC_POLYMERASE_Q5, 30, &prog);
+    CHECK(prog.step_count == 0);
 
     char *status = oc_document_status_text(doc);
     CHECK(strstr(status, "3,188 bp") != NULL);

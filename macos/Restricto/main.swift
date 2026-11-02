@@ -115,6 +115,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .separator(),
             item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]),
         ])
+        // Zoom In, Zoom Out and Actual Size, before Enter Full Screen.
+        if let view = main.item(withTitle: "View")?.submenu {
+            let at = view.numberOfItems - 1
+            for (i, zoomItem) in (Zoom.menuItems() + [NSMenuItem.separator()]).enumerated() {
+                view.insertItem(zoomItem, at: at + i)
+            }
+        }
         ToolMenus.install(in: main)
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"))

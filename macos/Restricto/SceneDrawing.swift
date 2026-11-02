@@ -6,10 +6,31 @@ import RestrictoCore
 
 /// A map layout that follows the document's Map Display options, with the
 /// translation's ORFs as arrows while it is on.
-func newMapLayout(_ document: CoreDocument, size: CGSize, dark: Bool) -> OpaquePointer? {
-    oc_map_layout_new_frames(document.handle, size.width, size.height, dark, document.mapShowsEnzymes,
-                             document.mapShowsPrimers, document.mapHiddenTypes.sorted().joined(separator: ","),
-                             Int32(document.frames), measureText, nil)
+func newMapLayout(_ document: CoreDocument, size: CGSize, dark: Bool, textScale: Double = 1) -> OpaquePointer? {
+    let types = document.mapHiddenTypes.sorted().joined(separator: ",")
+    func layout(_ scale: Double) -> OpaquePointer? {
+        oc_map_layout_new_scaled(document.handle, size.width, size.height, dark, document.mapShowsEnzymes,
+                                 document.mapShowsPrimers, types, Int32(document.frames), scale, measureText, nil)
+    }
+    var map = layout(textScale)
+    // Zoomed in, the text grows as far as the circle keeps 85% of its size:
+    // the bigger labels need room beside it, so in a small map they grow less.
+    if textScale > 1, let current = map, oc_map_layout_is_circular(current) {
+        let full = layout(1)
+        let minimum = (full.map { oc_map_layout_radius($0) } ?? 0) * 0.85
+        if let full = full { oc_map_layout_free(full) }
+        var scale = textScale - 0.1
+        while let m = map, oc_map_layout_radius(m) < minimum - 1, scale > 1 {
+            oc_map_layout_free(m)
+            map = layout(scale)
+            scale -= 0.1
+        }
+        if let m = map, oc_map_layout_radius(m) < minimum - 1 {
+            oc_map_layout_free(m)
+            map = layout(1)
+        }
+    }
+    return map
 }
 
 /// Draws a scene into a bitmap image now, so the scene can be freed.

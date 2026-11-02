@@ -172,7 +172,9 @@ SequenceLayout::SequenceLayout(const oc::Sequence &seq, const std::vector<CutSit
         for (const Range &r : f.ranges) {
             if (r.length() <= 0)
                 continue;
-            for (int li = r.start / m_bpl; li < int(m_lines.size()) && m_lines[size_t(li)].start < r.end; ++li) {
+            // (A file can put a range before base 1; it starts on line 0.)
+            for (int li = std::max(0, r.start / m_bpl); li < int(m_lines.size()) && m_lines[size_t(li)].start < r.end;
+                 ++li) {
                 const Line &line = m_lines[size_t(li)];
                 const int a = std::max(r.start, line.start) - line.start;
                 const int b = std::min(r.end, line.start + line.len) - line.start;
@@ -192,23 +194,35 @@ SequenceLayout::SequenceLayout(const oc::Sequence &seq, const std::vector<CutSit
     // within each line, with room for the name past the 3' end.
     for (size_t pi = 0; m_opt.primers && pi < m_seq.primers.size(); ++pi) {
         const Primer &pr = m_seq.primers[pi];
+        const bool circular = m_seq.circular;
         const Range bind = pr.binding;
-        if (bind.length() <= 0 || bind.end > m_n)
+        if (bind.length() <= 0 || bind.end > (circular ? bind.start + m_n : m_n))
             continue;
         const bool fwd = pr.strand != Strand::Reverse;
         const int tail = std::max(0, int(pr.bases.size()) - bind.length());
-        const Range r = fwd ? Range{std::max(0, bind.start - tail), bind.end}
-                            : Range{bind.start, std::min(m_n, bind.end + tail)};
+        // On a circle the site (across the origin: past the end) and its tail
+        // can run past either end; each turn is drawn where it falls.
+        Range r = fwd ? Range{bind.start - tail, bind.end} : Range{bind.start, bind.end + tail};
+        if (!circular)
+            r = {std::max(0, r.start), std::min(m_n, r.end)};
         const int nameCols = int(std::ceil((tm.width(pr.name, m_primerNameFont) + 6) / std::max(1.0, m_charW)));
-        for (int li = r.start / m_bpl; li < int(m_lines.size()) && m_lines[size_t(li)].start < r.end; ++li) {
-            Line &line = m_lines[size_t(li)];
-            const int a = std::max(r.start, line.start) - line.start;
-            const int b = std::min(r.end, line.start + line.len) - line.start;
-            if (b <= a)
+        for (int shift : {0, m_n, -m_n}) {
+            if (shift != 0 && !circular)
+                break;
+            const Range here{std::max(0, r.start - shift), std::min(m_n, r.end - shift)};
+            if (here.length() <= 0)
                 continue;
-            const int ba = std::clamp(bind.start - line.start, a, b), bb = std::clamp(bind.end - line.start, a, b);
-            const bool head = fwd ? bind.end == line.start + bb && bb > ba : bind.start == line.start + ba && bb > ba;
-            line.primers.push_back({int(pi), 0, a, b, ba, bb, head ? nameCols : 0, head, fwd});
+            const Range b0{bind.start - shift, bind.end - shift};
+            for (int li = here.start / m_bpl; li < int(m_lines.size()) && m_lines[size_t(li)].start < here.end; ++li) {
+                Line &line = m_lines[size_t(li)];
+                const int a = std::max(here.start, line.start) - line.start;
+                const int b = std::min(here.end, line.start + line.len) - line.start;
+                if (b <= a)
+                    continue;
+                const int ba = std::clamp(b0.start - line.start, a, b), bb = std::clamp(b0.end - line.start, a, b);
+                const bool head = fwd ? b0.end == line.start + bb && bb > ba : b0.start == line.start + ba && bb > ba;
+                line.primers.push_back({int(pi), 0, a, b, ba, bb, head ? nameCols : 0, head, fwd, shift});
+            }
         }
     }
     for (Line &line : m_lines) {
@@ -712,6 +726,7 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
         // with a nick where it leaves the arrow.
         for (const PrimerPiece &pc : l.primers) {
             const Primer &pr = m_seq.primers[size_t(pc.primer)];
+            const Color primerColor = Color::parse(pr.color, m_theme.primer);
             Rect r = primerRect(l, pc);
             r.y -= scrollY;
             const double ym = r.y + r.h / 2;
@@ -727,12 +742,12 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
                     poly = {{x0 - head, ym}, {x0, r.y}, {x1, r.y}, {x1, r.y + r.h}, {x0, r.y + r.h}};
                 else
                     poly = {{x0, r.y}, {x1, r.y}, {x1, r.y + r.h}, {x0, r.y + r.h}};
-                s.polygon(poly, m_theme.primer.withAlpha(0.1), m_theme.primer, 1.4);
+                s.polygon(poly, primerColor.withAlpha(0.1), primerColor, 1.4);
             }
             const double lift = pc.top ? -5 : 5;   // the tail leaves the strand
             for (int c = pc.a; c < pc.b; ++c) {
                 const int pos = l.start + c;
-                const int i = pc.top ? pos - first : first - pos;   // index in the primer, 5' to 3'
+                const int i = pc.top ? pos + pc.shift - first : first - pos - pc.shift;   // index in the primer, 5' to 3'
                 if (i < 0 || i >= int(pr.bases.size()))
                     continue;
                 const char typed = pr.bases[size_t(i)];   // uppercase unless typed in mixed case
@@ -750,7 +765,7 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
                 const double tx0 = leftTail ? boundaryX(pc.a) : boundaryX(pc.bindB);
                 const double tx1 = leftTail ? boundaryX(pc.bindA) : boundaryX(pc.b);
                 const double ty = ym + lift + (pc.top ? r.h / 2 - 1 : -r.h / 2 + 1);
-                const Color tc = m_theme.primer.withAlpha(0.8);
+                const Color tc = primerColor.withAlpha(0.8);
                 const bool joins = pc.bindB > pc.bindA;
                 if (leftTail) {
                     s.line({tx0, ty}, {tx1 - (joins ? 3 : 0), ty}, tc, 1.2);
@@ -766,11 +781,11 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
             if (pc.nameCols > 0) {
                 if (pc.top) {
                     const double nx = boundaryX(pc.bindB) + r.h * 0.6 + 4;
-                    s.label(pr.name, {nx, ym}, m_primerNameFont, m_theme.primer, HAlign::Left, VAlign::Middle);
+                    s.label(pr.name, {nx, ym}, m_primerNameFont, primerColor, HAlign::Left, VAlign::Middle);
                 } else {
                     const double nx = boundaryX(pc.bindA) - r.h * 0.6 - 4;
                     if (nx - pc.nameCols * m_charW >= m_left - m_endW)
-                        s.label(pr.name, {nx, ym}, m_primerNameFont, m_theme.primer, HAlign::Right, VAlign::Middle);
+                        s.label(pr.name, {nx, ym}, m_primerNameFont, primerColor, HAlign::Right, VAlign::Middle);
                 }
             }
         }

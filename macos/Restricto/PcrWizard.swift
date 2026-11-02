@@ -1,0 +1,671 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// The PCR wizard: a window with the reaction's inputs on the left (the two
+// primers and the polymerase) and two tabs on the right: the template's map,
+// where primers can be clicked, and, once the pair makes one, the product
+// drawn as it will be: its map and sequence, tails and all. The template's
+// window, dimmed behind, selects the stretch that gets amplified. Open
+// Product opens the product as a new, unsaved sequence.
+import AppKit
+import RestrictoCore
+
+final class PcrWizard: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
+    private let template: CoreDocument
+    /// The product as drawn on the right; refilled as the inputs change.
+    private let preview = CoreDocument()
+    private var hasProduct = false
+
+    private let forwardPopup = NSPopUpButton()
+    private let reversePopup = NSPopUpButton()
+    private let polymerasePopup = NSPopUpButton()
+    /// Green when the pair makes a product; otherwise what's missing.
+    private let status = NSTextField(wrappingLabelWithString: "")
+    private let typedField = NSTextField()
+    private let typedError = NSTextField(wrappingLabelWithString: "")
+    private let info = NSTextField(wrappingLabelWithString: "")
+    /// The suggested cycling, step by step, as NEB suggests it.
+    private let programGrid = NSGridView(numberOfColumns: 4, rows: 0)
+    private let programNote = NSTextField(wrappingLabelWithString: "")
+    private let cyclesField = NSTextField(labelWithString: "30 cycles")
+    private let cyclesStepper = NSStepper()
+    private let cyclesRow = NSStackView()
+    /// What Copy puts on the clipboard: a Markdown table under a title line.
+    private var programMarkdown = ""
+    private var stepCount = 0
+    private let warnings = NSTextField(wrappingLabelWithString: "")
+    private let openButton = NSButton(title: "Open Product", target: nil, action: nil)
+    private let addPrimerButton = NSButton(title: "Add Primer…", target: nil, action: nil)
+    private let productHeading = NSTextField(labelWithString: "PRODUCT")
+    private let programRow = NSStackView()
+    /// Vector: the template's map, where primers can be clicked. Product:
+    /// the product's map over its sequence, once the pair makes one.
+    private let tabs = NSSegmentedControl(labels: ["Vector", "Product"], trackingMode: .selectOne,
+                                          target: nil, action: nil)
+    private var vectorMap: MapView!
+    private var mapView: MapView!
+    private var sequenceView: SequenceView!
+    private let productSplit = NSSplitView()
+    /// Opens the template's Primers pane to add a primer.
+    private let onAddPrimer: () -> Void
+    /// The template's window: the product opens as a tab there.
+    private weak var parentWindow: NSWindow?
+    /// Darkens the template's window while the wizard is in front.
+    private var dim: NSWindow?
+    private var parentResize: NSObjectProtocol?
+    private var filled = false
+
+    /// Wizards open now, one per template.
+    private static var showing: [PcrWizard] = []
+
+    /// Brings up the wizard for `template`, opening one if there is none.
+    static func show(for template: CoreDocument, near parent: NSWindow?, onAddPrimer: @escaping () -> Void) {
+        if let open = visible.first(where: { $0.template === template }) {
+            open.window?.makeKeyAndOrderFront(nil)
+            return
+        }
+        let wizard = PcrWizard(template: template, onAddPrimer: onAddPrimer)
+        wizard.parentWindow = parent
+        showing.append(wizard)
+        if let parent = parent, let window = wizard.window {
+            // Centred on the template's window at about 80% of its size, named as it is.
+            let f = parent.frame
+            var size = NSSize(width: max(window.minSize.width, f.width * 0.8),
+                              height: max(window.minSize.height, f.height * 0.8))
+            if let screen = (parent.screen ?? NSScreen.main)?.visibleFrame {
+                size.width = min(size.width, screen.width)
+                size.height = min(size.height, screen.height)
+            }
+            window.setFrame(NSRect(x: f.midX - size.width / 2, y: f.midY - size.height / 2,
+                                   width: size.width, height: size.height), display: false)
+            window.title = "PCR · \(Self.withoutExtension(parent.title))"
+            wizard.parentResize = NotificationCenter.default.addObserver(
+                forName: NSWindow.didResizeNotification, object: parent, queue: .main) { [weak wizard] _ in
+                wizard?.followParent()
+            }
+        }
+        wizard.showWindow(nil)
+        // Kept above the template's window, moving with it, so clicking that
+        // window never buries the wizard behind it.
+        if let parent = parent, let window = wizard.window { parent.addChildWindow(window, ordered: .above) }
+        // Nothing focused: Return opens the product until the primer box is clicked.
+        wizard.window?.makeFirstResponder(nil)
+        // The map takes a little over half the height, the sequence the rest.
+        wizard.window?.layoutIfNeeded()
+        let split = wizard.productSplit
+        split.setPosition(split.bounds.height * 0.55, ofDividerAt: 0)
+    }
+
+    private init(template: CoreDocument, onAddPrimer: @escaping () -> Void) {
+        self.template = template
+        self.onAddPrimer = onAddPrimer
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1040, height: 660),
+                              styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered,
+                              defer: false)
+        window.title = "PCR · \(template.name)"
+        window.minSize = NSSize(width: 760, height: 480)
+        window.isReleasedWhenClosed = false
+        // A tool window, never a tab: document windows tab together, and one
+        // opening while this is key must not try to join it.
+        window.tabbingMode = .disallowed
+        super.init(window: window)
+        window.delegate = self
+        window.contentView = buildView()
+        template.observe { [weak self] what in
+            // New, changed or deleted primers on the template.
+            guard let self = self, what & Change.sequence != 0 else { return }
+            self.fillPrimers()
+            self.refresh()
+        }
+        fillPrimers()
+        refresh()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    // MARK: Layout
+
+    private func buildView() -> NSView {
+        func heading(_ text: String) -> NSTextField {
+            let label = NSTextField(labelWithString: text)
+            label.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+            label.textColor = .secondaryLabelColor
+            return label
+        }
+        let title = NSTextField(labelWithString: "PCR")
+        title.font = .systemFont(ofSize: NSFont.systemFontSize + 2, weight: .semibold)
+        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancel(_:)))
+        cancel.keyEquivalent = "\u{1b}"
+        openButton.target = self
+        openButton.action = #selector(openProduct(_:))
+        openButton.bezelColor = .controlAccentColor
+        openButton.keyEquivalent = "\r"
+        let header = NSStackView(views: [title, NSView(), cancel, openButton])
+        header.spacing = 8
+        status.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
+
+        for popup in [forwardPopup, reversePopup, polymerasePopup] {
+            popup.target = self
+            popup.action = #selector(inputsChanged(_:))
+        }
+        for p in 0..<Int32(OC_POLYMERASE_COUNT) { polymerasePopup.addItem(withTitle: takeString(oc_polymerase_name(p))) }
+        polymerasePopup.selectItem(at: Int(OC_POLYMERASE_Q5))
+
+        // A primer typed here is added to the template and picked.
+        typedField.placeholderString = "Type a primer 5′→3′, then Return"
+        typedField.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        typedField.target = self
+        typedField.action = #selector(typedPrimer(_:))
+        typedField.delegate = self
+        typedError.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        typedError.textColor = .systemOrange
+        typedError.isHidden = true
+        let hint = NSTextField(wrappingLabelWithString: "Or click a primer on the map, and shift-click the second.")
+        hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        hint.textColor = .secondaryLabelColor
+
+        info.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        programGrid.rowSpacing = 3
+        programGrid.columnSpacing = 10
+        programNote.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        programNote.textColor = .secondaryLabelColor
+        cyclesField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        cyclesStepper.minValue = 15
+        cyclesStepper.maxValue = 45
+        cyclesStepper.integerValue = 30
+        cyclesStepper.controlSize = .small
+        cyclesStepper.valueWraps = false
+        cyclesStepper.target = self
+        cyclesStepper.action = #selector(inputsChanged(_:))
+        warnings.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        warnings.textColor = .systemOrange
+        addPrimerButton.target = self
+        addPrimerButton.action = #selector(addPrimer(_:))
+        addPrimerButton.controlSize = .small
+        addPrimerButton.toolTip = "Design a primer in the template's Primers pane"
+
+        for label in [productHeading] {
+            label.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+            label.textColor = .secondaryLabelColor
+        }
+        // The program's heading, with a button to copy it for the cycler's notes.
+        let copy = NSButton(title: "Copy", target: self, action: #selector(copyProgram(_:)))
+        copy.controlSize = .small
+        copy.toolTip = "Copy the program as a Markdown table"
+        programRow.setViews([heading("SUGGESTED PROGRAM"), NSView(), copy], in: .leading)
+        cyclesRow.setViews([cyclesField, cyclesStepper], in: .leading)
+        cyclesRow.spacing = 4
+        let inputs = NSStackView(views: [
+            header, status,
+            heading("FORWARD PRIMER"), forwardPopup,
+            heading("REVERSE PRIMER"), reversePopup,
+            typedField, typedError, hint, addPrimerButton,
+            heading("POLYMERASE"), polymerasePopup,
+            productHeading, info, warnings,
+            programRow, programGrid, cyclesRow, programNote,
+        ])
+        inputs.orientation = .vertical
+        inputs.alignment = .leading
+        inputs.spacing = 6
+        inputs.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 16, right: 16)
+        for v in [header, status, forwardPopup, reversePopup, typedField, typedError, hint, polymerasePopup, info,
+                  warnings, programRow, programNote] as [NSView] {
+            v.widthAnchor.constraint(equalTo: inputs.widthAnchor, constant: -32).isActive = true
+        }
+        inputs.setCustomSpacing(10, after: header)
+        inputs.setCustomSpacing(14, after: status)
+        let sidebar = NSView()
+        sidebar.translatesAutoresizingMaskIntoConstraints = false
+        inputs.translatesAutoresizingMaskIntoConstraints = false
+        sidebar.addSubview(inputs)
+        NSLayoutConstraint.activate([
+            sidebar.widthAnchor.constraint(equalToConstant: 300),
+            inputs.topAnchor.constraint(equalTo: sidebar.topAnchor),
+            inputs.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor),
+            inputs.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+            inputs.bottomAnchor.constraint(lessThanOrEqualTo: sidebar.bottomAnchor),
+        ])
+
+        // Vector: the template's own map; clicking a primer picks it.
+        vectorMap = MapView(document: template)
+        vectorMap.onPickPrimer = { [weak self] index, adding in self?.pick(primer: index, adding: adding) }
+
+        // Product: map over sequence, neither editable.
+        mapView = MapView(document: preview)
+        sequenceView = SequenceView(document: preview)
+        sequenceView.isEditable = false
+        let scroll = NSScrollView()
+        scroll.documentView = sequenceView
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+        scroll.contentView.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: scroll.contentView,
+                                               queue: .main) { [weak self] _ in self?.sequenceView.updateSize() }
+        productSplit.isVertical = false
+        productSplit.dividerStyle = .thin
+        productSplit.addArrangedSubview(mapView)
+        productSplit.addArrangedSubview(scroll)
+        // Extra height goes to both; the sequence gives way last.
+        productSplit.setHoldingPriority(.defaultLow, forSubviewAt: 0)
+        productSplit.setHoldingPriority(.defaultLow - 1, forSubviewAt: 1)
+        mapView.heightAnchor.constraint(greaterThanOrEqualToConstant: 200).isActive = true
+        scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
+
+        tabs.target = self
+        tabs.action = #selector(tabChanged(_:))
+        tabs.selectedSegment = 0
+        tabs.setToolTip("The template, with its primers", forSegment: 0)
+        tabs.setToolTip("The product, once the primers make one", forSegment: 1)
+
+        let content = NSView()
+        for v in [tabs, vectorMap!, productSplit] as [NSView] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            content.addSubview(v)
+        }
+        NSLayoutConstraint.activate([
+            tabs.topAnchor.constraint(equalTo: content.topAnchor, constant: 12),
+            tabs.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+        ])
+        for v in [vectorMap!, productSplit] as [NSView] {
+            NSLayoutConstraint.activate([
+                v.topAnchor.constraint(equalTo: tabs.bottomAnchor, constant: 8),
+                v.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+                v.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+                v.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            ])
+        }
+        showTab(0)
+
+        let edge = NSBox()
+        edge.boxType = .separator
+        edge.widthAnchor.constraint(equalToConstant: 1).isActive = true
+        let root = NSStackView(views: [sidebar, edge, content])
+        root.orientation = .horizontal
+        root.spacing = 0
+        root.alignment = .top
+        for v in [sidebar, edge, content] as [NSView] {
+            v.heightAnchor.constraint(equalTo: root.heightAnchor).isActive = true
+        }
+        return root
+    }
+
+    @objc private func tabChanged(_ sender: Any?) { showTab(tabs.selectedSegment) }
+
+    private func showTab(_ i: Int) {
+        tabs.selectedSegment = i
+        vectorMap.isHidden = i != 0
+        productSplit.isHidden = i != 1
+    }
+
+    // MARK: Inputs
+
+    private struct Choice {
+        let index: Int
+        let start: Int
+        let length: Int
+        let forward: Bool
+    }
+
+    /// Lists the template's primers in both popups, after a "Choose" item,
+    /// keeping what was picked when it's still there. At first, a pair is
+    /// picked only when there's just one primer each way.
+    private func fillPrimers() {
+        let keepForward = (forwardPopup.selectedItem?.representedObject as? NSNumber)?.intValue
+        let keepReverse = (reversePopup.selectedItem?.representedObject as? NSNumber)?.intValue
+        let primers = template.primers
+        for (popup, wantForward) in [(forwardPopup, true), (reversePopup, false)] {
+            popup.removeAllItems()
+            popup.autoenablesItems = false
+            popup.addItem(withTitle: wantForward ? "Choose a forward primer" : "Choose a reverse primer")
+            for p in primers {
+                let binds = p.length > 0
+                let forward = p.strand == Int32(OC_STRAND_FORWARD)
+                let place = binds ? "\((p.start + 1).formatted())–\((p.start + p.length).formatted())" : "doesn't bind"
+                popup.addItem(withTitle: "\(p.name)   \(binds ? (forward ? "→" : "←") : "") \(place)")
+                popup.lastItem?.representedObject = NSNumber(value: p.index)
+                // Only primers reading the right way can be picked.
+                popup.lastItem?.isEnabled = binds && forward == wantForward
+            }
+            let usable = popup.itemArray.filter { $0.representedObject != nil && $0.isEnabled }
+            let keep = wantForward ? keepForward : keepReverse
+            if let keep = keep, let item = usable.first(where: { ($0.representedObject as? NSNumber)?.intValue == keep }) {
+                popup.select(item)
+            } else if !filled && usable.count == 1 {
+                popup.select(usable[0])
+            } else {
+                popup.selectItem(at: 0)
+            }
+        }
+        filled = true
+    }
+
+    private func choice(_ popup: NSPopUpButton) -> Choice? {
+        guard let item = popup.selectedItem, item.isEnabled,
+              let index = (item.representedObject as? NSNumber)?.intValue,
+              let p = template.primers.first(where: { $0.index == index }), p.length > 0 else { return nil }
+        return Choice(index: index, start: p.start, length: p.length, forward: p.strand == Int32(OC_STRAND_FORWARD))
+    }
+
+    @objc private func inputsChanged(_ sender: Any?) {
+        window?.makeFirstResponder(nil)
+        refresh()
+    }
+
+    /// A primer clicked on the map goes in for its strand. A plain click
+    /// starts over with it; shift-click adds it to the one already picked.
+    private func pick(primer index: Int, adding: Bool) {
+        guard let p = template.primers.first(where: { $0.index == index }), p.length > 0 else { NSSound.beep(); return }
+        let forward = p.strand == Int32(OC_STRAND_FORWARD)
+        let popup = forward ? forwardPopup : reversePopup
+        guard let item = popup.itemArray.first(where: { ($0.representedObject as? NSNumber)?.intValue == index }) else {
+            return
+        }
+        window?.makeFirstResponder(nil)
+        popup.select(item)
+        if !adding { (forward ? reversePopup : forwardPopup).selectItem(at: 0) }
+        refresh()
+    }
+
+    /// Return in the primer box adds what's typed to the template as a new
+    /// primer (one undo step there) and picks it.
+    @objc private func typedPrimer(_ sender: Any?) {
+        let bases = typedField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !bases.isEmpty else {
+            // Return in an empty box does what Return does elsewhere.
+            window?.makeFirstResponder(nil)
+            if hasProduct { openProduct(sender) }
+            return
+        }
+        let names = Set(template.primers.map { $0.name })
+        var n = 1
+        while names.contains("primer\(n)") { n += 1 }
+        var err: UnsafeMutablePointer<CChar>?
+        let index = oc_document_add_primer_sequence(template.handle, "primer\(n)", bases, &err)
+        if index < 0 {
+            let text = takeString(err)
+            typedError.stringValue = text.isEmpty ? "That primer doesn't bind." : text.prefix(1).uppercased() + text.dropFirst() + "."
+            typedError.textColor = .systemOrange
+            typedError.isHidden = false
+            NSSound.beep()
+            return
+        }
+        typedField.stringValue = ""
+        fillPrimers()
+        pick(primer: Int(index), adding: true)
+        if let p = template.primers.first(where: { $0.index == Int(index) }) {
+            let arrow = p.strand == Int32(OC_STRAND_FORWARD) ? "→" : "←"
+            typedError.stringValue = "Added \(p.name) \(arrow) \((p.start + 1).formatted())–\((p.start + p.length).formatted()) to \(template.name)."
+            typedError.textColor = .secondaryLabelColor
+            typedError.isHidden = false
+        }
+    }
+
+    // Return in the primer box adds the primer rather than opening the product.
+    func controlTextDidBeginEditing(_ obj: Notification) { openButton.keyEquivalent = "" }
+    func controlTextDidEndEditing(_ obj: Notification) { openButton.keyEquivalent = "\r" }
+
+    // MARK: Preview
+
+    /// Makes the product from the picked primers, draws it, and fills in the
+    /// readout and the suggested program.
+    private func refresh() {
+        let primers = template.primers
+        let forward = choice(forwardPopup), reverse = choice(reversePopup)
+        var lines: [String] = []
+        var warn: [String] = []
+        hasProduct = false
+        if let f = forward, let r = reverse {
+            let out = CoreDocument()
+            var err: UnsafeMutablePointer<CChar>?
+            if oc_pcr_product(template.handle, Int32(f.index), Int32(r.index), out.handle, &err) {
+                oc_document_copy(out.handle, preview.handle)
+                oc_document_clear_selection(preview.handle)
+                hasProduct = true
+            } else {
+                let text = takeString(err)
+                warn.append(text.isEmpty ? "These primers make no product." : text.prefix(1).uppercased() + text.dropFirst() + ".")
+            }
+        }
+        let fp = forward.flatMap { f in primers.first { $0.index == f.index } }
+        let rp = reverse.flatMap { r in primers.first { $0.index == r.index } }
+        let polymerase = Int32(max(0, polymerasePopup.indexOfSelectedItem))
+        let polymeraseName = polymerasePopup.titleOfSelectedItem ?? ""
+        let cycles = cyclesStepper.integerValue
+        cyclesField.stringValue = "\(cycles) cycles"
+        var prog = OCPcrProgram()
+        if hasProduct, let f = forward, let r = reverse, let fp = fp, let rp = rp {
+            let length = preview.length
+            var end = r.start + r.length
+            if end <= f.start { end += template.length }   // across the origin
+            let copied = end - f.start
+            lines.append("\(length.formatted()) bp")
+            var copiedLine = "Copies \((f.start + 1).formatted())–\(((end - 1) % template.length + 1).formatted())"
+                + " of \(template.name)"
+            let tails = length - copied
+            if tails > 0 { copiedLine += ", plus \(tails) bp of primer tails" }
+            lines.append(copiedLine)
+            // Annealing Tms in the polymerase's buffer: the parts that bind;
+            // tails join in from cycle 2.
+            let annealF = String(fp.bases.suffix(fp.length)), annealR = String(rp.bases.suffix(rp.length))
+            oc_pcr_program(annealF, annealR, Int32(length), polymerase, Int32(cycles), &prog)
+            if prog.step_count > 0 {
+                let a = Int(prog.tm1), b = Int(prog.tm2)
+                lines.append("Tm \(a) °C (\(fp.name)) · \(b) °C (\(rp.name)), in \(polymeraseName) buffer")
+                if abs(a - b) > 5 {
+                    let hotter = a > b ? fp.name : rp.name
+                    warn.append("The annealing Tms differ by \(abs(a - b)) °C; fit \(hotter) closer in the Primers pane.")
+                }
+                let title = "\(polymeraseName) · \(fp.name) + \(rp.name) · \(length.formatted()) bp"
+                programMarkdown = takeString(oc_pcr_program_markdown(annealF, annealR, Int32(length), polymerase,
+                                                                     Int32(cycles), title))
+            }
+            let pair = takeString(oc_primer_pair_check(fp.bases, rp.bases))
+            warn.append(contentsOf: pair.split(separator: "\n").filter { !$0.hasPrefix("Tm differs") }.map { String($0) })
+            let maxLength = Int(oc_polymerase_max_length(polymerase))
+            if length > maxLength {
+                warn.append("\(polymeraseName) is sold for products up to \((maxLength / 1000).formatted()) kb.")
+            }
+            // The template's window shows what gets copied.
+            template.select(start: f.start, length: copied)
+        } else {
+            // One primer picked: show where it binds.
+            if let one = forward ?? reverse { template.select(start: one.start, length: one.length) }
+        }
+
+        // The cue: green once the pair makes a product, otherwise what's missing.
+        let canPick = forwardPopup.itemArray.contains { $0.representedObject != nil && $0.isEnabled }
+            && reversePopup.itemArray.contains { $0.representedObject != nil && $0.isEnabled }
+        if hasProduct {
+            status.stringValue = "✓ Ready: a \(preview.length.formatted()) bp product. See the Product tab."
+            status.textColor = .systemGreen
+        } else {
+            status.textColor = .secondaryLabelColor
+            if !canPick {
+                status.stringValue = "PCR needs a primer on each strand facing the other. Type one below, or add one "
+                    + "in the template's Primers pane."
+            } else if forward == nil || reverse == nil {
+                status.stringValue = "Pick a forward and a reverse primer."
+            } else {
+                status.stringValue = "No product with these primers."
+                status.textColor = .systemOrange
+            }
+        }
+        tabs.setEnabled(hasProduct, forSegment: 1)
+        if !hasProduct && tabs.selectedSegment == 1 { showTab(0) }
+        info.stringValue = lines.joined(separator: "\n")
+        info.isHidden = lines.isEmpty
+        warnings.stringValue = warn.joined(separator: "\n")
+        warnings.isHidden = warn.isEmpty
+        fillProgram(prog, show: hasProduct)
+        programRow.isHidden = programGrid.isHidden
+        cyclesRow.isHidden = programGrid.isHidden
+        productHeading.isHidden = info.isHidden && warnings.isHidden
+        openButton.isEnabled = hasProduct
+    }
+
+    /// The program as a table: step, temperature, time, and the cycle count
+    /// beside the first repeated step; a note when Ta was held or merged.
+    private func fillProgram(_ prog: OCPcrProgram, show: Bool) {
+        // Removing a grid's rows leaves their views behind, drawn over the next table.
+        programGrid.subviews.forEach { $0.removeFromSuperview() }
+        while programGrid.numberOfRows > 0 { programGrid.removeRow(at: 0) }
+        stepCount = show ? Int(prog.step_count) : 0
+        programGrid.isHidden = stepCount == 0
+        guard stepCount > 0 else { programNote.isHidden = true; return }
+        func cell(_ text: String, header: Bool = false, align: NSTextAlignment = .left) -> NSTextField {
+            let label = NSTextField(labelWithString: text)
+            label.font = header ? .systemFont(ofSize: NSFont.smallSystemFontSize - 1, weight: .semibold)
+                                : .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+            label.textColor = header ? .tertiaryLabelColor : .labelColor
+            label.alignment = align
+            return label
+        }
+        programGrid.addRow(with: [cell("STEP", header: true), cell("°C", header: true, align: .right),
+                                  cell("TIME", header: true, align: .right), cell("", header: true)])
+        var steps = prog.steps
+        var cyclesShown = false
+        withUnsafeBytes(of: &steps) { raw in
+            let all = raw.bindMemory(to: OCPcrStep.self)
+            for i in 0..<stepCount {
+                var step = all[i]
+                let name = withUnsafeBytes(of: &step.name) { String(decoding: $0.prefix(while: { $0 != 0 }), as: UTF8.self) }
+                var repeats = ""
+                if step.cycled && !cyclesShown {
+                    repeats = "× \(prog.cycles)"
+                    cyclesShown = true
+                }
+                let row = programGrid.addRow(with: [cell(name), cell("\(step.celsius)", align: .right),
+                                                    cell(takeString(oc_format_seconds(step.seconds)), align: .right),
+                                                    cell(repeats)])
+                // The repeated steps stand out from the ones done once.
+                if !step.cycled {
+                    for c in 0..<row.numberOfCells {
+                        (row.cell(at: c).contentView as? NSTextField)?.textColor = .secondaryLabelColor
+                    }
+                }
+            }
+        }
+        var notes: [String] = []
+        if prog.capped { notes.append("Annealing held at its highest for this polymerase.") }
+        if prog.two_step { notes.append("Primers this hot anneal at the extension temperature, so the cycle has two steps.") }
+        programNote.stringValue = notes.joined(separator: " ")
+        programNote.isHidden = notes.isEmpty
+    }
+
+    // MARK: Actions
+
+    @objc private func openProduct(_ sender: Any?) {
+        guard hasProduct else { NSSound.beep(); return }
+        let product = CoreDocument()
+        oc_document_copy(preview.handle, product.handle)
+        oc_document_clear_selection(product.handle)
+        // Open it from the template's window, so it tabs there, then close.
+        parentWindow?.makeKeyAndOrderFront(nil)
+        SequenceDocument.open(product)
+        close()
+    }
+
+    @objc private func cancel(_ sender: Any?) { close() }
+
+    @objc private func copyProgram(_ sender: Any?) {
+        guard stepCount > 0 else { NSSound.beep(); return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(programMarkdown, forType: .string)
+    }
+
+    @objc private func addPrimer(_ sender: Any?) { onAddPrimer() }
+
+    /// File > New from Bases works from the template's window; pass it on
+    /// rather than greying it out while the wizard is in front.
+    @objc func newFromBases(_ sender: Any?) {
+        (parentWindow?.windowController as? DocumentWindowController)?.newFromBases(sender)
+    }
+
+    /// "pOC-demo.dna" as "pOC-demo"; only sequence-file extensions go, so a
+    /// name like "pUC19 v2.1" stays whole.
+    private static func withoutExtension(_ title: String) -> String {
+        let ext = (title as NSString).pathExtension.lowercased()
+        let known: Set<String> = ["dna", "gb", "gbk", "genbank", "embl", "emb", "fasta", "fa", "fna", "ape", "seq"]
+        return known.contains(ext) ? (title as NSString).deletingPathExtension : title
+    }
+
+    // MARK: Following the template's window
+
+    /// Re-centres the wizard on the template's window at 80% of its size
+    /// when that window is resized, and moves the dark layer with it.
+    private func followParent() {
+        guard let parent = parentWindow, let window = window else { return }
+        dim?.setFrame(parent.frame, display: true)
+        let f = parent.frame
+        let size = NSSize(width: max(window.minSize.width, f.width * 0.8),
+                          height: max(window.minSize.height, f.height * 0.8))
+        window.setFrame(NSRect(x: f.midX - size.width / 2, y: f.midY - size.height / 2,
+                               width: size.width, height: size.height), display: true)
+        // The content may need more than asked for; centre what it took.
+        let actual = window.frame.size
+        if actual != size {
+            window.setFrameOrigin(NSPoint(x: f.midX - actual.width / 2, y: f.midY - actual.height / 2))
+        }
+    }
+
+    // MARK: Dimming
+
+    func windowDidBecomeKey(_ notification: Notification) { setDimmed(true) }
+    func windowDidResignKey(_ notification: Notification) { setDimmed(false) }
+
+    /// Fades the template's window toward black while the wizard is in
+    /// front, so the wizard reads clearly; clicks still go through.
+    private func setDimmed(_ on: Bool) {
+        guard let parent = parentWindow, parent.isVisible else { return }
+        if on && dim == nil {
+            let overlay = NSWindow(contentRect: parent.frame, styleMask: .borderless, backing: .buffered, defer: false)
+            overlay.isOpaque = false
+            overlay.hasShadow = false
+            overlay.ignoresMouseEvents = true
+            overlay.isReleasedWhenClosed = false
+            overlay.backgroundColor = NSColor.black.withAlphaComponent(0.45)
+            overlay.alphaValue = 0
+            parent.addChildWindow(overlay, ordered: .above)
+            dim = overlay
+            // The wizard goes back on top of the dark layer.
+            if let window = window, window.parent === parent {
+                parent.removeChildWindow(window)
+                parent.addChildWindow(window, ordered: .above)
+            }
+        }
+        guard let overlay = dim else { return }
+        overlay.setFrame(parent.frame, display: false)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            overlay.animator().alphaValue = on ? 1 : 0
+        }
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        if let overlay = dim {
+            overlay.parent?.removeChildWindow(overlay)
+            overlay.orderOut(nil)
+            dim = nil
+        }
+        if let observer = parentResize { NotificationCenter.default.removeObserver(observer) }
+        if let window = window { window.parent?.removeChildWindow(window) }
+        // Let go after the close finishes: dropping the last reference here
+        // would free the window while it's still closing.
+        DispatchQueue.main.async { Self.showing.removeAll { $0 === self } }
+    }
+
+    // MARK: Launch check
+
+    /// Wizards not yet closed (a closed one lingers in `showing` until the next turn).
+    private static var visible: [PcrWizard] { showing.filter { $0.window?.isVisible == true } }
+    static var isAnyOpen: Bool { !visible.isEmpty }
+    static var openWindows: [NSWindow] { visible.compactMap { $0.window } }
+    /// The product length each open wizard shows (0 for none).
+    static var productLengths: [Int] { visible.map { $0.hasProduct ? $0.preview.length : 0 } }
+    static func openAll() { visible.forEach { $0.openProduct(nil) } }
+    static func cancelAll() { visible.forEach { $0.cancel(nil) } }
+    /// As clicking primer `index` on the vector map (shift-clicking when `adding`).
+    static func pickOnMap(_ index: Int, adding: Bool) { visible.forEach { $0.pick(primer: index, adding: adding) } }
+    /// Steps in the program each open wizard suggests (0 for none).
+    static var programSteps: [Int] { visible.map { $0.stepCount } }
+    static var productTabEnabled: Bool { visible.first?.tabs.isEnabled(forSegment: 1) ?? false }
+}

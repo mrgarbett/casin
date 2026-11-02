@@ -61,8 +61,12 @@ struct Feature {
 struct Primer {
     std::string name;
     std::string bases;
+    // On the top strand. On a circular sequence a site across the origin
+    // runs past the end: start < length < end, and it goes on from base 0.
     Range binding;
     Strand strand = Strand::Forward;
+    std::string color = {};   // "#rrggbb", or empty for the theme's primer colour
+    std::string description = {};
 };
 
 class Sequence {
@@ -79,6 +83,16 @@ public:
     std::vector<Primer> primers;
     // How this construct was made, oldest step first ("2026-10-27 PCR with ...").
     std::vector<std::string> history;
+    // SnapGene packets this program doesn't read (history, alignments, ...),
+    // kept verbatim with the bases they were read with. They are written
+    // back only while the bases are unchanged, since they may refer to
+    // positions.
+    struct ExtraPacket {
+        int type = 0;
+        std::string payload;
+    };
+    std::vector<ExtraPacket> snapgeneExtra;
+    std::string snapgeneExtraBases;
 
     int length() const { return int(bases.size()); }
     bool empty() const { return bases.empty(); }

@@ -8,6 +8,7 @@ final class MapView: NSView {
     private var layout: OpaquePointer?
     private var layoutSize = CGSize.zero
     private var layoutDark = false
+    private var layoutZoom = 1.0
     // drag state
     private var selecting = false
     private var anchor = 0
@@ -17,18 +18,21 @@ final class MapView: NSView {
     var onHoverBase: ((Int) -> Void)?
     /// Called with a feature's index when it is double-clicked.
     var onEditFeature: ((Int) -> Void)?
-    /// While the size keeps changing (a side panel sliding open), the old
-    /// layout is drawn, centred, and the new one waits until the size settles.
-    private var lastSizeChange = Date.distantPast
-    private var pendingRelayout: DispatchWorkItem?
+    /// Called with a primer's index when it is clicked, and whether shift
+    /// was down. Without it, a click on a primer selects where it binds.
+    var onPickPrimer: ((Int, Bool) -> Void)?
 
     init(document: CoreDocument) {
         self.document = document
         super.init(frame: NSRect(x: 0, y: 0, width: 520, height: 520))
         document.observe { [weak self] what in
             guard let self = self else { return }
-            if what & (Change.sequence | Change.enzymes) != 0 { self.invalidateLayout() }
+            if what & (Change.sequence | Change.enzymes | Change.pending) != 0 { self.invalidateLayout() }
             self.needsDisplay = true
+        }
+        // ⌘+ and ⌘−: the map's text grows and shrinks; its geometry fits.
+        NotificationCenter.default.addObserver(forName: Zoom.changed, object: nil, queue: .main) { [weak self] _ in
+            self?.invalidateLayout()
         }
     }
 
@@ -43,9 +47,15 @@ final class MapView: NSView {
         didSet { if trailingInset != oldValue { invalidateLayout() } }
     }
 
-    /// The size the map is laid out in: the view less the trailing inset.
+    /// Room kept free along the bottom (the status pill floats there when
+    /// the map is stacked over the sequence).
+    var bottomInset: CGFloat = 0 {
+        didSet { if bottomInset != oldValue { invalidateLayout() } }
+    }
+
+    /// The size the map is laid out in: the view less the insets.
     private var mapSize: CGSize {
-        CGSize(width: max(1, bounds.width - trailingInset), height: bounds.height)
+        CGSize(width: max(1, bounds.width - trailingInset), height: max(1, bounds.height - bottomInset))
     }
 
     /// An event's point in the map's own coordinates.
@@ -69,23 +79,16 @@ final class MapView: NSView {
 
     private func ensureLayout() -> OpaquePointer? {
         let dark = isDarkAppearance
-        if let current = layout, layoutDark == dark, layoutSize != mapSize {
-            let now = Date()
-            let changing = now.timeIntervalSince(lastSizeChange) < 0.25
-            lastSizeChange = now
-            if changing {
-                pendingRelayout?.cancel()
-                let work = DispatchWorkItem { [weak self] in self?.invalidateLayout() }
-                pendingRelayout = work
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
-                return current
-            }
-        }
-        if layout == nil || layoutSize != mapSize || layoutDark != dark {
+        // Laid out afresh at every size, including each frame of a side
+        // panel sliding open: it takes well under a millisecond, and the map
+        // then ends exactly where it will stay, with no snap at the end.
+        let zoom = Zoom.level
+        if layout == nil || layoutSize != mapSize || layoutDark != dark || layoutZoom != zoom {
             if let old = layout { oc_map_layout_free(old) }
-            layout = newMapLayout(document, size: mapSize, dark: dark)
+            layout = newMapLayout(document, size: mapSize, dark: dark, textScale: zoom)
             layoutSize = mapSize
             layoutDark = dark
+            layoutZoom = zoom
         }
         return layout
     }
@@ -94,16 +97,6 @@ final class MapView: NSView {
         guard let ctx = NSGraphicsContext.current?.cgContext, let layout = ensureLayout(),
               let scene = oc_map_layout_render(layout, document.handle) else { return }
         defer { oc_scene_free(scene) }
-        if layoutSize != mapSize {
-            // An old layout while the size settles: fill the view, centre the map.
-            let background = oc_scene_background(scene)
-            if background.a > 0 {
-                ctx.setFillColor(background.cgColor)
-                ctx.fill(bounds)
-            }
-            ctx.translateBy(x: ((mapSize.width - layoutSize.width) / 2).rounded(),
-                            y: ((mapSize.height - layoutSize.height) / 2).rounded())
-        }
         drawScene(scene, in: ctx, trailing: trailingInset)
     }
 
@@ -121,6 +114,12 @@ final class MapView: NSView {
             if event.clickCount == 2 { onEditFeature?(Int(index)) }
         case Int32(OC_HIT_SITE):
             document.activateSite(Int(index))
+        case Int32(OC_HIT_PRIMER):
+            if let pick = onPickPrimer {
+                pick(Int(index), event.modifierFlags.contains(.shift))
+            } else if let p = document.primers.first(where: { $0.index == Int(index) }), p.length > 0 {
+                document.select(start: p.start, length: p.length)
+            }
         case Int32(OC_HIT_SEQUENCE):
             selecting = true
             anchor = Int(position)

@@ -14,6 +14,7 @@ BuildRequires:  pkgconfig(gtk4) >= 4.12
 BuildRequires:  pkgconfig(libadwaita-1) >= 1.5
 BuildRequires:  pkgconfig(cairo)
 BuildRequires:  pkgconfig(pangocairo)
+BuildRequires:  pkgconfig(epoxy)
 BuildRequires:  desktop-file-utils
 BuildRequires:  libappstream-glib
 

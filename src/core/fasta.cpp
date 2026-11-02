@@ -30,9 +30,9 @@ bool readFasta(const std::string &data, Sequence *out, std::string *error)
         seq.bases += cleanBasesKeepingCase(line);
     }
     seq.setBasesFromText(seq.bases);
-    if (seq.bases.empty() && !sawHeader) {
+    if (seq.bases.empty()) {
         if (error)
-            *error = "no sequence found";
+            *error = sawHeader ? "no bases after the header" : "no sequence found";
         return false;
     }
     *out = seq;

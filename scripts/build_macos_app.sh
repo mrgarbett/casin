@@ -1,6 +1,6 @@
 #!/bin/sh
-# Builds Restricto.app (Swift + AppKit) with SwiftPM. Run on macOS 13+ with
-# Xcode or the Command Line Tools installed.
+# Builds Restricto.app (Swift + AppKit) with SwiftPM. Run on macOS 26+ with
+# Xcode 26 or its Command Line Tools installed.
 #   scripts/build_macos_app.sh            -> build/macos/Restricto.app
 set -eu
 cd "$(dirname "$0")/.."
@@ -14,12 +14,12 @@ APP=build/macos/Restricto.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Restricto"
-# SwiftPM can record the deployment target (13.0) as the SDK version. AppKit
-# keys the macOS 26 design (floating glass sidebar, glass toolbar) off the SDK
-# version, so stamp the real one in; the minimum system version stays 13.0.
+# SwiftPM can record the deployment target (26.0) as the SDK version. AppKit
+# keys the newest design (floating glass sidebar, glass toolbar) off the SDK
+# version, so stamp the real one in; the minimum system version stays 26.0.
 SDK_VERSION="$(xcrun --show-sdk-version 2>/dev/null || true)"
 if [ -n "$SDK_VERSION" ] && command -v vtool >/dev/null 2>&1; then
-    vtool -set-build-version macos 13.0 "$SDK_VERSION" -replace \
+    vtool -set-build-version macos 26.0 "$SDK_VERSION" -replace \
         -output "$APP/Contents/MacOS/Restricto" "$BIN" 2>/dev/null ||
         echo "warning: vtool could not stamp SDK $SDK_VERSION; the macOS 26 design may not appear" >&2
 fi
@@ -31,7 +31,7 @@ mkdir -p "$APPEX/Contents/MacOS"
 cp packaging/macos/QuickLook-Info.plist "$APPEX/Contents/Info.plist"
 cp "$BIN_DIR/RestrictoQuickLook" "$APPEX/Contents/MacOS/RestrictoQuickLook"
 if [ -n "$SDK_VERSION" ] && command -v vtool >/dev/null 2>&1; then
-    vtool -set-build-version macos 13.0 "$SDK_VERSION" -replace \
+    vtool -set-build-version macos 26.0 "$SDK_VERSION" -replace \
         -output "$APPEX/Contents/MacOS/RestrictoQuickLook" "$BIN_DIR/RestrictoQuickLook" 2>/dev/null || true
 fi
 
