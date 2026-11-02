@@ -26,6 +26,9 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     private var detailItem: NSSplitViewItem?
     private var splitController: NSSplitViewController?
     private let status = NSTextField(labelWithString: "")
+    /// Beside the status while the selection runs between two enzyme sites.
+    private let digestFragment = NSButton(title: "Digest and Gel…", target: nil,
+                                          action: #selector(DocumentWindowController.digestAndGel(_:)))
     /// View toggles beside the status: complement strand, translation, and
     /// enzymes and features on the map.
     private var viewToggles: [NSButton] = []
@@ -209,6 +212,10 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         inspector.onEditFeature = edit
         sequenceView.onEditFeature = edit
         sequenceView.onAddPrimer = { [weak self] in self?.addPrimer(nil) }
+        // Right-click on a site > Digest with…
+        let digest: (String) -> Void = { [weak self] enzyme in self?.digestAndGel(with: enzyme) }
+        sequenceView.onDigest = digest
+        mapView.onDigest = digest
         inspector.onPcr = { [weak self] in self?.pcrProduct(nil) }
         mapView.onEditFeature = edit
         inspector.onPick = { [weak self] _, wasShowing in
@@ -400,12 +407,24 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
             toggles.centerYAnchor.constraint(equalTo: togglesInner.centerYAnchor),
         ])
         let infoInner = NSView()
-        status.translatesAutoresizingMaskIntoConstraints = false
-        infoInner.addSubview(status)
+        digestFragment.target = self
+        digestFragment.bezelStyle = .inline
+        digestFragment.controlSize = .small
+        digestFragment.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        digestFragment.isHidden = true
+        // In a narrow window the button truncates before the status and the toggles.
+        digestFragment.setContentCompressionResistancePriority(.defaultHigh - 1, for: .horizontal)
+        digestFragment.toolTip = "Digest and gel with the two enzymes at the ends of the selection"
+        digestFragment.setAccessibilityLabel("Digest and gel with these two")
+        let infoRow = NSStackView(views: [status, digestFragment])
+        infoRow.orientation = .horizontal
+        infoRow.spacing = 8
+        infoRow.translatesAutoresizingMaskIntoConstraints = false
+        infoInner.addSubview(infoRow)
         NSLayoutConstraint.activate([
-            status.leadingAnchor.constraint(equalTo: infoInner.leadingAnchor, constant: 14),
-            status.trailingAnchor.constraint(equalTo: infoInner.trailingAnchor, constant: -14),
-            status.centerYAnchor.constraint(equalTo: infoInner.centerYAnchor),
+            infoRow.leadingAnchor.constraint(equalTo: infoInner.leadingAnchor, constant: 14),
+            infoRow.trailingAnchor.constraint(equalTo: infoInner.trailingAnchor, constant: -14),
+            infoRow.centerYAnchor.constraint(equalTo: infoInner.centerYAnchor),
         ])
         let togglesCapsule = Glass.capsule(around: togglesInner, height: 30)
         let info = Glass.capsule(around: infoInner, height: 30)
@@ -477,7 +496,7 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         window?.titleVisibility = .hidden
         window?.toolbar = toolbar
         window?.toolbarStyle = .unified
-        searchField.placeholderString = "Find bases (both strands)"
+        searchField.placeholderString = "Find bases or a name"
         searchField.sendsWholeSearchString = true
         searchField.target = self
         searchField.action = #selector(findFromField(_:))
@@ -524,11 +543,17 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         if let message = statusMessage {
             parts.append(message)
         } else {
-            let selection = core.selectionText
-            if !selection.isEmpty { parts.append(selection) }
+            if let fragment = core.siteFragmentText, let positions = SelectionBadge.positions(for: core) {
+                // Short, to leave room for the digest button.
+                parts += [fragment, positions]
+            } else {
+                let selection = core.selectionText
+                if !selection.isEmpty { parts.append(selection) }
+            }
             if hoverBase >= 0 && hoverBase < core.length { parts.append("Base \((hoverBase + 1).formatted())") }
         }
         status.stringValue = parts.joined(separator: "  ·  ")
+        digestFragment.isHidden = statusMessage != nil || core.siteFragment == nil
         guard let info = infoCapsule else { return }
         let show = !parts.isEmpty
         guard info.isHidden == show else { return }
@@ -697,10 +722,11 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
     @objc private func findFromField(_ sender: NSSearchField) {
         let query = sender.stringValue.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return }
-        let result = core.findNext(query)
+        // A feature, primer or enzyme by name first, then bases on both strands.
+        let result = core.findNamed(query)
         if result.match < 0 {
             NSSound.beep()
-            statusMessage = "Find takes DNA bases (IUPAC codes such as N and R work too)"
+            statusMessage = "No feature, primer or enzyme named \(query), and it isn't DNA bases"
         } else if result.match == 0 {
             NSSound.beep()
             statusMessage = "No match for \(query.uppercased()) on either strand"
@@ -819,6 +845,20 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
 
     @objc func chooseBrowserFolder(_ sender: Any?) {
         browser.chooseFolder(sender)
+    }
+
+    /// A second window on the same document, beside this one rather than as
+    /// a tab: e.g. the map in one and the sequence in the other. Both show
+    /// the same sequence, selection and edits.
+    @objc func newWindowForDocument(_ sender: Any?) {
+        guard let doc = document as? SequenceDocument else { return }
+        let controller = DocumentWindowController(document: doc)
+        controller.window?.tabbingMode = .disallowed
+        doc.addWindowController(controller)
+        if let frame = window?.frame {
+            controller.window?.setFrame(frame.offsetBy(dx: 30, dy: -30), display: false)
+        }
+        controller.showWindow(nil)
     }
 
     @objc func toggleMapHidden(_ sender: Any?) {

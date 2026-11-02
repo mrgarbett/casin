@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "document.h"
 #include "maplayout.h"   // withThousands
+#include "style.h"
 #include "../core/edit.h"
 #include "../core/featurelib.h"
 #include "../core/tm.h"
@@ -45,7 +46,7 @@ void Document::setSequence(Sequence seq, std::string path)
     m_hasSelection = false;
     m_selection = {};
     m_activeFeature = -1;
-    m_activeSite = -1;
+    m_activeSite = m_secondSite = -1;
     m_undo.clear();
     m_redo.clear();
     m_typing = false;
@@ -81,6 +82,17 @@ bool Document::enzymePassesFilter(const std::string &name) const
     return c > 0 && (m_maxCuts <= 0 || c <= m_maxCuts);
 }
 
+std::vector<int> Document::featuresCutByEnzyme(const std::string &name) const
+{
+    std::set<int> hit;
+    for (const CutSite &s : m_allSites)
+        if (s.enzyme->name == name)
+            for (int i : featuresCutBy(m_seq, s))
+                if (view::FeatureStyle::isDrawn(m_seq.features[size_t(i)]))
+                    hit.insert(i);
+    return {hit.begin(), hit.end()};
+}
+
 void Document::refilter()
 {
     m_visibleSites.clear();
@@ -90,7 +102,7 @@ void Document::refilter()
             continue;
         m_visibleSites.push_back(s);
     }
-    m_activeSite = -1;
+    m_activeSite = m_secondSite = -1;
 }
 
 void Document::setMaxCuts(int maxCuts)
@@ -138,7 +150,7 @@ void Document::setSelection(Span s)
     m_selection = s;
     m_hasSelection = true;
     m_activeFeature = -1;
-    m_activeSite = -1;
+    m_activeSite = m_secondSite = -1;
     emit(m_selListeners);
 }
 
@@ -148,7 +160,7 @@ void Document::clearSelection()
     m_hasSelection = false;
     m_selection = {};
     m_activeFeature = -1;
-    m_activeSite = -1;
+    m_activeSite = m_secondSite = -1;
     emit(m_selListeners);
 }
 
@@ -167,7 +179,7 @@ void Document::activateFeature(int index)
     m_selection = m_seq.features[size_t(index)].span(m_seq.length(), m_seq.circular);
     m_hasSelection = true;
     m_activeFeature = index;
-    m_activeSite = -1;
+    m_activeSite = m_secondSite = -1;
     emit(m_selListeners);
 }
 
@@ -181,7 +193,97 @@ void Document::activateSite(int visibleIndex)
     m_hasSelection = true;
     m_activeFeature = -1;
     m_activeSite = visibleIndex;
+    m_secondSite = -1;
     emit(m_selListeners);
+}
+
+bool Document::goToPosition(const std::string &text)
+{
+    std::string t;
+    for (char c : text)
+        if (!std::isspace(static_cast<unsigned char>(c)) && c != ',')
+            t += c;
+    std::string first = t, second;
+    for (const char *sep : {"..", "\u2013", "-"})
+        if (const size_t at = t.find(sep); at != std::string::npos) {
+            first = t.substr(0, at);
+            second = t.substr(at + std::strlen(sep));
+            break;
+        }
+    const int n = m_seq.length();
+    const auto base = [n](const std::string &s) {   // 1..n, or 0
+        if (s.empty() || s.size() > 9 || !std::all_of(s.begin(), s.end(), [](char c) { return c >= '0' && c <= '9'; }))
+            return 0;
+        const int v = std::stoi(s);
+        return v <= n ? v : 0;
+    };
+    const int a = base(first), b = first == t ? a : base(second);
+    if (a == 0 || b == 0 || (b < a && !m_seq.circular))
+        return false;
+    setSelection({a - 1, b >= a ? b - a + 1 : n - a + 1 + b});
+    return true;
+}
+
+void Document::extendToSite(int visibleIndex)
+{
+    const int n = m_seq.length();
+    if (m_activeSite < 0 || m_activeSite >= int(m_visibleSites.size()) || visibleIndex == m_activeSite || n == 0) {
+        activateSite(visibleIndex);
+        return;
+    }
+    if (visibleIndex < 0 || visibleIndex >= int(m_visibleSites.size()))
+        return;
+    m_typing = false;
+    const int a = m_visibleSites[size_t(m_activeSite)].cutTop, b = m_visibleSites[size_t(visibleIndex)].cutTop;
+    if (m_seq.circular)
+        m_selection = {a % n, ((b - a) % n + n) % n};
+    else
+        m_selection = {std::min(a, b), std::abs(b - a)};
+    m_hasSelection = true;
+    m_activeFeature = -1;
+    m_secondSite = visibleIndex;
+    emit(m_selListeners);
+}
+
+void Document::extendSelectionTo(Span target)
+{
+    const int n = m_seq.length();
+    if (n == 0)
+        return;
+    m_typing = false;
+    if (!m_hasSelection) {
+        m_selection = target;
+    } else if (!m_seq.circular) {
+        const int start = std::min(m_selection.start, target.start);
+        m_selection = {start, std::max(m_selection.end(), target.end()) - start};
+    } else {
+        // From one start forward to cover the other span; the shorter way wins.
+        const auto cover = [n](Span a, Span b) {
+            const int d = ((b.start - a.start) % n + n) % n;
+            return Span{(a.start % n + n) % n, std::min(n, std::max(a.length, d + b.length))};
+        };
+        const Span fwd = cover(m_selection, target), back = cover(target, m_selection);
+        m_selection = fwd.length <= back.length ? fwd : back;
+    }
+    m_hasSelection = true;
+    m_activeFeature = -1;
+    m_activeSite = -1;
+    emit(m_selListeners);
+}
+
+void Document::extendToFeature(int index)
+{
+    if (index >= 0 && index < int(m_seq.features.size()))
+        extendSelectionTo(m_seq.features[size_t(index)].span(m_seq.length(), m_seq.circular));
+}
+
+void Document::extendToPrimer(int index)
+{
+    const std::vector<Primer> &primers = displaySequence().primers;
+    if (index >= 0 && index < int(primers.size()) && primers[size_t(index)].binding.length() > 0) {
+        const Range &b = primers[size_t(index)].binding;
+        extendSelectionTo({b.start, b.length()});
+    }
 }
 
 int Document::findNext(const std::string &raw, int *count, Strand *strand)
@@ -209,6 +311,98 @@ int Document::findNext(const std::string &raw, int *count, Strand *strand)
     if (strand)
         *strand = matches[hit].strand;
     setSelection({matches[hit].start, matches[hit].length});
+    return int(hit) + 1;
+}
+
+int Document::findNamesOrBases(const std::string &raw, int *count, FindKind *kind)
+{
+    if (count)
+        *count = 0;
+    if (kind)
+        *kind = FindKind::None;
+    auto lower = [](std::string t) {
+        for (char &c : t)
+            c = char(std::tolower(static_cast<unsigned char>(c)));
+        return t;
+    };
+    const size_t first = raw.find_first_not_of(" \t\r\n");
+    const std::string name = first == std::string::npos
+        ? std::string() : lower(raw.substr(first, raw.find_last_not_of(" \t\r\n") - first + 1));
+    std::string bases;
+    for (char c : raw)
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r')
+            bases.push_back(c);
+    if (name.empty())
+        return -1;
+
+    struct Hit {
+        FindKind kind;
+        int index;   // feature, primer or visible site; -1 for a site the filter hides
+        Span span;
+    };
+    std::vector<Hit> hits;
+    for (size_t i = 0; i < m_seq.features.size(); ++i) {
+        const Feature &f = m_seq.features[i];
+        if (view::FeatureStyle::isDrawn(f) && lower(f.name) == name)
+            hits.push_back({FindKind::Feature, int(i), f.span(m_seq.length(), m_seq.circular)});
+    }
+    for (size_t i = 0; i < m_seq.primers.size(); ++i) {
+        const Primer &p = m_seq.primers[i];
+        if (p.binding.length() > 0 && lower(p.name) == name)
+            hits.push_back({FindKind::Primer, int(i), {p.binding.start, p.binding.length()}});
+    }
+    for (const CutSite &s : m_allSites) {
+        if (lower(s.enzyme->name) != name)
+            continue;
+        // Enzymes that cut twice list a site twice; keep one.
+        const Span span{s.matchStart, s.enzyme->siteLength()};
+        bool seen = false;
+        for (const Hit &h : hits)
+            seen = seen || (h.kind == FindKind::Site && h.span == span);
+        if (seen)
+            continue;
+        int visible = -1;
+        for (size_t v = 0; v < m_visibleSites.size() && visible < 0; ++v)
+            if (m_visibleSites[v].enzyme == s.enzyme && m_visibleSites[v].matchStart == s.matchStart)
+                visible = int(v);
+        hits.push_back({FindKind::Site, visible, span});
+    }
+    std::stable_sort(hits.begin(), hits.end(), [](const Hit &a, const Hit &b) { return a.span.start < b.span.start; });
+    const size_t names = hits.size();
+    const bool dna = !bases.empty() && cleanBases(bases).size() == bases.size();
+    if (dna)
+        for (const PatternMatch &m : findPattern(m_seq, bases))
+            hits.push_back({FindKind::Bases, -1, {m.start, m.length}});
+    if (count)
+        *count = int(hits.size());
+    if (hits.empty())
+        return dna ? 0 : -1;
+
+    size_t hit = 0;
+    if (name == m_findQuery && m_findIndex >= 0 && m_hasSelection && m_selection == m_findSelection) {
+        hit = size_t(m_findIndex + 1) % hits.size();
+    } else {
+        // The first name match after the selection start, else the first base match.
+        const size_t end = names > 0 ? names : hits.size();
+        const int from = m_hasSelection ? m_selection.start : -1;
+        for (size_t i = 0; i < end; ++i)
+            if (hits[i].span.start > from) {
+                hit = i;
+                break;
+            }
+    }
+    const Hit &h = hits[hit];
+    if (h.kind == FindKind::Feature)
+        activateFeature(h.index);
+    else if (h.kind == FindKind::Site && h.index >= 0)
+        activateSite(h.index);
+    else
+        setSelection(h.span);
+    m_findQuery = name;
+    m_findIndex = int(hit);
+    m_findSelection = m_selection;
+    if (kind)
+        *kind = h.kind;
     return int(hit) + 1;
 }
 
@@ -261,7 +455,7 @@ void Document::sequenceEdited()
     m_hasPending = false;
     m_reads.clear();
     m_activeFeature = -1;
-    m_activeSite = -1;
+    m_activeSite = m_secondSite = -1;
     recomputeSites();
     m_inEdit = true;
     emit(m_seqListeners);
