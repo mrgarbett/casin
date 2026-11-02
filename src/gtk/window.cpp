@@ -397,7 +397,7 @@ void Window::buildUi()
     // The sequence, with its find bar floating at the bottom. It moves between
     // the middle and the panel, so it is kept alive while it has no parent.
     m_search = gtk_search_entry_new();
-    gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(m_search), "Find bases (both strands)");
+    gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(m_search), "Find bases or a name");
     gtk_widget_set_size_request(m_search, 260, -1);
     g_signal_connect(m_search, "activate", G_CALLBACK(&Window::onSearchActivate), this);
     g_signal_connect_swapped(m_search, "stop-search", G_CALLBACK(+[](gpointer p) {
@@ -1609,17 +1609,25 @@ void Window::onEnzymeRowActivated(GtkListBox *, GtkListBoxRow *row, gpointer p)
 
 void Window::find(const std::string &query)
 {
-    int count = 0;
-    Strand strand = Strand::Forward;
-    const int n = m_doc.findNext(query, &count, &strand);
-    // After findNext: its new selection clears the message.
+    int count = 0, names = 0;
+    Document::FindKind kind = Document::FindKind::None;
+    // A feature, primer or enzyme by name first, then bases on both strands.
+    const int n = m_doc.findNamesOrBases(query, &count, &kind, &names);
+    // After the search: its new selection clears the message.
     if (n < 0)
-        m_statusMessage = "Find takes DNA bases (IUPAC codes such as N and R work too)";
+        m_statusMessage = "No feature, primer or enzyme named " + query + ", and it isn't DNA bases";
     else if (n == 0)
         m_statusMessage = "No match for " + toUpper(query) + " on either strand";
-    else if (count > 1)
-        m_statusMessage = "Match " + std::to_string(n) + " of " + std::to_string(count)
-                        + (strand == Strand::Reverse ? " (bottom strand)" : "");
+    else {
+        // The name matches come first, so number each group on its own: a
+        // query such as "MCS" is both a feature's name and six IUPAC bases.
+        const bool bases = kind == Document::FindKind::Bases;
+        const int of = bases ? count - names : names;
+        const int which = bases ? n - names : n;
+        if (of > 1)
+            m_statusMessage = "Match " + std::to_string(which) + " of " + std::to_string(of)
+                            + (bases && names > 0 ? " bases" : "");
+    }
     updateStatus();
 }
 

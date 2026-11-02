@@ -298,8 +298,11 @@ static void testFindNames()
     doc.findNext("GAT", &bases);
     CHECK(bases > 0);
     doc.clearSelection();
-    CHECK_EQ(doc.findNamesOrBases("gat", &count, &kind), 1);
+    int names = 0;
+    CHECK_EQ(doc.findNamesOrBases("gat", &count, &kind, &names), 1);
     CHECK(count == bases + 1 && kind == K::Feature && doc.activeFeature() == 2);
+    // The one name match is counted apart from the base matches behind it.
+    CHECK_EQ(names, 1);
     CHECK_EQ(doc.findNamesOrBases("GAT", &count, &kind), 2);
     CHECK(kind == K::Bases);
     for (int i = 0; i < bases - 1; ++i)
@@ -313,8 +316,9 @@ static void testFindNames()
     int plain = 0;
     const int first = doc.findNext("GAATTC", &plain);
     doc.clearSelection();
-    CHECK_EQ(doc.findNamesOrBases("gaattc", &count, &kind), first);
+    CHECK_EQ(doc.findNamesOrBases("gaattc", &count, &kind, &names), first);
     CHECK(count == plain && kind == K::Bases && doc.selection() == (Span{20, 6}));
+    CHECK_EQ(names, 0);   // nothing is named so: the matches are all bases
     CHECK_EQ(doc.findNamesOrBases("ACACACAC", &count, &kind), 0);
     CHECK(count == 0 && kind == K::None);
     // Not a name (a "source" feature doesn't count) and not DNA.
