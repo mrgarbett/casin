@@ -211,6 +211,10 @@ void Shell::loadStyles()
 }
 .restricto-cue.ready { background-color: alpha(@success_color, 0.16); color: @success_color; font-weight: 600; }
 .restricto-cue.problem { background-color: alpha(@warning_color, 0.16); color: @warning_color; }
+/* Enzymes list tags: a feature a cut falls inside, and Dam/Dcm blocking. */
+.restricto-tag { font-size: 9pt; font-weight: 600; }
+.restricto-tag.feature { color: #9141ac; }
+.restricto-tag.methyl { color: #e66100; }
 .restricto-program { padding: 10px 14px; font-feature-settings: "tnum"; }
 .restricto-program .head { font-size: smaller; font-weight: bold; opacity: 0.5; }
 .restricto-program .once { opacity: 0.6; }

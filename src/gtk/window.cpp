@@ -3,6 +3,7 @@
 
 #include "shell.h"
 
+#include "core/enzymes.h"
 #include "core/genbank.h"
 #include "core/version.h"
 #include "core/primercheck.h"
@@ -1440,6 +1441,51 @@ void Window::rebuildEnzymeList()
         g_signal_connect(check, "toggled", G_CALLBACK(&Window::onEnzymeToggled), this);
         adw_action_row_add_prefix(ADW_ACTION_ROW(row), check);
         const int n = m_doc.cutCount(e->name);
+        // Tags, as on the Mac: a feature this enzyme cuts inside, and the
+        // Dam or Dcm methylation that blocks its sites in a dam+ dcm+ strain.
+        std::vector<std::string> tips;
+        std::vector<int> inside = m_doc.featuresCutByEnzyme(e->name);
+        if (!inside.empty()) {
+            std::string names;
+            for (int fi : inside) {
+                const Feature &f = m_doc.sequence().features[size_t(fi)];
+                names += (names.empty() ? "" : ", ") + (f.name.empty() ? f.type : f.name);
+            }
+            const Feature &first = m_doc.sequence().features[size_t(inside[0])];
+            const std::string label = (first.name.empty() ? first.type : first.name)
+                                    + (inside.size() > 1 ? " +" + std::to_string(inside.size() - 1) : "");
+            GtkWidget *tag = gtk_label_new(label.c_str());
+            gtk_widget_add_css_class(tag, "restricto-tag");
+            gtk_widget_add_css_class(tag, "feature");
+            gtk_label_set_ellipsize(GTK_LABEL(tag), PANGO_ELLIPSIZE_MIDDLE);
+            gtk_label_set_max_width_chars(GTK_LABEL(tag), 14);
+            adw_action_row_add_suffix(ADW_ACTION_ROW(row), tag);
+            tips.push_back(e->name + " cuts inside " + names);
+        }
+        int blocked = 0, kinds = MethylNone;
+        for (const CutSite &s : m_doc.allSites())
+            if (s.enzyme && s.enzyme->name == e->name) {
+                const int m = methylationBlock(m_doc.sequence(), s);
+                blocked += m != MethylNone;
+                kinds |= m;
+            }
+        if (blocked > 0) {
+            const std::string kind = methylationName(kinds & 3);
+            GtkWidget *tag = gtk_label_new(kind == "Dam and Dcm" ? "Dam·Dcm" : kind.c_str());
+            gtk_widget_add_css_class(tag, "restricto-tag");
+            gtk_widget_add_css_class(tag, "methyl");
+            adw_action_row_add_suffix(ADW_ACTION_ROW(row), tag);
+            tips.push_back(e->name + ": " + (blocked >= n ? "every site" : std::to_string(blocked) + " of "
+                                                                              + std::to_string(n) + " sites")
+                           + " blocked by " + kind
+                           + " methylation when the DNA comes from a dam+ dcm+ E. coli strain");
+        }
+        if (!tips.empty()) {
+            std::string tip;
+            for (const std::string &t : tips)
+                tip += (tip.empty() ? "" : "\n") + t;
+            gtk_widget_set_tooltip_text(row, tip.c_str());
+        }
         GtkWidget *count = gtk_label_new((std::to_string(n) + (n == 1 ? " cut" : " cuts")).c_str());
         gtk_widget_add_css_class(count, "dim-label");
         adw_action_row_add_suffix(ADW_ACTION_ROW(row), count);
