@@ -285,6 +285,14 @@ final class SequenceView: NSView {
         guard let layout = ensureLayout(), !document.isEmpty else { return }
         let p = layoutPoint(event)
         if event.modifierFlags.contains(.shift) {
+            // On a second enzyme: the bases between the two cuts.
+            let site = Int(oc_seq_layout_site_at(layout, p.x, p.y))
+            if site >= 0 {
+                document.extendToSite(site)
+                SelectionBadge.shared.show(for: document, event: event, in: self)
+                SelectionBadge.shared.hideSoon()
+                return
+            }
             if !document.hasSelection { anchor = 0 }
             dragging = true
             extendSelection(to: p)

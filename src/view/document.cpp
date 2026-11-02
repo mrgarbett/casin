@@ -184,6 +184,26 @@ void Document::activateSite(int visibleIndex)
     emit(m_selListeners);
 }
 
+void Document::extendToSite(int visibleIndex)
+{
+    const int n = m_seq.length();
+    if (m_activeSite < 0 || m_activeSite >= int(m_visibleSites.size()) || visibleIndex == m_activeSite || n == 0) {
+        activateSite(visibleIndex);
+        return;
+    }
+    if (visibleIndex < 0 || visibleIndex >= int(m_visibleSites.size()))
+        return;
+    m_typing = false;
+    const int a = m_visibleSites[size_t(m_activeSite)].cutTop, b = m_visibleSites[size_t(visibleIndex)].cutTop;
+    if (m_seq.circular)
+        m_selection = {a % n, ((b - a) % n + n) % n};
+    else
+        m_selection = {std::min(a, b), std::abs(b - a)};
+    m_hasSelection = true;
+    m_activeFeature = -1;
+    emit(m_selListeners);
+}
+
 int Document::findNext(const std::string &raw, int *count, Strand *strand)
 {
     std::string query;

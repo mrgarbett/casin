@@ -72,6 +72,11 @@ public:
     void activateFeature(int index);
     // Selects the site's recognition sequence and makes it active.
     void activateSite(int visibleIndex);
+    // Shift-click on a second site: selects the bases between the active
+    // site's top-strand cut and this one's (forward from the active site on a
+    // circle), keeping the first site active. With no active site, as
+    // activateSite.
+    void extendToSite(int visibleIndex);
 
     // Searches both strands for `query` (IUPAC) and selects the first match
     // starting after the current selection start, wrapping around. Returns the
