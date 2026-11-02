@@ -358,46 +358,13 @@ extension DocumentWindowController {
         }
     }
 
+    /// Opens the gel wizard on this sequence (see GelWizard).
     @objc func digestAndGel(_ sender: Any?) {
         guard let d = doc, !d.isEmpty else { return }
-        let shown = Array(Set(d.visibleSiteEnzymes)).sorted()
-        let form = Form("Digest and Gel", "Enzymes shown on the map, cut together.")
-        // A selection between two sites pre-fills its two enzymes.
-        let fragment = d.siteFragment
-        let firstIndex = fragment.flatMap { shown.firstIndex(of: $0.first) } ?? 0
-        let secondIndex = fragment.flatMap { f in f.second == f.first ? nil : shown.firstIndex(of: f.second) }
-        let first = form.popup("Enzyme", shown, selected: firstIndex)
-        let second = form.popup("And", ["(none)"] + shown, selected: secondIndex.map { $0 + 1 } ?? 0)
-        let ladders = (0..<Int(oc_ladder_count())).map { String(cString: oc_ladder_name(Int32($0))) }
-        let ladder = form.popup("Ladder", ladders)
-        guard !shown.isEmpty else {
-            tell("Digest and Gel", "No enzymes are shown. Change the cut filter in the Enzymes sidebar.")
-            return
-        }
-        form.run(in: window, ok: "Digest") { [weak self] in
-            var enzymes = [shown[max(0, first.indexOfSelectedItem)]]
-            if second.indexOfSelectedItem > 0 { enzymes.append(shown[second.indexOfSelectedItem - 1]) }
-            var frags = [OCFragmentInfo](repeating: OCFragmentInfo(), count: 400)
-            let n = withCStrings(enzymes) { oc_digest(d.handle, $0, Int32(enzymes.count), &frags, Int32(frags.count)) }
-            var lines: [String] = []
-            for f in frags.prefix(Int(min(n, 400))) {
-                let left = tupleString(f.left_enzyme), right = tupleString(f.right_enzyme)
-                lines.append("\(Int(f.length).formatted()) bp".padding(toLength: 12, withPad: " ", startingAt: 0)
-                             + "\(f.start + 1)  \(left.isEmpty ? "end" : left) – \(right.isEmpty ? "end" : right)")
-            }
-            let scene = withCStrings(enzymes) {
-                oc_gel_render(d.handle, $0, Int32(enzymes.count), Int32(max(0, ladder.indexOfSelectedItem)), 360, 420,
-                              self?.window?.contentView?.isDarkAppearance ?? false, measureText, nil)
-            }
-            let title = "\(enzymes.joined(separator: " + ")): \(n) fragment\(n == 1 ? "" : "s")"
-            if let scene = scene {
-                let image = sceneImage(scene)
-                oc_scene_free(scene)
-                showImage(title, lines.joined(separator: "\n"), image, in: self?.window)
-            } else {
-                showText(title, "", lines.joined(separator: "\n"), in: self?.window)
-            }
-        }
+        // A selection between two sites adds a lane cut by its two enzymes.
+        var enzymes: [String] = []
+        if let f = d.siteFragment { enzymes = f.first == f.second ? [f.first] : [f.first, f.second] }
+        GelWizard.show(for: d, near: window, cutWith: enzymes)
     }
 
     // MARK: Features
