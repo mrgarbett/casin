@@ -209,6 +209,10 @@ final class DocumentWindowController: NSWindowController, NSToolbarDelegate, NSM
         inspector.onEditFeature = edit
         sequenceView.onEditFeature = edit
         sequenceView.onAddPrimer = { [weak self] in self?.addPrimer(nil) }
+        // Right-click on a site > Digest with…
+        let digest: (String) -> Void = { [weak self] enzyme in self?.digestAndGel(with: enzyme) }
+        sequenceView.onDigest = digest
+        mapView.onDigest = digest
         inspector.onPcr = { [weak self] in self?.pcrProduct(nil) }
         mapView.onEditFeature = edit
         inspector.onPick = { [weak self] _, wasShowing in

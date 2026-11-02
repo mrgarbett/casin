@@ -358,11 +358,14 @@ extension DocumentWindowController {
         }
     }
 
-    @objc func digestAndGel(_ sender: Any?) {
+    @objc func digestAndGel(_ sender: Any?) { digestAndGel(with: nil) }
+
+    /// The Digest and Gel wizard, with `enzyme` picked first when given.
+    func digestAndGel(with enzyme: String?) {
         guard let d = doc, !d.isEmpty else { return }
         let shown = Array(Set(d.visibleSiteEnzymes)).sorted()
         let form = Form("Digest and Gel", "Enzymes shown on the map, cut together.")
-        let first = form.popup("Enzyme", shown)
+        let first = form.popup("Enzyme", shown, selected: enzyme.flatMap { shown.firstIndex(of: $0) } ?? 0)
         let second = form.popup("And", ["(none)"] + shown)
         let ladders = (0..<Int(oc_ladder_count())).map { String(cString: oc_ladder_name(Int32($0))) }
         let ladder = form.popup("Ladder", ladders)
