@@ -566,6 +566,12 @@ void SequenceView::dragBegin(GtkGestureDrag *g, double x, double y, gpointer p)
     const view::Point at = self->content(x, y);
     const GdkModifierType mods = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(g));
     if (mods & GDK_SHIFT_MASK) {
+        // On a second enzyme: the bases between the two cuts.
+        const int site = self->m_layout->siteAt(at);
+        if (site >= 0) {
+            self->m_doc->extendToSite(site);
+            return;
+        }
         // Shift-click extends from the existing anchor.
         if (!self->m_doc->hasSelection())
             self->m_anchor = 0;
