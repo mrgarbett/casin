@@ -5,6 +5,7 @@ versions may change file handling, menus and the C API.
 
 ## Unreleased
 
+- **macOS:** in the sequence view the arrow keys move the caret (by a base, or a line up and down), Shift+arrows grow the selection and Escape clears it.
 - **macOS:** the app now needs macOS 26 Tahoe or later (built with Xcode 26). Support for macOS 13 to 15 and the plain, non-glass layout were dropped.
 - **Focus:** the menus now show the core cloning tools only (primers, PCR, digest and gel, insertion by PCR, Gibson) plus opening, saving and editing. The other tools from the first alpha are hidden until each gets its own tested step; turn on **Experimental Tools** (main menu on Linux, the Restricto menu on the Mac) to show them again. Nothing was removed.
 

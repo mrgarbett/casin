@@ -142,6 +142,13 @@ int main(int argc, char **argv)
 
     OCSeqLayout *seq = oc_seq_layout_new(doc, 800, true, true, measure, NULL);
     CHECK(oc_seq_layout_total_height(seq) > 1000);
+    {
+        /* The next line starts a line's worth of bases on. */
+        const int bpl = oc_seq_layout_bases_per_line(seq);
+        CHECK(bpl > 10 && bpl < oc_document_length(doc));
+        CHECK(oc_seq_layout_line_top(seq, bpl) > oc_seq_layout_line_top(seq, bpl - 1));
+        CHECK(oc_seq_layout_line_top(seq, 0) == oc_seq_layout_line_top(seq, bpl - 1));
+    }
     scene = oc_seq_layout_render(seq, doc, 0, 600);
     CHECK(oc_scene_item_count(scene) > 50);
     oc_scene_free(scene);

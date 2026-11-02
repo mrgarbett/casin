@@ -208,11 +208,12 @@ final class SequenceView: NSView {
         ctx.restoreGState()
     }
 
-    // MARK: Keyboard: typing bases edits the sequence
+    // MARK: Keyboard: typing bases edits the sequence; arrows move the caret
 
     override var acceptsFirstResponder: Bool { true }
 
     override func keyDown(with event: NSEvent) {
+        if !document.isEmpty, moveCaret(with: event) { return }
         guard !document.isEmpty, isEditable else { super.keyDown(with: event); return }
         let flags = event.modifierFlags.intersection([.command, .control, .option])
         guard flags.isEmpty, let chars = event.charactersIgnoringModifiers, !chars.isEmpty else {
@@ -240,6 +241,53 @@ final class SequenceView: NSView {
                 super.keyDown(with: event)
             }
         }
+    }
+
+    /// The arrow keys move the caret by a base or a line, Shift+arrows grow
+    /// or shrink the selection from its anchor, and Escape drops a range to
+    /// a caret at its start (a bare caret goes). False for any other key.
+    private func moveCaret(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection([.command, .control, .option])
+        guard flags.isEmpty, let key = event.charactersIgnoringModifiers?.unicodeScalars.first?.value else { return false }
+        if key == 0x1B {   // Escape
+            guard document.hasSelection else { NSSound.beep(); return true }
+            if document.selectionLength > 0 {
+                document.select(start: document.selectionStart, length: 0)
+            } else {
+                oc_document_clear_selection(document.handle)
+            }
+            return true
+        }
+        let line = ensureLayout().map { max(1, Int(oc_seq_layout_bases_per_line($0))) } ?? 1
+        let step: Int
+        switch Int(key) {
+        case NSLeftArrowFunctionKey: step = -1
+        case NSRightArrowFunctionKey: step = 1
+        case NSUpArrowFunctionKey: step = -line
+        case NSDownArrowFunctionKey: step = line
+        default: return false
+        }
+        let n = document.length
+        let start = document.hasSelection ? document.selectionStart : 0
+        let end = start + (document.hasSelection ? document.selectionLength : 0)
+        if event.modifierFlags.contains(.shift) {
+            // The end away from the anchor moves; a selection made some other
+            // way is anchored at its start.
+            if anchor != start && anchor != end { anchor = start }
+            let moving = anchor == start ? end : start
+            let to = min(max(moving + step, 0), n)
+            document.select(start: min(to, anchor), length: abs(to - anchor))
+            scrollToPosition(to)
+        } else {
+            // A range drops to its near end, as in a text view, before a line move.
+            var to = step < 0 ? start : end
+            if start == end || abs(step) > 1 { to += step }
+            to = min(max(to, 0), n)
+            anchor = to
+            document.select(start: to, length: 0)
+            scrollToPosition(to)
+        }
+        return true
     }
 
     @objc func paste(_ sender: Any?) {

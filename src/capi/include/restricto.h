@@ -298,6 +298,8 @@ int oc_seq_layout_base_at(const OCSeqLayout *layout, double x, double y);
 void oc_seq_layout_set_hover_codon(OCSeqLayout *layout, int codon_start);
 double oc_seq_layout_line_top(const OCSeqLayout *layout, int position);
 double oc_seq_layout_line_height(const OCSeqLayout *layout, int position);
+/* Bases on each full line (the arrow keys move the caret up and down by this). */
+int oc_seq_layout_bases_per_line(const OCSeqLayout *layout);
 char *oc_seq_layout_tooltip(const OCSeqLayout *layout, double x, double y);
 
 /* ---- digest and gel ------------------------------------------------------ */
