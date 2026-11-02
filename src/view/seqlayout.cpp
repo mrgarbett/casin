@@ -623,14 +623,16 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
     const CutSite *active = (m_opt.enzymes && st.activeSite >= 0 && st.activeSite < int(m_sites.size()))
                               ? &m_sites[size_t(st.activeSite)] : nullptr;
     // An amino acid lights up with the selection when its whole codon is
-    // selected: one for a clicked codon, the row for a double-clicked frame.
+    // selected and the selection starts in its frame: one for a clicked
+    // codon, the row for a double-clicked frame, nothing for a stretch of
+    // bases picked in another frame.
     auto codonSelected = [&](int p) {
         if (!st.hasSelection || st.selection.length < 3)
             return false;
         const int a = st.selection.start, e = st.selection.end();
-        if (p >= a && p + 3 <= e)
-            return true;
-        return m_seq.circular && p + m_n >= a && p + m_n + 3 <= e;
+        if (p < a && m_seq.circular)
+            p += m_n;
+        return p >= a && p + 3 <= e && (p - a) % 3 == 0;
     };
 
     const double asc = m_baseFont.size * 0.78;

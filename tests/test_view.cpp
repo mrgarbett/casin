@@ -284,6 +284,11 @@ int main(int argc, char **argv)
             const size_t plainCount = six.render(0, 400, {}).items.size();
             CHECK(six.render(0, 400, one).items.size() == plainCount + 2);
             CHECK(six.render(0, 400, all).items.size() == plainCount + 4);
+            // A stretch picked in another frame lights nothing.
+            SeqViewState off;
+            off.hasSelection = true;
+            off.selection = {1, 8};
+            CHECK(six.render(0, 400, off).items.size() == plainCount + 1);
         }
         // Hovering it outlines the codon: one more shape on that line.
         SeqViewState hovering;
