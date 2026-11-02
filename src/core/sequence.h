@@ -61,6 +61,8 @@ struct Feature {
 struct Primer {
     std::string name;
     std::string bases;
+    // On the top strand. On a circular sequence a site across the origin
+    // runs past the end: start < length < end, and it goes on from base 0.
     Range binding;
     Strand strand = Strand::Forward;
     std::string color = {};   // "#rrggbb", or empty for the theme's primer colour

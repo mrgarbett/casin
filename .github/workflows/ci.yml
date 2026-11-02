@@ -19,13 +19,15 @@ jobs:
     steps:
       - name: Install build dependencies
         run: |
-          dnf -y install git gcc-c++ cmake ninja-build pkgconfig gtk4-devel libadwaita-devel \
+          dnf -y install git gcc-c++ cmake ninja-build pkgconfig gtk4-devel libadwaita-devel libepoxy-devel \
                          cairo-devel pango-devel desktop-file-utils libappstream-glib \
                          rpm-build rpmdevtools xorg-x11-server-Xvfb google-noto-sans-fonts
       - uses: actions/checkout@v4
       - name: Build and test
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          # Warnings fail the build here (GCC 16's -Wnonnull from <algorithm> aside).
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_CXX_FLAGS="-Werror -Wno-error=nonnull"
           cmake --build build
           ctest --test-dir build --output-on-failure
       - name: Render the demo map and a window screenshot
@@ -49,6 +51,22 @@ jobs:
             demo-map.png
             window.png
             restricto-*.rpm
+
+  sanitizers:
+    # The core, view and C API under AddressSanitizer and UBSan, with every
+    # report fatal: the tests pass only if they read nothing out of bounds.
+    name: Sanitizers (ASan + UBSan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test
+        run: |
+          cmake -S . -B build -DRESTRICTO_FRONTEND=none -DCMAKE_BUILD_TYPE=Debug \
+              -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -Werror" \
+              -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build build -j "$(nproc)"
+          UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 ASAN_OPTIONS=halt_on_error=1 \
+              ctest --test-dir build --output-on-failure
 
   flatpak:
     name: Flatpak (GNOME runtime)
@@ -104,7 +122,8 @@ jobs:
       - name: Core tests
         run: |
           brew install ninja
-          cmake -S . -B build -G Ninja -DRESTRICTO_FRONTEND=none
+          cmake -S . -B build -G Ninja -DRESTRICTO_FRONTEND=none -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_CXX_FLAGS=-Werror
           cmake --build build
           ctest --test-dir build --output-on-failure
       - name: Build Restricto.app

@@ -15,6 +15,8 @@ struct MapState {
     bool hasSelection = false;
     int activeFeature = -1;  // index into Sequence::features
     int activeSite = -1;     // index into the sites passed to the layout
+    int hoverFeature = -1;   // under the mouse here or in the sequence view: lightly outlined
+    int hoverSite = -1;      // likewise, its label lightly backed
 };
 
 // What the map shows. Hidden feature types are matched on Feature::type.
@@ -137,5 +139,8 @@ private:
 
 std::string formatBp(int n);   // "2,686 bp"
 std::string withThousands(int n);
+// A site as people number it, "1,201–1,224"; across the origin of a sequence
+// of n bases (its end past n), "3,180–12".
+std::string siteText(const Range &r, int n);
 
 } // namespace oc::view

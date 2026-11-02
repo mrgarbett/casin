@@ -6,6 +6,7 @@
 #include "view/maplayout.h"
 
 #include <gtk/gtk.h>
+#include <functional>
 #include <memory>
 
 namespace oc::gtk {
@@ -20,13 +21,30 @@ public:
     void setDark(bool dark);
     const view::MapOptions &options() const { return m_options; }
     void setOptions(view::MapOptions options);
+    // Room kept clear on the right and at the bottom for capsules floating
+    // over the map; the background still fills the whole view.
+    void setInsets(int trailing, int bottom);
+    // The map's text scale (1 = 100 %); the map itself keeps its size.
+    void setZoom(double zoom);
+
+    // As on SequenceView: the base under the mouse, the mouse while a drag
+    // selects bases (-1, -1 at the end), a feature double-clicked.
+    std::function<void(int)> onHoverBase;
+    std::function<void(double, double)> onSelectDrag;
+    std::function<void(int)> onEditFeature;
+    // When set, clicking a primer picks it (index, shift held) instead of
+    // starting a selection, as on the PCR wizard's vector map.
+    std::function<void(int, bool)> onPickPrimer;
 
 private:
     static void draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer self);
-    static void dragBegin(GtkGestureDrag *, double x, double y, gpointer self);
+    static void dragBegin(GtkGestureDrag *drag, double x, double y, gpointer self);
     static void dragUpdate(GtkGestureDrag *, double dx, double dy, gpointer self);
     static void dragEnd(GtkGestureDrag *, double dx, double dy, gpointer self);
     static gboolean queryTooltip(GtkWidget *, int x, int y, gboolean kb, GtkTooltip *tip, gpointer self);
+    static void motion(GtkEventControllerMotion *, double x, double y, gpointer self);
+    static void leave(GtkEventControllerMotion *, gpointer self);
+    static void pressed(GtkGestureClick *, int n, double x, double y, gpointer self);
     void ensureLayout(int w, int h);
 
     Document *m_doc;
@@ -34,6 +52,8 @@ private:
     view::PangoTextMeasurer m_measure;
     std::unique_ptr<view::MapLayout> m_layout;
     int m_w = 0, m_h = 0;
+    int m_trailing = 0, m_bottom = 0;
+    double m_zoom = 1;
     bool m_dark = false;
     view::MapOptions m_options;
     // drag state

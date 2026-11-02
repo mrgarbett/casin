@@ -5,6 +5,7 @@
 #include "style.h"
 #include "../core/align.h"
 #include "../core/enzymes.h"
+#include "../core/orf.h"
 #include "../core/sequence.h"
 
 #include <map>
@@ -18,6 +19,8 @@ struct SeqViewState {
     int activeFeature = -1;
     int activeSite = -1;   // index into the sites passed to the layout
     int hoverCodon = -1;   // first base of a codon outlined on the strands (its amino acid is under the mouse)
+    int hoverFeature = -1; // feature under the mouse here or on the map: its bases lightly tinted
+    int hoverSite = -1;    // site under the mouse here or on the map: its recognition bases tinted
 };
 
 // What the sequence view shows besides the bases.
@@ -62,6 +65,10 @@ public:
     // First base of the codon whose amino acid is under p (in an ORF frame
     // row or a CDS translation row), or -1.
     int codonAt(Point p) const;
+    // The whole translation whose amino acid is under p: the open reading
+    // frame (start to stop codon) in an ORF frame row, or the CDS feature's
+    // footprint in its translation row. Empty when p isn't on an amino acid.
+    Span translationAt(Point p) const;
     // The base under p on either strand, or -1.
     int baseAt(Point p) const;
     int readAt(Point p) const;         // -1 if none
@@ -92,6 +99,7 @@ private:
         int nameCols;       // columns kept free past the 3' end for the name (0: no name here)
         bool head;  // 3' end is in this piece
         bool top;   // forward primers sit above the top strand, reverse ones below
+        int shift = 0;   // what to add to a base's position to place it on the primer: n or -n across the origin
     };
     struct Line {
         int start = 0, len = 0;
@@ -124,6 +132,15 @@ private:
     bool m_complement;
     SeqOptions m_opt;
     std::vector<char> m_orfFwd, m_orfRev;   // amino acid at each ORF codon's first top-strand base, else 0
+    std::vector<Orf> m_orfs;                // the frames' ORFs, longest first
+    // What codonAt found: the codon's first base, and where (an ORF frame
+    // row on a strand, or a CDS feature's translation row).
+    struct CodonHit {
+        int codon = -1;
+        Strand strand = Strand::Forward;
+        int feature = -1;
+    };
+    CodonHit codonHitAt(Point p) const;
     std::vector<ReadTrack> m_reads;
     int m_n = 0;
     int m_bpl = 10;

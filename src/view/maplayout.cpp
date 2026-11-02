@@ -4,6 +4,7 @@
 #include "../core/orf.h"
 
 #include <algorithm>
+#include <clocale>
 #include <cmath>
 #include <map>
 
@@ -40,12 +41,25 @@ std::string tickText(int pos, int step)
 
 } // namespace
 
+// Thousands are grouped the way the user's locale does, so that a German
+// reader sees 1.530 bp beside a GC of 53,5 %, not 1,530 (which reads as
+// 1.53). Without a grouping character, a locale with a decimal comma gets
+// the point and the rest the comma.
 std::string withThousands(int n)
 {
+    const std::lconv *lc = std::localeconv();
+    std::string sep = lc && lc->thousands_sep ? lc->thousands_sep : "";
+    if (sep.empty())
+        sep = (lc && lc->decimal_point && lc->decimal_point[0] == ',') ? "." : ",";
     std::string s = std::to_string(n < 0 ? -n : n);
     for (int i = int(s.size()) - 3; i > 0; i -= 3)
-        s.insert(size_t(i), ",");
+        s.insert(size_t(i), sep);
     return n < 0 ? "-" + s : s;
+}
+
+std::string siteText(const Range &r, int n)
+{
+    return withThousands(r.start + 1) + "–" + withThousands(r.end > n && n > 0 ? r.end - n : r.end);
 }
 
 std::string formatBp(int n)
@@ -168,6 +182,16 @@ Point MapLayout::polar(double angle, double r) const
     return {m_c.x + r * std::sin(angle), m_c.y - r * std::cos(angle)};
 }
 
+namespace {
+// Whether a primer has a site to draw: on a circular sequence one across the
+// origin runs past the end, up to a whole turn.
+bool primerShown(const Primer &pr, const Sequence &seq)
+{
+    const int n = seq.length();
+    return pr.binding.length() > 0 && pr.binding.end <= (seq.circular ? pr.binding.start + n : n);
+}
+} // namespace
+
 double MapLayout::angleOfPos(double pos) const
 {
     return 2 * kPi * pos / m_n;
@@ -210,6 +234,10 @@ std::vector<std::vector<Span>> MapLayout::featureBlocks() const
             blocks.back().length += blocks.front().length;
             blocks.erase(blocks.begin());
         }
+        // A site between two bases (GenBank's 5^6) has no length: it's drawn
+        // as a tick where it lies.
+        if (blocks.empty() && !f.ranges.empty())
+            blocks.push_back({f.ranges.front().start, 0});
         out.push_back(blocks);
     }
     return out;
@@ -498,7 +526,7 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
     // Primer names, from the primer arrows just outside the lanes.
     for (size_t i = 0; m_options.primers && i < m_seq.primers.size(); ++i) {
         const Primer &pr = m_seq.primers[i];
-        if (pr.binding.length() <= 0 || pr.binding.end > m_n || pr.name.empty())
+        if (!primerShown(pr, m_seq) || pr.name.empty())
             continue;
         LabelGlyph g;
         g.primer = int(i);
@@ -507,7 +535,8 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
         g.color = m_theme.text;
         g.swatch = Color::parse(pr.color, m_theme.primer);
         g.priority = -1;
-        g.angle = angleOfPos((pr.binding.start + pr.binding.end) / 2.0);
+        // The middle of a primer across the origin lies past the end.
+        g.angle = angleOfPos(std::fmod((pr.binding.start + pr.binding.end) / 2.0, double(m_n)));
         g.anchorR = m_featureOuter + 10;
         g.rect = {0, 0, tm.width(g.text, g.font) + 12, tm.height(g.font)};
         m_labels.push_back(g);
@@ -518,7 +547,7 @@ void MapLayout::layoutCircular(TextMeasurer &tm)
     // the bends don't sit on the primer arrows.
     bool primerBand = false;
     for (const Primer &pr : m_seq.primers)
-        primerBand = primerBand || (m_options.primers && pr.binding.length() > 0 && pr.binding.end <= m_n);
+        primerBand = primerBand || (m_options.primers && primerShown(pr, m_seq));
     const double elbowR = m_featureOuter + (primerBand ? 15 : 6);
     const double rLabel = elbowR + 12;
     for (LabelGlyph &g : m_labels) {
@@ -770,7 +799,7 @@ void MapLayout::layoutLinear(TextMeasurer &tm)
     m_linearBottom = lane0 + laneCount * kLinearPitch;
     // A row for the primers under the features.
     for (const Primer &pr : m_seq.primers)
-        if (m_options.primers && pr.binding.length() > 0 && pr.binding.end <= m_n) {
+        if (m_options.primers && primerShown(pr, m_seq)) {
             m_primerRowY = std::max(m_linearBottom, m_yb + 30) + 6;
             m_linearBottom = m_primerRowY + 22;
             break;
@@ -843,7 +872,7 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
     renderOrfs(s);
 
     for (const FeatureGlyph &g : m_features) {
-        const bool active = g.feature == st.activeFeature;
+        const bool active = g.feature == st.activeFeature, hover = g.feature == st.hoverFeature;
         for (const auto &c : g.connectors) {
             PathItem p;
             p.points = c;
@@ -852,14 +881,15 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
             s.path(p);
         }
         for (const auto &poly : g.polys)
-            s.polygon(poly, g.fill, active ? m_theme.accent : m_theme.featureOutline, active ? 2.0 : 0.8);
+            s.polygon(poly, g.fill, active || hover ? m_theme.accent : m_theme.featureOutline,
+                      active ? 2.0 : hover ? 1.2 : 0.8);
         for (const TextItem &t : g.label)
             s.text(t);
     }
 
     // Primers: outlined arrows just outside the feature lanes, pointing 5' to 3'.
     for (const Primer &pr : m_seq.primers) {
-        if (!m_options.primers || pr.binding.length() <= 0 || pr.binding.end > m_n)
+        if (!m_options.primers || !primerShown(pr, m_seq))
             continue;
         const double r0 = m_featureOuter + 2, r1 = r0 + 7, rm = (r0 + r1) / 2;
         double a0 = angleOfPos(pr.binding.start), a1 = angleOfPos(pr.binding.end);
@@ -903,6 +933,8 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
             const bool activeF = g.feature >= 0 && g.feature == st.activeFeature;
             if (activeF)
                 s.rect(g.rect.adjusted(2), m_theme.accent.withAlpha(0.15));
+            else if (g.feature >= 0 && g.feature == st.hoverFeature)
+                s.rect(g.rect.adjusted(2), m_theme.accent.withAlpha(0.08));
             const double cy = g.rect.y + g.rect.h / 2;
             s.rect({g.rect.x + 1, cy - 4, 8, 8}, g.swatch, m_theme.featureOutline, 0.8);
             s.label(g.text, {g.rect.x + 12, cy}, g.font, g.color, HAlign::Left, VAlign::Middle);
@@ -911,6 +943,8 @@ void MapLayout::renderCircular(Scene &s, const MapState &st) const
         const bool active = std::find(g.sites.begin(), g.sites.end(), st.activeSite) != g.sites.end();
         if (active)
             s.rect(g.rect.adjusted(2), m_theme.cutMarker.withAlpha(0.15));
+        else if (std::find(g.sites.begin(), g.sites.end(), st.hoverSite) != g.sites.end())
+            s.rect(g.rect.adjusted(2), m_theme.cutMarker.withAlpha(0.08));
         s.label(g.text, g.textPos, g.font, active ? m_theme.cutMarker : g.color, g.align, VAlign::Middle);
     }
 
@@ -942,18 +976,19 @@ void MapLayout::renderLinear(Scene &s, const MapState &st) const
         s.text(t);
     renderOrfs(s);
     for (const FeatureGlyph &g : m_features) {
-        const bool active = g.feature == st.activeFeature;
+        const bool active = g.feature == st.activeFeature, hover = g.feature == st.hoverFeature;
         for (const auto &c : g.connectors)
             s.line(c.front(), c.back(), g.fill.mix(m_theme.text, 0.3), 1.2);
         for (const auto &poly : g.polys)
-            s.polygon(poly, g.fill, active ? m_theme.accent : m_theme.featureOutline, active ? 2.0 : 0.8);
+            s.polygon(poly, g.fill, active || hover ? m_theme.accent : m_theme.featureOutline,
+                      active ? 2.0 : hover ? 1.2 : 0.8);
         for (const TextItem &t : g.label)
             s.text(t);
     }
     // Primers: outlined arrows in their own row, pointing 5' to 3', named
     // beside them, with a stub up off the 5' end for a tail that doesn't anneal.
     for (const Primer &pr : m_seq.primers) {
-        if (!m_options.primers || pr.binding.length() <= 0 || pr.binding.end > m_n || m_primerRowY <= 0)
+        if (!m_options.primers || !primerShown(pr, m_seq) || m_primerRowY <= 0)
             continue;
         const bool rev = pr.strand == Strand::Reverse;
         const double y0 = m_primerRowY, y1 = y0 + 7, ym = (y0 + y1) / 2;
@@ -995,6 +1030,8 @@ void MapLayout::renderLinear(Scene &s, const MapState &st) const
         s.rect(g.rect.adjusted(1), m_theme.background);
         if (active)
             s.rect(g.rect.adjusted(2), m_theme.cutMarker.withAlpha(0.15));
+        else if (std::find(g.sites.begin(), g.sites.end(), st.hoverSite) != g.sites.end())
+            s.rect(g.rect.adjusted(2), m_theme.cutMarker.withAlpha(0.08));
         s.label(g.text, g.textPos, g.font, active ? m_theme.cutMarker : g.color, g.align, VAlign::Middle);
     }
     const std::string title = (m_seq.name.empty() ? std::string("Untitled") : m_seq.name) + "  ·  "
@@ -1061,7 +1098,7 @@ int MapLayout::primerAt(Point p) const
             return g.primer;
     for (int i = int(m_seq.primers.size()) - 1; i >= 0; --i) {
         const Primer &pr = m_seq.primers[size_t(i)];
-        if (pr.binding.length() <= 0 || pr.binding.end > m_n)
+        if (!primerShown(pr, m_seq))
             continue;
         if (m_circular) {
             const double r = std::hypot(p.x - m_c.x, p.y - m_c.y);
@@ -1070,7 +1107,8 @@ int MapLayout::primerAt(Point p) const
                 continue;
             const double pos = angleAt(p) / (2 * kPi) * m_n;
             const double slack = 3.0 / std::max(1.0, r) / (2 * kPi) * m_n;   // 3 px either side
-            if (pos >= pr.binding.start - slack && pos <= pr.binding.end + slack)
+            if ((pos >= pr.binding.start - slack && pos <= pr.binding.end + slack)
+                || pos + m_n <= pr.binding.end + slack)   // past the origin
                 return i;
         } else {
             if (m_primerRowY <= 0 || p.y < m_primerRowY - 3 || p.y > m_primerRowY + 10)

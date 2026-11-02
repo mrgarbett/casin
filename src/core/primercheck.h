@@ -7,6 +7,7 @@
 
 #include "sequence.h"
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -84,9 +85,12 @@ std::vector<PrimerSite> findPrimerSites(const Sequence &seq, const std::string &
 // comes as close as it can to `targetTm`, between 15 and 40 bases. The 3' end
 // and any 5' tail stay; the annealing part's 5' end moves along the template.
 // Returns the new primer (its tail as it was) and sets *fitted to the new
-// site. Returns `primer` unchanged when it doesn't anneal at `site`.
+// site. Returns `primer` unchanged when it doesn't anneal at `site`. `tm`
+// works out a Tm from clean bases: meltingTemperature unless given (as
+// polymeraseTmExact for a polymerase's buffer).
 std::string fitAnnealingToTm(const Sequence &seq, const std::string &primer, const PrimerSite &site,
-                             double targetTm, PrimerSite *fitted);
+                             double targetTm, PrimerSite *fitted,
+                             const std::function<double(const std::string &)> &tm = {});
 
 // Length of the product two primers make from these sites, tails included,
 // or -1 when they don't face each other on opposite strands.

@@ -67,7 +67,8 @@ SequenceLayout::SequenceLayout(const oc::Sequence &seq, const std::vector<CutSit
         m_orfFwd.assign(size_t(m_n), 0);
         if (m_opt.frames == 6)
             m_orfRev.assign(size_t(m_n), 0);
-        for (const Orf &o : findOrfs(m_seq, std::max(1, m_opt.minOrfCodons))) {
+        m_orfs = findOrfs(m_seq, std::max(1, m_opt.minOrfCodons));
+        for (const Orf &o : m_orfs) {
             std::vector<char> &aa = o.strand == Strand::Reverse ? m_orfRev : m_orfFwd;
             if (aa.empty())
                 continue;
@@ -172,7 +173,9 @@ SequenceLayout::SequenceLayout(const oc::Sequence &seq, const std::vector<CutSit
         for (const Range &r : f.ranges) {
             if (r.length() <= 0)
                 continue;
-            for (int li = r.start / m_bpl; li < int(m_lines.size()) && m_lines[size_t(li)].start < r.end; ++li) {
+            // (A file can put a range before base 1; it starts on line 0.)
+            for (int li = std::max(0, r.start / m_bpl); li < int(m_lines.size()) && m_lines[size_t(li)].start < r.end;
+                 ++li) {
                 const Line &line = m_lines[size_t(li)];
                 const int a = std::max(r.start, line.start) - line.start;
                 const int b = std::min(r.end, line.start + line.len) - line.start;
@@ -192,23 +195,35 @@ SequenceLayout::SequenceLayout(const oc::Sequence &seq, const std::vector<CutSit
     // within each line, with room for the name past the 3' end.
     for (size_t pi = 0; m_opt.primers && pi < m_seq.primers.size(); ++pi) {
         const Primer &pr = m_seq.primers[pi];
+        const bool circular = m_seq.circular;
         const Range bind = pr.binding;
-        if (bind.length() <= 0 || bind.end > m_n)
+        if (bind.length() <= 0 || bind.end > (circular ? bind.start + m_n : m_n))
             continue;
         const bool fwd = pr.strand != Strand::Reverse;
         const int tail = std::max(0, int(pr.bases.size()) - bind.length());
-        const Range r = fwd ? Range{std::max(0, bind.start - tail), bind.end}
-                            : Range{bind.start, std::min(m_n, bind.end + tail)};
+        // On a circle the site (across the origin: past the end) and its tail
+        // can run past either end; each turn is drawn where it falls.
+        Range r = fwd ? Range{bind.start - tail, bind.end} : Range{bind.start, bind.end + tail};
+        if (!circular)
+            r = {std::max(0, r.start), std::min(m_n, r.end)};
         const int nameCols = int(std::ceil((tm.width(pr.name, m_primerNameFont) + 6) / std::max(1.0, m_charW)));
-        for (int li = r.start / m_bpl; li < int(m_lines.size()) && m_lines[size_t(li)].start < r.end; ++li) {
-            Line &line = m_lines[size_t(li)];
-            const int a = std::max(r.start, line.start) - line.start;
-            const int b = std::min(r.end, line.start + line.len) - line.start;
-            if (b <= a)
+        for (int shift : {0, m_n, -m_n}) {
+            if (shift != 0 && !circular)
+                break;
+            const Range here{std::max(0, r.start - shift), std::min(m_n, r.end - shift)};
+            if (here.length() <= 0)
                 continue;
-            const int ba = std::clamp(bind.start - line.start, a, b), bb = std::clamp(bind.end - line.start, a, b);
-            const bool head = fwd ? bind.end == line.start + bb && bb > ba : bind.start == line.start + ba && bb > ba;
-            line.primers.push_back({int(pi), 0, a, b, ba, bb, head ? nameCols : 0, head, fwd});
+            const Range b0{bind.start - shift, bind.end - shift};
+            for (int li = here.start / m_bpl; li < int(m_lines.size()) && m_lines[size_t(li)].start < here.end; ++li) {
+                Line &line = m_lines[size_t(li)];
+                const int a = std::max(here.start, line.start) - line.start;
+                const int b = std::min(here.end, line.start + line.len) - line.start;
+                if (b <= a)
+                    continue;
+                const int ba = std::clamp(b0.start - line.start, a, b), bb = std::clamp(b0.end - line.start, a, b);
+                const bool head = fwd ? b0.end == line.start + bb && bb > ba : b0.start == line.start + ba && bb > ba;
+                line.primers.push_back({int(pi), 0, a, b, ba, bb, head ? nameCols : 0, head, fwd, shift});
+            }
         }
     }
     for (Line &line : m_lines) {
@@ -349,13 +364,36 @@ int SequenceLayout::baseAt(Point p) const
 
 int SequenceLayout::codonAt(Point p) const
 {
+    return codonHitAt(p).codon;
+}
+
+Span SequenceLayout::translationAt(Point p) const
+{
+    const CodonHit hit = codonHitAt(p);
+    if (hit.codon < 0)
+        return {};
+    if (hit.feature >= 0)
+        return m_seq.features[size_t(hit.feature)].span(m_n, m_seq.circular);
+    // The ORF of that strand and phase covering the codon; the longest first.
+    for (const Orf &o : m_orfs) {
+        if (o.strand != hit.strand)
+            continue;
+        const int rel = ((hit.codon - o.start) % m_n + m_n) % m_n;
+        if (rel < o.length && rel % 3 == 0)
+            return {o.start, o.length};
+    }
+    return {};
+}
+
+SequenceLayout::CodonHit SequenceLayout::codonHitAt(Point p) const
+{
     const int li = lineIndexAt(p.y);
     if (li < 0)
-        return -1;
+        return {};
     const Line &l = m_lines[size_t(li)];
     const int col = columnAt(p.x);
     if (col < 0 || col >= l.len)
-        return -1;
+        return {};
     const int pos = l.start + col;
     // ORF frame rows: the codon of that frame covering pos.
     for (int side = 0; side < 2; ++side) {
@@ -370,8 +408,8 @@ int SequenceLayout::codonAt(Point p) const
         const int phase = fwd ? k : ((m_n - k) % 3 + 3) % 3;
         const int start = pos - ((pos - phase) % 3 + 3) % 3;
         if (start >= 0 && start < m_n && aas[size_t(start)])
-            return start;
-        return -1;
+            return {start, fwd ? Strand::Forward : Strand::Reverse, -1};
+        return {};
     }
     // CDS translation rows, under their feature lanes.
     for (const LanePiece &pc : l.pieces) {
@@ -385,9 +423,9 @@ int SequenceLayout::codonAt(Point p) const
             continue;
         for (const CodonMark &m : mi->second)
             if (std::abs(m.position - pos) <= 1)
-                return m.position - 1;
+                return {m.position - 1, Strand::Forward, pc.feature};
     }
-    return -1;
+    return {};
 }
 
 double SequenceLayout::boundaryX(int b) const
@@ -584,6 +622,38 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
     }
     const CutSite *active = (m_opt.enzymes && st.activeSite >= 0 && st.activeSite < int(m_sites.size()))
                               ? &m_sites[size_t(st.activeSite)] : nullptr;
+    // The feature or site hovered here or on the map: a light tint over its
+    // bases (a site's recognition sequence), up to two pieces across the origin.
+    std::vector<std::pair<Range, Color>> tints;
+    auto tint = [&](int a, int e, Color c) {
+        if (a < 0 || a >= m_n || e <= a)
+            return;
+        tints.push_back({{a, std::min(e, m_n)}, c});
+        if (e > m_n && m_seq.circular)
+            tints.push_back({{0, std::min(e - m_n, a)}, c});
+    };
+    if (m_opt.features && st.hoverFeature >= 0 && st.hoverFeature < int(m_seq.features.size())
+        && FeatureStyle::isDrawn(m_seq.features[size_t(st.hoverFeature)])
+        && !m_opt.hiddenTypes.count(m_seq.features[size_t(st.hoverFeature)].type))
+        for (const Range &r : m_seq.features[size_t(st.hoverFeature)].ranges)
+            tint(r.start, r.end, m_theme.accent.withAlpha(0.12));
+    if (m_opt.enzymes && st.hoverSite >= 0 && st.hoverSite < int(m_sites.size())) {
+        const CutSite &c = m_sites[size_t(st.hoverSite)];
+        if (c.enzyme)
+            tint(c.matchStart, c.matchStart + c.enzyme->siteLength(), m_theme.cutMarker.withAlpha(0.15));
+    }
+    // An amino acid lights up with the selection when its whole codon is
+    // selected and the selection starts in its frame: one for a clicked
+    // codon, the row for a double-clicked frame, nothing for a stretch of
+    // bases picked in another frame.
+    auto codonSelected = [&](int p) {
+        if (!st.hasSelection || st.selection.length < 3)
+            return false;
+        const int a = st.selection.start, e = st.selection.end();
+        if (p < a && m_seq.circular)
+            p += m_n;
+        return p >= a && p + 3 <= e && (p - a) % 3 == 0;
+    };
 
     const double asc = m_baseFont.size * 0.78;
     for (int li = lineIndexAt(scrollY); li >= 0 && li < int(m_lines.size()); ++li) {
@@ -599,6 +669,12 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
             const int b = std::min(r.end, l.start + l.len) - l.start;
             if (b > a)
                 s.rect({boundaryX(a), top, boundaryX(b) - boundaryX(a), strandsEnd - top}, m_theme.selection);
+        }
+        for (const auto &t : tints) {
+            const int a = std::max(t.first.start, l.start) - l.start;
+            const int b = std::min(t.first.end, l.start + l.len) - l.start;
+            if (b > a)
+                s.rect({boundaryX(a), top, boundaryX(b) - boundaryX(a), strandsEnd - top}, t.second);
         }
         for (const Range &r : hover) {
             const int a = std::max(r.start, l.start) - l.start;
@@ -662,6 +738,8 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
                     if (!aa || (fwd ? p % 3 : ((m_n - p) % 3 + 3) % 3) != k)
                         continue;
                     const double cx = colX(p + 1 - l.start) + m_charW / 2;
+                    if (codonSelected(p))
+                        s.rect({cx - m_charW * 1.5 + 0.5, fy, m_charW * 3 - 1, m_aaH - 1}, m_theme.selection);
                     // The stop codon's block points the way the frame reads.
                     s.polygon(codonBlock(cx - m_charW * 1.5 + 0.5, fy, m_charW * 3 - 1, m_aaH - 1,
                                          aa == '*' ? (fwd ? 1 : -1) : 0),
@@ -733,7 +811,7 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
             const double lift = pc.top ? -5 : 5;   // the tail leaves the strand
             for (int c = pc.a; c < pc.b; ++c) {
                 const int pos = l.start + c;
-                const int i = pc.top ? pos - first : first - pos;   // index in the primer, 5' to 3'
+                const int i = pc.top ? pos + pc.shift - first : first - pos - pc.shift;   // index in the primer, 5' to 3'
                 if (i < 0 || i >= int(pr.bases.size()))
                     continue;
                 const char typed = pr.bases[size_t(i)];   // uppercase unless typed in mixed case
@@ -829,8 +907,9 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
                 poly = {{x0, ym}, {x0 + head, ly}, {x1, ly}, {x1, ly + m_laneH}, {x0 + head, ly + m_laneH}};
             else
                 poly = {{x0, ly}, {x1, ly}, {x1, ly + m_laneH}, {x0, ly + m_laneH}};
-            const bool isActive = pc.feature == st.activeFeature;
-            s.polygon(poly, fill, isActive ? m_theme.accent : m_theme.featureOutline, isActive ? 2 : 0.6);
+            const bool isActive = pc.feature == st.activeFeature, isHover = pc.feature == st.hoverFeature;
+            s.polygon(poly, fill, isActive || isHover ? m_theme.accent : m_theme.featureOutline,
+                      isActive ? 2 : isHover ? 1.2 : 0.6);
             Font nf{10, true, false};
             const double avail = x1 - x0 - head - 6;
             if (avail > 20) {
@@ -856,6 +935,8 @@ Scene SequenceLayout::render(double scrollY, double viewHeight, const SeqViewSta
                 for (; it != marks.end() && it->position < l.start + pc.b; ++it, ++k) {
                     const int c = it->position - l.start;
                     const double cx = colX(c) + m_charW / 2;
+                    if (codonSelected(it->position - 1))
+                        s.rect({cx - m_charW * 1.5, ay, m_charW * 3, m_aaH - 1}, m_theme.selection);
                     // The block at the 3' end of the reading frame points its way.
                     const bool fwdF = f.strand != Strand::Reverse;
                     const bool last = fwdF ? k + 1 == int(marks.size()) : k == 0;
