@@ -2147,22 +2147,26 @@ void Window::goToDialog()
     Form f = makeForm("Go to Position", "Go");
     st->dialog = f.dialog;
     GtkWidget *g = addGroup(f);
+    const std::string wrap = m_doc.sequence().circular ? ", or across the origin as 9000..200" : "";
     adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(g),
-                                          ("A base number from 1 to " + view::withThousands(n) + ".").c_str());
-    st->entry = entryRow(g, "Base", std::to_string(m_doc.hasSelection() ? m_doc.selection().start + 1 : 1));
+                                          ("A base number from 1 to " + view::withThousands(n)
+                                           + ", or a range such as 100..500 or 100-500" + wrap + ".")
+                                              .c_str());
+    // A range already selected comes back as a range, so it can be nudged.
+    const Span sel = m_doc.selection();
+    const int last = n > 0 ? (sel.start + sel.length - 1) % n + 1 : 1;
+    const std::string current = !m_doc.hasSelection() ? "1"
+                                : sel.length > 1      ? std::to_string(sel.start + 1) + ".." + std::to_string(last)
+                                                      : std::to_string(sel.start + 1);
+    st->entry = entryRow(g, "Position", current);
     g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
                          auto *st = static_cast<TextForm *>(p);
-                         std::string digits;
-                         for (char c : text(st->entry))
-                             if (std::isdigit(static_cast<unsigned char>(c)))
-                                 digits.push_back(c);
-                         const long base = digits.empty() || digits.size() > 9 ? 0 : std::atol(digits.c_str());
-                         if (base < 1 || base > st->doc->sequence().length()) {
+                         if (!st->doc->goToPosition(text(st->entry))) {
                              st->window->toast("Type a base number from 1 to "
-                                               + view::withThousands(st->doc->sequence().length()));
+                                               + view::withThousands(st->doc->sequence().length())
+                                               + ", or a range such as 100..500");
                              return;
                          }
-                         st->doc->setSelection({int(base) - 1, 0});
                          adw_dialog_close(st->dialog);
                      })),
                      st);
