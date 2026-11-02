@@ -28,6 +28,7 @@ add_executable(restricto
     shell.cpp
     dialogs.cpp
     digestdialog.cpp
+    gatewaywizard.cpp
     mapview.cpp
     seqview.cpp
     primereditor.cpp

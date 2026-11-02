@@ -939,6 +939,7 @@ void Shell::rebuildMenu()
     g_menu_append(cloneCore, "PCR…", "win.pcr");
     g_menu_append(cloneCore, "Insertion by PCR…", "win.insertion");
     g_menu_append(cloneCore, "Gibson Assembly…", "win.gibson");
+    g_menu_append(cloneCore, "Gateway Cloning…", "win.gateway");
     g_menu_append_section(cloneMenu, nullptr, G_MENU_MODEL(cloneCore));
     GMenu *cloneExp = g_menu_new();
     addExp(cloneExp, "Restriction Cloning…", "win.clone");
