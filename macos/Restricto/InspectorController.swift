@@ -535,18 +535,35 @@ final class InspectorController: NSViewController, NSTableViewDataSource, NSTabl
             label.lineBreakMode = .byTruncatingTail
             label.toolTip = e.name
             label.textColor = e.passesFilter ? .labelColor : .tertiaryLabelColor
-            guard e.methylationBlocked > 0 else { return label }
-            // Dam/Dcm: a small orange tag; the tooltip says how many sites it blocks.
-            let tag = NSTextField(labelWithString: e.methylation == "Dam and Dcm" ? "Dam·Dcm" : e.methylation)
-            tag.font = .systemFont(ofSize: 9, weight: .semibold)
-            tag.textColor = .systemOrange
-            let all = e.methylationBlocked >= e.cuts
-            let tip = "\(e.name): \(all ? "every site" : "\(e.methylationBlocked) of \(e.cuts) sites") blocked by "
-                + "\(e.methylation) methylation when the DNA comes from a dam+ dcm+ E. coli strain"
-            label.toolTip = tip
-            tag.toolTip = tip
-            tag.setContentCompressionResistancePriority(.required, for: .horizontal)
-            let stack = NSStackView(views: [label, tag])
+            var views: [NSView] = [label]
+            var tips: [String] = []
+            if !e.cutFeatures.isEmpty {
+                // Cuts inside a feature: a small tag naming it (and how many more);
+                // the tooltip lists them all.
+                let more = e.cutFeatures.count > 1 ? " +\(e.cutFeatures.count - 1)" : ""
+                let tag = NSTextField(labelWithString: e.cutFeatures[0] + more)
+                tag.font = .systemFont(ofSize: 9, weight: .semibold)
+                tag.textColor = .systemPurple
+                tag.lineBreakMode = .byTruncatingMiddle
+                tag.setContentCompressionResistancePriority(.defaultLow + 1, for: .horizontal)
+                views.append(tag)
+                tips.append("\(e.name) cuts inside \(e.cutFeatures.joined(separator: ", "))")
+            }
+            if e.methylationBlocked > 0 {
+                // Dam/Dcm: a small orange tag; the tooltip says how many sites it blocks.
+                let tag = NSTextField(labelWithString: e.methylation == "Dam and Dcm" ? "Dam·Dcm" : e.methylation)
+                tag.font = .systemFont(ofSize: 9, weight: .semibold)
+                tag.textColor = .systemOrange
+                let all = e.methylationBlocked >= e.cuts
+                tips.append("\(e.name): \(all ? "every site" : "\(e.methylationBlocked) of \(e.cuts) sites") blocked by "
+                    + "\(e.methylation) methylation when the DNA comes from a dam+ dcm+ E. coli strain")
+                tag.setContentCompressionResistancePriority(.required, for: .horizontal)
+                views.append(tag)
+            }
+            guard views.count > 1 else { return label }
+            let tip = tips.joined(separator: "\n")
+            for view in views { view.toolTip = tip }
+            let stack = NSStackView(views: views)
             stack.spacing = 4
             return stack
         case "site":

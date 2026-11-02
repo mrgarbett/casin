@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "document.h"
 #include "maplayout.h"   // withThousands
+#include "style.h"
 #include "../core/edit.h"
 #include "../core/featurelib.h"
 #include "../core/tm.h"
@@ -79,6 +80,17 @@ bool Document::enzymePassesFilter(const std::string &name) const
 {
     const int c = cutCount(name);
     return c > 0 && (m_maxCuts <= 0 || c <= m_maxCuts);
+}
+
+std::vector<int> Document::featuresCutByEnzyme(const std::string &name) const
+{
+    std::set<int> hit;
+    for (const CutSite &s : m_allSites)
+        if (s.enzyme->name == name)
+            for (int i : featuresCutBy(m_seq, s))
+                if (view::FeatureStyle::isDrawn(m_seq.features[size_t(i)]))
+                    hit.insert(i);
+    return {hit.begin(), hit.end()};
 }
 
 void Document::refilter()

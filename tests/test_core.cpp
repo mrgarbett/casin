@@ -1711,6 +1711,49 @@ static void testMethylation()
     CHECK(methylationName(MethylDam | MethylDcm) == "Dam and Dcm");
 }
 
+// A site cuts into a feature when the stretch between its two strand cuts
+// reaches inside the footprint; cuts on the edge leave the feature whole.
+static void testFeaturesCutBy()
+{
+    Sequence s;
+    s.bases = "AAAAAAAAAAGAATTCAAAAAAAAAA";   // EcoRI G^AATTC at 10: cuts 11 (top) and 15 (bottom)
+    s.circular = true;
+    auto feature = [&](const std::string &name, std::vector<Range> ranges) {
+        Feature f;
+        f.type = "misc_feature";
+        f.name = name;
+        f.ranges = std::move(ranges);
+        s.features.push_back(f);
+    };
+    feature("around", {{5, 20}});
+    feature("ends at the top cut", {{0, 11}});
+    feature("starts at the bottom cut", {{15, 26}});
+    feature("in the overhang", {{12, 14}});
+    feature("elsewhere", {{18, 24}});
+    feature("across the origin", {{20, 26}, {0, 12}});
+    const std::vector<Enzyme> one = {*findEnzyme("EcoRI")};
+    const std::vector<CutSite> sites = findSites(s, one);
+    CHECK(sites.size() == 1);
+    if (sites.size() != 1)
+        return;
+    CHECK(featuresCutBy(s, sites[0]) == (std::vector<int>{0, 3, 5}));
+
+    // A site across the origin of a circle (EcoRI at 23: cuts at 24 and 2).
+    Sequence o;
+    o.bases = "TTCAAAAAAAAAAAAAAAAAAAAGAA";
+    o.circular = true;
+    Feature f;
+    f.type = "CDS";
+    f.ranges = {{22, 26}, {0, 1}};
+    o.features.push_back(f);
+    f.ranges = {{5, 20}};
+    o.features.push_back(f);
+    const std::vector<CutSite> across = findSites(o, one);
+    CHECK(across.size() == 1);
+    if (!across.empty())
+        CHECK(featuresCutBy(o, across[0]) == std::vector<int>{0});
+}
+
 static void testCommonFeatures()
 {
     const CommonElement *amp = nullptr, *t7 = nullptr, *m13 = nullptr;
@@ -1965,6 +2008,7 @@ int main(int argc, char **argv)
     testOverhangClone();
     testLowercase();
     testMethylation();
+    testFeaturesCutBy();
     testCommonFeatures();
     if (argc > 1) {
         testEmbl(argv[1]);

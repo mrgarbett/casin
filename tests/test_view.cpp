@@ -262,6 +262,30 @@ static void testFeatureColor(const Sequence &seq)
     CHECK(!r.features.empty() && r.features[0].color.empty());
 }
 
+// The enzymes list marks enzymes that cut inside a feature; "source" doesn't count.
+static void testCutsInsideFeatures()
+{
+    Sequence s;
+    s.bases = std::string(20, 'A') + "GAATTC" + std::string(20, 'A') + "GGATCC" + std::string(20, 'A');
+    s.circular = true;
+    auto feature = [&](const std::string &type, const std::string &name, int start, int end) {
+        Feature f;
+        f.type = type;
+        f.name = name;
+        f.ranges = {{start, end}};
+        s.features.push_back(f);
+    };
+    feature("source", "", 0, int(s.bases.size()));
+    feature("CDS", "insert", 10, 30);    // EcoRI cuts inside
+    feature("promoter", "P7", 21, 25);   // inside EcoRI's overhang
+    feature("CDS", "AmpR", 52, 60);      // BamHI cuts at 47/51, just before it
+    Document doc;
+    doc.setSequence(s);
+    CHECK(doc.featuresCutByEnzyme("EcoRI") == (std::vector<int>{1, 2}));
+    CHECK(doc.featuresCutByEnzyme("BamHI").empty());
+    CHECK(doc.featuresCutByEnzyme("NotAnEnzyme").empty());
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2) {
@@ -486,6 +510,7 @@ int main(int argc, char **argv)
     }
     testUndo(seq);
     testFeatureColor(seq);
+    testCutsInsideFeatures();
     testGoToPosition();
     testShiftSelectSites();
     testEditingHistoryHidden();

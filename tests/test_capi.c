@@ -61,6 +61,7 @@ int main(int argc, char **argv)
     for (int i = 0; i < oc_document_enzyme_count(doc); ++i) {
         OCEnzymeInfo e;
         oc_document_enzyme(doc, i, &e);
+        CHECK(e.cut_feature_names && (e.cut_features == 0) == (e.cut_feature_names[0] == '\0'));
         if (strcmp(e.name, "EcoRI") == 0) {
             sawEcoRI = true;
             CHECK(e.hidden && e.cuts == 1);

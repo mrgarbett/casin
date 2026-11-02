@@ -50,6 +50,9 @@ public:
     bool isEnzymeHidden(const std::string &name) const { return m_hidden.count(name) > 0; }
     void setEnzymeHidden(const std::string &name, bool hidden);
     bool enzymePassesFilter(const std::string &name) const;
+    // The drawn features (not "source") that any of the enzyme's cuts fall
+    // inside, as feature indices in order: cloning there breaks them.
+    std::vector<int> featuresCutByEnzyme(const std::string &name) const;
     // Shows just these enzymes, with the cut filter set to `maxCuts`.
     void showOnlyEnzymes(const std::set<std::string> &names, int maxCuts);
 

@@ -97,6 +97,8 @@ typedef struct {
     bool passes_filter;
     int methylation_blocked;   /* of its sites, how many Dam/Dcm methylation blocks */
     const char *methylation;   /* "Dam", "Dcm", "Dam and Dcm", or "" */
+    int cut_features;          /* drawn features (not "source") its cuts fall inside */
+    const char *cut_feature_names;   /* their names, one per line, or "" */
 } OCEnzymeInfo;
 
 int oc_document_enzyme_count(const OCDocument *doc);           /* every known enzyme */
