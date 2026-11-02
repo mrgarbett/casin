@@ -234,6 +234,71 @@ static void testShiftSelectFeatures()
     CHECK(doc.selection() == (Span{85, 65}));
 }
 
+// Find matches feature, primer and enzyme names first, then bases.
+static void testFindNames()
+{
+    Sequence s;
+    s.bases = std::string(20, 'A') + "GAATTC" + std::string(20, 'C') + "GGATCC" + std::string(40, 'C');
+    s.circular = true;
+    auto feature = [&](const std::string &type, const std::string &name, int start, int end) {
+        Feature f;
+        f.type = type;
+        f.name = name;
+        f.ranges = {{start, end}};
+        s.features.push_back(f);
+    };
+    feature("source", "whole", 0, int(s.bases.size()));
+    feature("misc_feature", "attB1", 5, 15);
+    feature("misc_feature", "GAT", 30, 33);   // a name that is also DNA
+    s.primers.push_back({"P7", s.bases.substr(60, 20), {60, 80}, Strand::Forward});
+    Document doc;
+    doc.setSequence(s);
+    using K = Document::FindKind;
+    int count = 0;
+    K kind = K::None;
+
+    CHECK_EQ(doc.findNamesOrBases(" ATTB1 ", &count, &kind), 1);
+    CHECK(count == 1 && kind == K::Feature && doc.activeFeature() == 1);
+    CHECK(doc.selection() == (Span{5, 10}));
+    CHECK_EQ(doc.findNamesOrBases("p7", &count, &kind), 1);
+    CHECK(kind == K::Primer && doc.selection() == (Span{60, 20}));
+    CHECK_EQ(doc.findNamesOrBases("ecori", &count, &kind), 1);
+    CHECK(count == 1 && kind == K::Site && doc.activeSite() >= 0 && doc.selection() == (Span{20, 6}));
+    // A site the cut filter hides is still found, as a plain selection.
+    doc.setEnzymeHidden("BamHI", true);
+    CHECK_EQ(doc.findNamesOrBases("BamHI", &count, &kind), 1);
+    CHECK(kind == K::Site && doc.activeSite() < 0 && doc.selection() == (Span{46, 6}));
+
+    // "GAT": the feature, then the base matches, then round to the feature.
+    int bases = 0;
+    doc.clearSelection();
+    doc.findNext("GAT", &bases);
+    CHECK(bases > 0);
+    doc.clearSelection();
+    CHECK_EQ(doc.findNamesOrBases("gat", &count, &kind), 1);
+    CHECK(count == bases + 1 && kind == K::Feature && doc.activeFeature() == 2);
+    CHECK_EQ(doc.findNamesOrBases("GAT", &count, &kind), 2);
+    CHECK(kind == K::Bases);
+    for (int i = 0; i < bases - 1; ++i)
+        doc.findNamesOrBases("GAT", &count, &kind);
+    CHECK(kind == K::Bases);
+    CHECK_EQ(doc.findNamesOrBases("GAT", &count, &kind), 1);
+    CHECK(kind == K::Feature);
+
+    // Plain DNA still searches bases, as findNext does.
+    doc.clearSelection();
+    int plain = 0;
+    const int first = doc.findNext("GAATTC", &plain);
+    doc.clearSelection();
+    CHECK_EQ(doc.findNamesOrBases("gaattc", &count, &kind), first);
+    CHECK(count == plain && kind == K::Bases && doc.selection() == (Span{20, 6}));
+    CHECK_EQ(doc.findNamesOrBases("ACACACAC", &count, &kind), 0);
+    CHECK(count == 0 && kind == K::None);
+    // Not a name (a "source" feature doesn't count) and not DNA.
+    CHECK_EQ(doc.findNamesOrBases("whole", &count, &kind), -1);
+    CHECK_EQ(doc.findNamesOrBases("   ", &count, &kind), -1);
+}
+
 static void testFeatureColor(const Sequence &seq)
 {
     Document doc;
@@ -511,6 +576,7 @@ int main(int argc, char **argv)
     testUndo(seq);
     testFeatureColor(seq);
     testCutsInsideFeatures();
+    testFindNames();
     testGoToPosition();
     testShiftSelectSites();
     testEditingHistoryHidden();

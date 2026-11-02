@@ -730,6 +730,21 @@ int oc_document_find_next(OCDocument *doc, const char *query, int *count)
     });
 }
 
+int oc_document_find_named(OCDocument *doc, const char *query, int *count, int *kind)
+{
+    return guarded<int>(-1, nullptr, [&]() -> int {
+        Document::FindKind k = Document::FindKind::None;
+        const int n = doc->doc.findNamesOrBases(query ? query : "", count, &k);
+        if (kind)
+            *kind = k == Document::FindKind::Feature ? OC_HIT_FEATURE
+                  : k == Document::FindKind::Primer  ? OC_HIT_PRIMER
+                  : k == Document::FindKind::Site    ? OC_HIT_SITE
+                  : k == Document::FindKind::Bases   ? OC_HIT_SEQUENCE
+                                                     : OC_HIT_NONE;
+        return n;
+    });
+}
+
 // ---- layouts --------------------------------------------------------------------
 
 /* ---- digest and gel ---- */

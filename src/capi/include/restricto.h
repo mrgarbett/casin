@@ -139,6 +139,13 @@ void oc_document_extend_to_primer(OCDocument *doc, int index);
  * selects the next match. Returns the 1-based match number, 0 when there is
  * no match, or -1 when the query isn't DNA. *count gets the total. */
 int oc_document_find_next(OCDocument *doc, const char *query, int *count);
+/* Like oc_document_find_next, but features (not "source"), primers and enzyme
+ * sites named `query` (ignoring case) come first, in sequence order, then the
+ * base matches when the query is DNA. Repeating the query while its last
+ * match is still selected steps through them all. *kind gets OC_HIT_FEATURE,
+ * OC_HIT_PRIMER, OC_HIT_SITE or OC_HIT_SEQUENCE (bases). Returns -1 when
+ * nothing has the name and the query isn't DNA. */
+int oc_document_find_named(OCDocument *doc, const char *query, int *count, int *kind);
 
 /* ---- editing --------------------------------------------------------------
  * Each call is one undo step and reports OC_CHANGED_SEQUENCE, then
