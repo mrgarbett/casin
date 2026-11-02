@@ -27,7 +27,7 @@ if(GIT_FOUND)
         endforeach()
     endif()
 endif()
-configure_file(src/core/version_hash.h.in ${PROJECT_SOURCE_DIR}/src/core/version_hash.h @ONLY)
+configure_file(cmake/version_hash.h.in ${PROJECT_SOURCE_DIR}/src/core/version_hash.h @ONLY)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wall -Wextra -Wpedantic)
