@@ -32,6 +32,8 @@ final class SequenceView: NSView {
     var onEditFeature: ((Int) -> Void)?
     /// Right-click > Add Primer… (with the selection, if any).
     var onAddPrimer: (() -> Void)?
+    /// Right-click on a site > Digest with…: called with the enzyme.
+    var onDigest: ((String) -> Void)?
     /// False for a preview: typing, paste, cut and delete don't change it.
     var isEditable = true
     /// While the width keeps changing (a side panel sliding open), the old
@@ -268,8 +270,14 @@ final class SequenceView: NSView {
 
     // MARK: Mouse
 
-    /// Right-click: Add Primer…, pre-filled with the selected bases.
+    /// Right-click: on an enzyme site, the site menu; elsewhere Add Primer…,
+    /// pre-filled with the selected bases.
     override func menu(for event: NSEvent) -> NSMenu? {
+        if let digest = onDigest, let layout = ensureLayout(), !document.isEmpty {
+            let p = layoutPoint(event)
+            let site = Int(oc_seq_layout_site_at(layout, p.x, p.y))
+            if site >= 0 { return SiteMenu.menu(for: site, in: document, onDigest: digest) }
+        }
         guard onAddPrimer != nil, !document.isEmpty else { return super.menu(for: event) }
         let menu = NSMenu()
         let title = document.hasSelection && document.selectionLength > 0 ? "Add Primer from Selection…" : "Add Primer…"
@@ -285,6 +293,23 @@ final class SequenceView: NSView {
         guard let layout = ensureLayout(), !document.isEmpty else { return }
         let p = layoutPoint(event)
         if event.modifierFlags.contains(.shift) {
+            // On a second enzyme: the bases between the two cuts. On a
+            // primer or feature: the selection grown to cover it.
+            let site = Int(oc_seq_layout_site_at(layout, p.x, p.y))
+            let primer = site < 0 ? Int(oc_seq_layout_primer_at(layout, p.x, p.y)) : -1
+            let feature = site < 0 && primer < 0 ? Int(oc_seq_layout_feature_at(layout, p.x, p.y)) : -1
+            if site >= 0 || primer >= 0 || feature >= 0 {
+                if site >= 0 {
+                    document.extendToSite(site)
+                } else if primer >= 0 {
+                    document.extendToPrimer(primer)
+                } else {
+                    document.extendToFeature(feature)
+                }
+                SelectionBadge.shared.show(for: document, event: event, in: self)
+                SelectionBadge.shared.hideSoon()
+                return
+            }
             if !document.hasSelection { anchor = 0 }
             dragging = true
             extendSelection(to: p)
@@ -292,10 +317,22 @@ final class SequenceView: NSView {
             return
         }
         // An amino acid in a translation row selects its codon; dragging on
-        // across amino acids selects their codons too.
+        // across amino acids selects their codons too. A double-click takes
+        // the whole translation: the open reading frame, or the CDS.
         let codon = Int(oc_seq_layout_codon_at(layout, p.x, p.y))
         if codon >= 0 {
             window?.makeFirstResponder(self)
+            if event.clickCount == 2 {
+                var start: Int32 = 0, length: Int32 = 0
+                if oc_seq_layout_translation_at(layout, p.x, p.y, &start, &length) {
+                    dragging = false
+                    codonAnchor = nil
+                    anchor = Int(start)
+                    document.select(start: Int(start), length: Int(length))
+                    SelectionBadge.shared.show(for: document, event: event, in: self)
+                    return
+                }
+            }
             dragging = true
             codonAnchor = codon
             anchor = codon

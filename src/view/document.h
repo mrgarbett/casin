@@ -68,10 +68,25 @@ public:
     std::string selectedBases() const;
     int activeFeature() const { return m_activeFeature; }
     int activeSite() const { return m_activeSite; }
+    // The site shift-clicked after the active one (extendToSite), while that
+    // selection stands; -1 otherwise.
+    int secondSite() const { return m_secondSite; }
     // Selects the feature's footprint and makes it active.
     void activateFeature(int index);
     // Selects the site's recognition sequence and makes it active.
     void activateSite(int visibleIndex);
+    // Shift-click on a second site: selects the bases between the active
+    // site's top-strand cut and this one's (forward from the active site on a
+    // circle), keeping the first site active. With no active site, as
+    // activateSite.
+    void extendToSite(int visibleIndex);
+    // Shift-click on a feature or primer: grows the selection (or caret) to
+    // also cover `target`. On a circle it takes the shorter of the two arcs
+    // that cover both, so it grows towards the target the near way round.
+    // With no selection, selects the target.
+    void extendSelectionTo(Span target);
+    void extendToFeature(int index);
+    void extendToPrimer(int index);   // index into displaySequence().primers
 
     // Searches both strands for `query` (IUPAC) and selects the first match
     // starting after the current selection start, wrapping around. Returns the
@@ -176,6 +191,7 @@ private:
     bool m_hasSelection = false;
     int m_activeFeature = -1;
     int m_activeSite = -1;
+    int m_secondSite = -1;
     std::vector<Step> m_undo, m_redo;
     unsigned m_state = 0, m_savedState = 0, m_nextState = 0;
     bool m_inEdit = false;
