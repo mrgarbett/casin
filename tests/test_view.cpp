@@ -267,6 +267,29 @@ int main(int argc, char **argv)
             for (double x = 0; x < 300 && hit < 0; x += 2)
                 hit = six.codonAt({x, y});
         CHECK(hit == 0 || hit == 3 || hit == 6);
+        // Its whole translation is the ORF, from the ATG through the stop.
+        {
+            Span whole;
+            for (double y = 0; y < six.totalHeight() && whole.empty(); y += 1)
+                for (double x = 0; x < 300 && whole.empty(); x += 2)
+                    whole = six.translationAt({x, y});
+            CHECK(whole.start == 0 && whole.length == 9);
+            CHECK(six.translationAt({0, -50}).empty());
+            // Selecting a codon lights its amino acid: one more shape than the
+            // selection's own rectangle; the whole ORF lights all three.
+            SeqViewState one, all;
+            one.hasSelection = all.hasSelection = true;
+            one.selection = {3, 3};
+            all.selection = whole;
+            const size_t plainCount = six.render(0, 400, {}).items.size();
+            CHECK(six.render(0, 400, one).items.size() == plainCount + 2);
+            CHECK(six.render(0, 400, all).items.size() == plainCount + 4);
+            // A stretch picked in another frame lights nothing.
+            SeqViewState off;
+            off.hasSelection = true;
+            off.selection = {1, 8};
+            CHECK(six.render(0, 400, off).items.size() == plainCount + 1);
+        }
         // Hovering it outlines the codon: one more shape on that line.
         SeqViewState hovering;
         hovering.hoverCodon = hit;
