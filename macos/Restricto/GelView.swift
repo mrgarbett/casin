@@ -25,6 +25,28 @@ struct GelLaneModel {
     let isLadder: Bool
 }
 
+/// The comb that cast the wells: how many, how wide each is, and how thick
+/// a plug of DNA it loads (a thin comb gives sharper, brighter bands).
+struct GelComb: Equatable {
+    let name: String
+    let teeth: Int
+    /// Tooth width and thickness, in millimetres.
+    let width: Double
+    let thickness: Double
+
+    /// Combs as sold for a 7 cm mini gel tray.
+    static let common: [GelComb] = [
+        GelComb(name: "8 wells · 1.5 mm", teeth: 8, width: 6.0, thickness: 1.5),
+        GelComb(name: "10 wells · 1.0 mm", teeth: 10, width: 5.0, thickness: 1.0),
+        GelComb(name: "12 wells · 1.0 mm", teeth: 12, width: 4.0, thickness: 1.0),
+        GelComb(name: "15 wells · 0.75 mm", teeth: 15, width: 3.2, thickness: 0.75),
+        GelComb(name: "20 wells · 0.75 mm", teeth: 20, width: 2.3, thickness: 0.75),
+    ]
+    static let standard = common[1]
+    /// How much thinner (or thicker) than a 1 mm comb's a fresh band is.
+    var plug: CGFloat { CGFloat(0.6 + 0.4 * thickness) }
+}
+
 /// How the gel was stained and photographed.
 enum GelStain: Int, CaseIterable {
     case ethidiumUV = 0, sybrSafe = 1, blackAndWhite = 2
@@ -81,6 +103,8 @@ final class GelView: NSView {
     override var isFlipped: Bool { true }
 
     var stain: GelStain = .ethidiumUV { didSet { needsDisplay = true } }
+    /// The comb that cast the wells: how thick they are, and so the bands.
+    var comb: GelComb = .standard { didSet { needsDisplay = true } }
     /// How long the gel ran, as a fraction of a full run.
     var runLevel: Double = 1 { didSet { needsDisplay = true } }
     /// Where the loading dyes' fronts are after a full run (bromophenol blue,
@@ -190,26 +214,39 @@ final class GelView: NSView {
     }
 
     private var geometry: Geometry {
-        let area = NSRect(x: 24, y: 36, width: max(100, bounds.width - 48),
-                          height: max(120, bounds.height - 36 - bottomInset))
+        // Below the floating tabs at the top, above the controls at the bottom.
+        let area = NSRect(x: 24, y: 54, width: max(100, bounds.width - 48),
+                          height: max(120, bounds.height - 54 - bottomInset))
         // Lanes grow to fill the pane (a few lanes make a wide gel, not a
-        // narrow strip), with the gaps and the size labels growing with them.
+        // narrow strip), with the gaps and the size labels growing with them;
+        // many lanes shrink until the whole comb fits beside the ladder's sizes.
         let n = CGFloat(max(1, lanes.count))
-        let unit = (area.width - 60) / (n * 1.25 + 0.25)
-        let laneW = min(120, max(26, unit))
+        let ladder = lanes.contains(where: { $0.isLadder })
+        let unit = (area.width - (ladder ? 60 : 0)) / (n * 1.25 + 0.25)
+        var laneW = min(120, max(12, unit))
         let scale = max(1, laneW / 64)
-        let gap = min(28, max(10, laneW * 0.25))
-        let labelW = 60 * min(1.4, scale)
-        let slabW = n * laneW + (n + 1) * gap
-        let slabX = area.minX + labelW + max(0, (area.width - labelW - slabW) / 2)
-        let slab = NSRect(x: slabX, y: area.minY + 24 * scale, width: slabW, height: area.maxY - area.minY - 24 * scale)
+        var gap = min(28, max(4, laneW * 0.25))
+        // The ladder's sizes sit left of the slab; the slab is centred in the
+        // pane, and only moves over when they wouldn't fit beside it.
+        let labelW = ladder ? 60 * min(1.4, scale) : 0
+        var slabW = n * laneW + (n + 1) * gap
+        if labelW + slabW > area.width {
+            let f = (area.width - labelW) / slabW
+            laneW *= f
+            gap *= f
+            slabW = area.width - labelW
+        }
+        let slabX = area.minX + max(labelW, (area.width - slabW) / 2)
+        // The gel is as long whatever is loaded: its run is the pane's height,
+        // so the same fragment sits at the same place on every gel.
+        let slab = NSRect(x: slabX, y: area.minY + 24, width: slabW, height: area.maxY - area.minY - 24)
         return Geometry(slab: slab, laneW: laneW, gap: gap, scale: scale, labelW: labelW,
-                        runTop: slab.minY + 34 * scale, runBottom: slab.maxY - 22)
+                        runTop: slab.minY + 34, runBottom: slab.maxY - 22)
     }
 
     /// Thicker for more DNA; wider and softer the further it ran, as bands diffuse.
     private func bandHeight(_ b: GelBandModel, at position: CGFloat, scale: CGFloat = 1) -> CGFloat {
-        (2.5 + 4.5 * CGFloat(b.intensity) + 2.5 * max(0, position)) * min(1.5, scale)
+        ((2.5 + 4.5 * CGFloat(b.intensity)) * comb.plug + 2.5 * max(0, position)) * min(1.5, scale)
     }
 
     /// A band past the bottom has run off the gel; one near the edge fades out.
@@ -232,6 +269,12 @@ final class GelView: NSView {
         let g = geometry
         drawSlab(g)
 
+        // A well for each lane loaded (the imager crops to what was loaded).
+        let wellH = (5 + 3 * CGFloat(comb.thickness)) * min(1.5, g.scale)
+        for i in 0..<lanes.count {
+            let x = g.laneX(i)
+            drawWell(NSRect(x: x + 2, y: g.slab.minY + 14, width: g.laneW - 4, height: wellH))
+        }
         let nameFont = NSFont.systemFont(ofSize: min(16, 11 * g.scale), weight: .semibold)
         for (i, lane) in lanes.enumerated() {
             let x = g.laneX(i)
@@ -244,8 +287,7 @@ final class GelView: NSView {
             }
             let nameColor = i == selectedLane ? NSColor.white : NSColor.white.withAlphaComponent(0.6)
             drawText(lane.name, font: nameFont, color: nameColor,
-                     centeredAt: NSPoint(x: x + g.laneW / 2, y: g.slab.minY - 13 * g.scale))
-            drawWell(NSRect(x: x + 2, y: g.slab.minY + 14 * g.scale, width: g.laneW - 4, height: 8 * min(1.5, g.scale)))
+                     centeredAt: NSPoint(x: x + g.laneW / 2, y: g.slab.minY - 13))
 
             let far = reach(i)
             let fadeIn = CGFloat(min(1, (i < progress.count ? progress[i] : 1) * 4))
@@ -268,9 +310,10 @@ final class GelView: NSView {
             }
         }
 
-        // The ladder's sizes on the left, the reference bands bolder.
-        if let ladder = lanes.first, ladder.isLadder {
-            let far = reach(0)
+        // The first ladder's sizes on the left, the reference bands bolder.
+        if let li = lanes.firstIndex(where: { $0.isLadder }) {
+            let ladder = lanes[li]
+            let far = reach(li)
             var lastY = -CGFloat.infinity
             for band in ladder.bands.sorted(by: { $0.run < $1.run }) {
                 let p = CGFloat(band.run) * far
@@ -517,8 +560,8 @@ final class GelView: NSView {
         finishRunning()
         defer { hover = keepHover; selectedLane = keepSelected; needsDisplay = true }
         let g = geometry
-        let crop = NSRect(x: g.slab.minX - g.labelW - 8, y: g.slab.minY - 30 * g.scale,
-                          width: g.slab.width + g.labelW + 24, height: g.slab.height + 30 * g.scale + 16)
+        let crop = NSRect(x: g.slab.minX - g.labelW - 8, y: g.slab.minY - 30,
+                          width: g.slab.width + g.labelW + 24, height: g.slab.height + 30 + 16)
             .intersection(bounds)
         guard !crop.isEmpty, let rep = bitmapImageRepForCachingDisplay(in: crop) else { return nil }
         cacheDisplay(in: crop, to: rep)

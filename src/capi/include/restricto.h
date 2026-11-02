@@ -316,14 +316,17 @@ typedef struct {
 int oc_digest(const OCDocument *doc, const char *const *enzymes, int enzyme_count, OCFragmentInfo *out, int max);
 int oc_ladder_count(void);
 const char *oc_ladder_name(int index);
-/* A gel built lane by lane: a ladder, then any number of lanes, each a
-   sequence cut with some enzymes (none: the uncut molecule). Lanes are
-   named by their number; the ladder lane is "L". */
+/* A gel built lane by lane: ladders and samples in any order, each sample a
+   sequence cut with some enzymes (none: the uncut molecule). Samples are
+   named by their number among the samples; a ladder lane is "L".
+   `oc_gel_new(ladder)` starts with that ladder in lane 0; a negative ladder
+   starts empty, for `oc_gel_add_ladder` to place ladders where wanted. */
 typedef struct OCGel OCGel;
 OCGel *oc_gel_new(int ladder);
 void oc_gel_free(OCGel *gel);
+void oc_gel_add_ladder(OCGel *gel, int ladder);
 void oc_gel_add_lane(OCGel *gel, const OCDocument *doc, const char *const *enzymes, int enzyme_count);
-/* The lane's band sizes, largest first; returns how many (up to `max`). Lane 0 is the ladder. */
+/* The lane's band sizes, largest first; returns how many (up to `max`). */
 int oc_gel_lane_bands(const OCGel *gel, int lane, int *out, int max);
 /* The agarose percentage the gel is cast at (1% by default); it sets how far
    each size runs. The percentages offered, lowest first: */

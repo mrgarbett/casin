@@ -420,6 +420,22 @@ int main(int argc, char **argv)
     CHECK(gs != NULL && oc_scene_item_count(gs) > 10);
     oc_scene_free(gs);
     oc_gel_free(lanes);
+    /* Ladders anywhere: an empty gel, a sample, a ladder, a sample. */
+    lanes = oc_gel_new(-1);
+    CHECK(oc_gel_lane_count(lanes) == 0);
+    oc_gel_add_lane(lanes, doc, ecori, 1);
+    oc_gel_add_ladder(lanes, 0);
+    oc_gel_add_lane(lanes, doc, NULL, 0);
+    CHECK(oc_gel_lane_count(lanes) == 3 && oc_gel_lane_bands(lanes, 1, bands, 64) > 5
+          && oc_gel_lane_uncut_circular(lanes, 2) && !oc_gel_lane_uncut_circular(lanes, 1));
+    nb = oc_gel_lane_band_info(lanes, 1, info, 64);
+    int refs = 0;
+    for (int i = 0; i < nb; ++i) refs += info[i].reference ? 1 : 0;
+    CHECK(nb > 5 && refs >= 1 && refs < nb);
+    gs = oc_gel_scene(lanes, 400, 500, false, measure, NULL);
+    CHECK(gs != NULL && oc_scene_item_count(gs) > 10);
+    oc_scene_free(gs);
+    oc_gel_free(lanes);
 
     /* PCR cycling for pOC-demo's seq-fwd and mcs-rev, in Q5 buffer. */
     OCPcrProgram prog;

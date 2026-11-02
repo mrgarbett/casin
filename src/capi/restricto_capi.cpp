@@ -772,9 +772,17 @@ struct OCGel {
 OCGel *oc_gel_new(int ladder)
 {
     auto *g = new OCGel;
-    const Ladder &l = commonLadders()[size_t(std::clamp(ladder, 0, oc_ladder_count() - 1))];
-    g->lanes.push_back({"L", l.bands, l.bright, true, false, {}});
+    if (ladder >= 0)
+        oc_gel_add_ladder(g, ladder);
     return g;
+}
+
+void oc_gel_add_ladder(OCGel *gel, int ladder)
+{
+    if (!gel)
+        return;
+    const Ladder &l = commonLadders()[size_t(std::clamp(ladder, 0, oc_ladder_count() - 1))];
+    gel->lanes.push_back({"L", l.bands, l.bright, true, false, {}});
 }
 
 void oc_gel_free(OCGel *gel) { delete gel; }
@@ -784,7 +792,10 @@ void oc_gel_add_lane(OCGel *gel, const OCDocument *doc, const char *const *enzym
     if (!gel || !doc)
         return;
     const Sequence &seq = doc->doc.sequence();
-    view::GelLane lane{std::to_string(gel->lanes.size()), {}, {}, false, false, {}};
+    // Samples are numbered among themselves: a ladder between them is "L".
+    const size_t samples = size_t(std::count_if(gel->lanes.begin(), gel->lanes.end(),
+                                                [](const view::GelLane &l) { return !l.ladder; }));
+    view::GelLane lane{std::to_string(samples + 1), {}, {}, false, false, {}};
     const std::vector<Enzyme> use = enzymesNamed(enzymes, enzyme_count);
     const bool uncut = use.empty() || digest(seq, use).uncut;
     if (uncut) {
