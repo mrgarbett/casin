@@ -1,0 +1,1081 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// The gel wizard: lanes on the left (ladders and any open sequence, cut
+// with any enzymes or left uncut, in any order), and the gel on the right
+// as an imager shows it. Changing or moving a lane runs it again. Hovering a band names it;
+// clicking a fragment selects it in its sequence. Copy Image puts the gel on
+// the clipboard for a notebook.
+import AppKit
+import RestrictoCore
+
+/// A row that acts as one control: clicking anywhere on it calls `onClick`.
+/// With a badge, it shows a numbered disc on its left (the lanes list).
+final class ClickRow: NSView {
+    var onClick: (() -> Void)?
+    var isSelected = false { didSet { needsDisplay = true } }
+    var badge: String? { didSet { needsDisplay = true } }
+    private var hovering = false { didSet { needsDisplay = true } }
+
+    init(content: NSView, badge: String? = nil) {
+        self.badge = badge
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: badge == nil ? 8 : 36),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            content.topAnchor.constraint(equalTo: topAnchor, constant: 5),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
+        ])
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        frame.contains(point) ? self : nil
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let box = bounds.insetBy(dx: 0, dy: 1)
+        if isSelected || hovering {
+            NSColor.controlAccentColor.withAlphaComponent(isSelected ? 0.22 : 0.08).setFill()
+            NSBezierPath(roundedRect: box, xRadius: 7, yRadius: 7).fill()
+        }
+        if let badge = badge {
+            let disc = NSRect(x: 8, y: bounds.midY - 10, width: 20, height: 20)
+            (isSelected ? NSColor.controlAccentColor : NSColor.tertiaryLabelColor).setFill()
+            NSBezierPath(ovalIn: disc).fill()
+            let text = NSAttributedString(string: badge, attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .bold), .foregroundColor: NSColor.white])
+            let size = text.size()
+            text.draw(at: NSPoint(x: disc.midX - size.width / 2, y: disc.midY - size.height / 2))
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow,
+                                                              .inVisibleRect], owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) { hovering = true }
+    override func mouseExited(with event: NSEvent) { hovering = false }
+    override func mouseDown(with event: NSEvent) { onClick?() }
+    override func accessibilityPerformPress() -> Bool { onClick?(); return true }
+}
+
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
+}
+
+final class GelWizard: NSWindowController, NSWindowDelegate, NSTokenFieldDelegate {
+    private struct Lane {
+        var doc: CoreDocument
+        var enzymes: [String]
+        /// A ladder lane: which of the common ladders; nil for a sample.
+        var ladder: Int? = nil
+        var isLadder: Bool { ladder != nil }
+        /// What decides the bands: when it changes, the lane runs again.
+        var key: String {
+            if let ladder = ladder { return "ladder \(ladder)" }
+            return "\(ObjectIdentifier(doc).hashValue)|\(doc.length)|\(enzymes.joined(separator: ","))"
+        }
+    }
+
+    private struct Fragment {
+        let start: Int
+        let length: Int
+        let caption: String
+    }
+
+    private let template: CoreDocument
+    /// The lanes as on the gel, ladders among them.
+    private var lanes: [Lane] = []
+    /// The lane being edited, as an index into `lanes`.
+    private var selected = 0
+    private var fragments: [[Fragment]] = []
+    private var drawnKeys: [String] = []
+    private var observed: Set<ObjectIdentifier> = []
+    /// The comb sets how many lanes fit the gel.
+    private var comb: GelComb = .standard
+
+    private let gelView = GelView()
+    private let laneList = NSStackView()
+    private let addLaneButton = NSButton()
+    private let removeLaneButton = NSButton()
+    private let moveLeftButton = NSButton()
+    private let moveRightButton = NSButton()
+    private let laneHeading = NSTextField(labelWithString: "LANE 1")
+    private let sequencePopup = NSPopUpButton()
+    private let enzymeField = NSTokenField()
+    private let enzymeMenu = NSPopUpButton(frame: .zero, pullsDown: true)
+    private let enzymeNote = NSTextField(wrappingLabelWithString: "")
+    private let enzymeHint = NSTextField(wrappingLabelWithString: "Enzymes in one lane cut together.")
+    private let fragmentHeading = NSTextField(labelWithString: "FRAGMENTS")
+    private let fragmentList = NSStackView()
+    private let agarosePopup = NSPopUpButton()
+    private let combPopup = NSPopUpButton()
+    private let stainPopup = NSPopUpButton()
+    /// EXPERIMENTAL: three ways to look at the same gel.
+    private let lookTabs = NSSegmentedControl(labels: ["Imager", "3D"], trackingMode: .selectOne,
+                                              target: nil, action: nil)
+    /// The stains the Imager tab offers, in the popup's order.
+    private static let imagerStains: [GelStain] = [.ethidiumUV, .sybrSafe, .blackAndWhite]
+    private var imagerStain: GelStain = .ethidiumUV
+    /// How the 3D gel is stained and lit; the same popup picks it on that tab.
+    private var scene3D: Gel3DScene = .pinkOnBlue
+    /// Made the first time the 3D tab is opened.
+    private var gel3D: Gel3DView?
+    /// The glass pills floating over the gel.
+    private var pills: [NSView] = []
+    private var models: [GelLaneModel] = []
+    private let stage = NSView()
+    /// How long the gel ran: drag it back to see the gel part way through.
+    private let runSlider = NSSlider(value: 1, minValue: 0.1, maxValue: 1, target: nil, action: nil)
+    private let runLabel = NSTextField(labelWithString: "Full run")
+    private let copyButton = NSButton()
+    /// EXPERIMENTAL: the 3D picture's knobs, as sliders in a popover, and
+    /// their values kept while the app runs (to settle on the shipped ones).
+    private let tuneButton = NSButton()
+    private var tunePopover: NSPopover?
+    private var tuneValueLabels: [NSTextField] = []
+    private var tuneSliders: [NSSlider] = []
+    private static var look3D = Gel3DLook()
+    private struct Knob {
+        let name: String
+        let value: WritableKeyPath<Gel3DLook, Float>
+        let lo: Double
+        let hi: Double
+        let step: Double
+        /// The value on the slider's step, with the step's decimals: what's
+        /// copied is what the slider shows.
+        func onStep(_ v: Double) -> Double { (v / step).rounded() * step }
+        func text(_ v: Double) -> String {
+            var decimals = 0
+            var s = step
+            while s < 0.999 && decimals < 4 { s *= 10; decimals += 1 }
+            return String(format: "%.\(decimals)f", onStep(v))
+        }
+    }
+    /// The picture's knobs; the lamp, bloom, vignette and grain stay at what
+    /// ships (Rodrigo: the sliders stop at Scatter).
+    private static let knobs: [Knob] = [
+        Knob(name: "Exposure", value: \.exposure, lo: 0.2, hi: 2.0, step: 0.05),
+        Knob(name: "Contrast", value: \.contrast, lo: 0.6, hi: 2.5, step: 0.05),
+        Knob(name: "Stain glow", value: \.stain, lo: 0.0, hi: 3.0, step: 0.05),
+        Knob(name: "Band glow", value: \.band, lo: 0.0, hi: 3.0, step: 0.05),
+        Knob(name: "Scatter", value: \.scatter, lo: 0.0, hi: 60.0, step: 1.0),
+    ]
+    private var chrome: WizardChrome?
+    /// Sequences listed in the sequence popup, in its order.
+    private var openDocs: [CoreDocument] = []
+
+    private static var showing: [GelWizard] = []
+    /// Each sequence's lanes as its gel was last closed, so reopening it keeps them.
+    private static var remembered: [(template: CoreDocument, lanes: [Lane], selected: Int)] = []
+
+    /// Brings up the gel for `template`, opening one if there is none: the
+    /// sequence uncut, and cut with the first enzyme shown on its map.
+    /// With `cutWith`, also adds a lane cut by those enzymes, or selects one
+    /// that already is.
+    static func show(for template: CoreDocument, near parent: NSWindow?, cutWith enzymes: [String] = []) {
+        if let open = visible.first(where: { $0.template === template }) {
+            open.window?.makeKeyAndOrderFront(nil)
+            open.cut(with: enzymes)
+            return
+        }
+        let wizard = GelWizard(template: template)
+        showing.append(wizard)
+        if let window = wizard.window {
+            wizard.chrome = WizardChrome(window: window, parent: parent)
+            if let parent = parent { window.title = "Gel · \(Self.withoutExtension(parent.title))" }
+        }
+        wizard.showWindow(nil)
+        wizard.chrome?.attach()
+        wizard.window?.makeFirstResponder(nil)
+        wizard.cut(with: enzymes)
+    }
+
+    private func cut(with enzymes: [String]) {
+        guard !enzymes.isEmpty else { return }
+        if let i = lanes.firstIndex(where: { $0.doc === template && $0.enzymes == enzymes }) {
+            selected = i
+            refresh()
+            return
+        }
+        guard lanes.count < comb.teeth else { return }
+        addLane(nil)
+        enzymeField.objectValue = enzymes
+        enzymesEdited(nil)
+    }
+
+    private init(template: CoreDocument) {
+        self.template = template
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1040, height: 660),
+                              styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView],
+                              backing: .buffered, defer: false)
+        window.title = "Gel · \(template.name)"
+        window.titlebarAppearsTransparent = true
+        // The sidebar names it; a title would sit over the dark gel.
+        window.titleVisibility = .hidden
+        window.minSize = NSSize(width: 760, height: 480)
+        window.isReleasedWhenClosed = false
+        window.tabbingMode = .disallowed
+        super.init(window: window)
+        window.delegate = self
+        if let saved = Self.remembered.first(where: { $0.template === template }) {
+            lanes = saved.lanes
+            selected = saved.selected
+        } else {
+            // The ladder last used, the sequence uncut, and cut with its first enzyme.
+            let savedLadder = UserDefaults.standard.integer(forKey: "GelLadder")
+            lanes = [Lane(doc: template, enzymes: [], ladder: min(max(0, savedLadder), max(0, Int(oc_ladder_count()) - 1))),
+                     Lane(doc: template, enzymes: [])]
+            if let first = template.visibleSiteEnzymes.first { lanes.append(Lane(doc: template, enzymes: [first])) }
+            selected = lanes.count - 1
+        }
+        window.contentView = buildView()
+        refresh()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    // MARK: Layout
+
+    private func buildView() -> NSView {
+        func heading(_ text: String) -> NSTextField {
+            let label = NSTextField(labelWithString: text)
+            label.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+            label.textColor = .secondaryLabelColor
+            return label
+        }
+        func symbolButton(_ button: NSButton, _ symbol: String, _ tip: String, _ action: Selector) {
+            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tip)
+            button.bezelStyle = .accessoryBarAction
+            button.isBordered = true
+            button.controlSize = .small
+            button.toolTip = tip
+            button.target = self
+            button.action = action
+        }
+
+        let title = NSTextField(labelWithString: "Gel")
+        title.font = .systemFont(ofSize: NSFont.systemFontSize + 2, weight: .semibold)
+        let done = NSButton(title: "Done", target: self, action: #selector(done(_:)))
+        done.bezelColor = .controlAccentColor
+        done.keyEquivalent = "\r"
+        let header = NSStackView(views: [title, NSView(), done])
+        let subtitle = NSTextField(wrappingLabelWithString: "Digests run side by side on an agarose gel.")
+        subtitle.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        subtitle.textColor = .secondaryLabelColor
+
+        // Percentages as a bench would cast them; 1% unless chosen before.
+        let savedPercent = UserDefaults.standard.object(forKey: "GelPercent") as? Double ?? 1
+        for i in 0..<Int(oc_gel_percent_count()) {
+            let percent = oc_gel_percent(Int32(i))
+            agarosePopup.addItem(withTitle: "\(percent.formatted(.number.precision(.fractionLength(0...1))))% agarose")
+            agarosePopup.lastItem?.representedObject = NSNumber(value: percent)
+            if abs(percent - savedPercent) < 0.01 { agarosePopup.select(agarosePopup.lastItem) }
+        }
+        agarosePopup.toolTip = "Denser gels separate small fragments; thinner ones, large ones"
+        agarosePopup.target = self
+        agarosePopup.action = #selector(agaroseChanged(_:))
+        // The comb: how many wells, and how thick a plug each loads.
+        for c in GelComb.common { combPopup.addItem(withTitle: c.name) }
+        let savedComb = UserDefaults.standard.object(forKey: "GelComb") as? Int ?? 1
+        combPopup.selectItem(at: savedComb >= 0 && savedComb < GelComb.common.count ? savedComb : 1)
+        comb = GelComb.common[max(0, combPopup.indexOfSelectedItem)]
+        combPopup.toolTip = "The comb that cast the wells: a thin one gives sharper bands"
+        combPopup.target = self
+        combPopup.action = #selector(combChanged(_:))
+
+        symbolButton(addLaneButton, "plus", "Add a lane after this one", #selector(addLane(_:)))
+        symbolButton(removeLaneButton, "minus", "Remove this lane", #selector(removeLane(_:)))
+        symbolButton(moveLeftButton, "chevron.left", "Move this lane left", #selector(moveLaneLeft(_:)))
+        symbolButton(moveRightButton, "chevron.right", "Move this lane right", #selector(moveLaneRight(_:)))
+        let lanesRow = NSStackView(views: [heading("LANES"), NSView(), moveLeftButton, moveRightButton,
+                                           addLaneButton, removeLaneButton])
+        lanesRow.spacing = 2
+        lanesRow.setCustomSpacing(10, after: moveRightButton)
+        laneList.orientation = .vertical
+        laneList.alignment = .leading
+        laneList.spacing = 0
+
+        laneHeading.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+        laneHeading.textColor = .secondaryLabelColor
+        sequencePopup.target = self
+        sequencePopup.action = #selector(sequenceChanged(_:))
+        NotificationCenter.default.addObserver(forName: NSPopUpButton.willPopUpNotification, object: sequencePopup,
+                                               queue: .main) { [weak self] _ in self?.fillSequencePopup() }
+        enzymeField.delegate = self
+        enzymeField.placeholderString = "Uncut. Type an enzyme…"
+        enzymeField.tokenStyle = .rounded
+        enzymeField.completionDelay = 0.1
+        enzymeField.target = self
+        enzymeField.action = #selector(enzymesEdited(_:))
+        enzymeMenu.pullsDown = true
+        enzymeMenu.isBordered = false
+        enzymeMenu.controlSize = .small
+        enzymeMenu.toolTip = "Add an enzyme that cuts this sequence"
+        (enzymeMenu.cell as? NSPopUpButtonCell)?.arrowPosition = .arrowAtBottom
+        let enzymeRow = NSStackView(views: [enzymeField, enzymeMenu])
+        enzymeRow.spacing = 4
+        enzymeField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        enzymeMenu.setContentHuggingPriority(.required, for: .horizontal)
+        enzymeHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        enzymeHint.textColor = .secondaryLabelColor
+        enzymeNote.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        enzymeNote.textColor = .systemOrange
+        enzymeNote.isHidden = true
+
+        fragmentHeading.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+        fragmentHeading.textColor = .secondaryLabelColor
+        fragmentList.orientation = .vertical
+        fragmentList.alignment = .leading
+        fragmentList.spacing = 0
+
+        let inputs = NSStackView(views: [
+            header, subtitle,
+            heading("GEL"), agarosePopup, combPopup,
+            lanesRow, laneList,
+            laneHeading, sequencePopup, enzymeRow, enzymeHint, enzymeNote,
+            fragmentHeading, fragmentList,
+        ])
+        inputs.orientation = .vertical
+        inputs.alignment = .leading
+        inputs.spacing = 6
+        inputs.edgeInsets = NSEdgeInsets(top: 38, left: 16, bottom: 16, right: 16)
+        for v in [header, subtitle, agarosePopup, combPopup, lanesRow, laneList, sequencePopup, enzymeRow, enzymeNote, enzymeHint,
+                  fragmentList] as [NSView] {
+            v.widthAnchor.constraint(equalTo: inputs.widthAnchor, constant: -32).isActive = true
+        }
+        inputs.setCustomSpacing(16, after: subtitle)
+        inputs.setCustomSpacing(16, after: combPopup)
+        inputs.setCustomSpacing(16, after: laneList)
+        inputs.setCustomSpacing(16, after: enzymeNote)
+        inputs.setCustomSpacing(16, after: enzymeHint)
+
+        // The sidebar scrolls when the lanes and fragments outgrow it.
+        let document = FlippedView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        inputs.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(inputs)
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.documentView = document
+        NSLayoutConstraint.activate([
+            inputs.topAnchor.constraint(equalTo: document.topAnchor),
+            inputs.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            inputs.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+            inputs.bottomAnchor.constraint(equalTo: document.bottomAnchor),
+            document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+        ])
+        let sidebar = Glass.sidePanelBackground(frame: .zero)
+        sidebar.translatesAutoresizingMaskIntoConstraints = false
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        sidebar.addSubview(scroll)
+        NSLayoutConstraint.activate([
+            sidebar.widthAnchor.constraint(equalToConstant: 300),
+            scroll.topAnchor.constraint(equalTo: sidebar.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor),
+            scroll.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+        ])
+
+        // The gel, always dark as an imager is, with its controls floating over it.
+        gelView.onSelectLane = { [weak self] lane in self?.selectLane(lane) }
+        gelView.onPickBand = { [weak self] lane, band in self?.pickFragment(lane: lane, index: band) }
+        let saved = GelStain(rawValue: UserDefaults.standard.integer(forKey: "GelStain")) ?? .ethidiumUV
+        imagerStain = Self.imagerStains.contains(saved) ? saved : .ethidiumUV
+        gelView.stain = imagerStain
+        gelView.comb = comb
+        scene3D = Gel3DScene(rawValue: UserDefaults.standard.integer(forKey: "Gel3DScene")) ?? .pinkOnBlue
+        fillStainPopup()
+        stainPopup.isBordered = false
+        stainPopup.toolTip = "How the gel was stained and photographed"
+        stainPopup.target = self
+        stainPopup.action = #selector(stainChanged(_:))
+        runSlider.target = self
+        runSlider.action = #selector(runChanged(_:))
+        runSlider.isContinuous = true
+        runSlider.controlSize = .small
+        runSlider.toolTip = "How long the gel ran"
+        runSlider.widthAnchor.constraint(equalToConstant: 110).isActive = true
+        runLabel.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        runLabel.textColor = .secondaryLabelColor
+        runLabel.widthAnchor.constraint(equalToConstant: 54).isActive = true
+        let runIcon = NSImageView(image: NSImage(systemSymbolName: "bolt.fill", accessibilityDescription: "Run")!)
+        runIcon.contentTintColor = .secondaryLabelColor
+        runIcon.toolTip = "How long the gel ran"
+        copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy Image")
+        copyButton.title = "Copy Image"
+        // Icon only, so the pill fits over the gel at the window's smallest.
+        copyButton.imagePosition = .imageOnly
+        copyButton.bezelStyle = .accessoryBarAction
+        copyButton.target = self
+        copyButton.action = #selector(copyImage(_:))
+        copyButton.toolTip = "Copy the gel as a picture"
+        tuneButton.image = NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: "Tune")
+        tuneButton.title = "Tune"
+        tuneButton.imagePosition = .imageOnly
+        tuneButton.bezelStyle = .accessoryBarAction
+        tuneButton.target = self
+        tuneButton.action = #selector(tuneClicked(_:))
+        tuneButton.toolTip = "Tune the 3D picture"
+        tuneButton.isHidden = true
+        let pillContent = NSStackView(views: [stainPopup, runIcon, runSlider, runLabel, copyButton, tuneButton])
+        pillContent.setCustomSpacing(18, after: stainPopup)
+        pillContent.setCustomSpacing(18, after: runLabel)
+        pillContent.spacing = 10
+        pillContent.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 10)
+        let pill = Glass.capsule(around: pillContent, height: 36)
+
+        stage.appearance = NSAppearance(named: .darkAqua)
+        lookTabs.target = self
+        lookTabs.action = #selector(lookChanged(_:))
+        lookTabs.selectedSegment = 0
+        lookTabs.setToolTip("The gel as an imager prints it", forSegment: 0)
+        lookTabs.setToolTip("The gel in 3D: drag to turn it, scroll to come closer", forSegment: 1)
+        let tabsPill = Glass.capsule(around: lookTabs, height: 30)
+        pills = [pill, tabsPill]
+        for v in [gelView, pill, tabsPill] as [NSView] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            stage.addSubview(v)
+        }
+        NSLayoutConstraint.activate([
+            gelView.topAnchor.constraint(equalTo: stage.topAnchor),
+            gelView.bottomAnchor.constraint(equalTo: stage.bottomAnchor),
+            gelView.leadingAnchor.constraint(equalTo: stage.leadingAnchor),
+            gelView.trailingAnchor.constraint(equalTo: stage.trailingAnchor),
+            pill.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
+            pill.bottomAnchor.constraint(equalTo: stage.bottomAnchor, constant: -16),
+            tabsPill.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
+            tabsPill.topAnchor.constraint(equalTo: stage.topAnchor, constant: 10),
+        ])
+        gelView.bottomInset = 68
+
+        let root = NSStackView(views: [sidebar, stage])
+        root.orientation = .horizontal
+        root.spacing = 0
+        root.alignment = .top
+        for v in [sidebar, stage] as [NSView] {
+            v.heightAnchor.constraint(equalTo: root.heightAnchor).isActive = true
+        }
+        return root
+    }
+
+    // MARK: Lanes
+
+    /// Rebuilds the gel from the lanes, running the ones that changed.
+    private func refresh() {
+        guard let gel = oc_gel_new(-1) else { return }
+        defer { oc_gel_free(gel) }
+        let percent = (agarosePopup.selectedItem?.representedObject as? NSNumber)?.doubleValue ?? 1
+        oc_gel_set_percent(gel, percent)
+        // Bromophenol blue runs with ~300 bp fragments, xylene cyanol with ~4 kb.
+        gelView.dyeRuns = [oc_gel_run_fraction(300, percent), oc_gel_run_fraction(4000, percent)]
+        fragments = []
+        for lane in lanes {
+            if let ladder = lane.ladder {
+                oc_gel_add_ladder(gel, Int32(ladder))
+                fragments.append([])
+                continue
+            }
+            withCStrings(lane.enzymes) { oc_gel_add_lane(gel, lane.doc.handle, $0, Int32(lane.enzymes.count)) }
+            fragments.append(fragmentsOf(lane))
+            if observed.insert(ObjectIdentifier(lane.doc)).inserted {
+                lane.doc.observe { [weak self] what in
+                    guard let self = self, what & Change.sequence != 0 else { return }
+                    self.refresh()
+                }
+            }
+        }
+        var models: [GelLaneModel] = []
+        var info = [OCGelBand](repeating: OCGelBand(), count: 512)
+        let names = laneNames
+        for i in 0..<min(lanes.count, Int(oc_gel_lane_count(gel))) {
+            let n = Int(min(oc_gel_lane_band_info(gel, Int32(i), &info, Int32(info.count)), Int32(info.count)))
+            let bands = info.prefix(n).enumerated().map { j, b in
+                GelBandModel(bp: Int(b.bp), run: b.run, intensity: b.intensity, reference: b.reference,
+                             caption: i < fragments.count && j < fragments[i].count ? fragments[i][j].caption : "")
+            }
+            models.append(GelLaneModel(name: names[i], bands: bands, isLadder: lanes[i].isLadder))
+        }
+        // A new percentage runs every lane again; so does a lane that moved.
+        let keys = lanes.map { "\(percent) \($0.key)" }
+        let running = Set(keys.indices.filter { $0 >= drawnKeys.count || drawnKeys[$0] != keys[$0] })
+        drawnKeys = keys
+        selected = min(max(0, selected), lanes.count - 1)
+        gelView.selectedLane = selected
+        gelView.setLanes(models, running: running)
+        self.models = models
+        gel3D?.show(models, runLevel: runSlider.doubleValue, dyeRuns: gelView.dyeRuns)
+        fillSidebar()
+    }
+
+    /// What each lane is called on the gel: "L" for a ladder, the samples
+    /// numbered among themselves.
+    private var laneNames: [String] {
+        var n = 0
+        return lanes.map { lane -> String in
+            if lane.isLadder { return "L" }
+            n += 1
+            return "\(n)"
+        }
+    }
+
+    /// The lane's fragments, largest first as its bands are, with their ends.
+    private func fragmentsOf(_ lane: Lane) -> [Fragment] {
+        let doc = lane.doc
+        // An uncut plasmid runs twice: the nicked open circle, then the
+        // supercoiled form, as the core draws it.
+        let uncutCircle = [Fragment(start: 0, length: doc.length, caption: "uncut, nicked (open circle)"),
+                           Fragment(start: 0, length: doc.length, caption: "uncut, supercoiled")]
+        if lane.enzymes.isEmpty {
+            return doc.isCircular ? uncutCircle : [Fragment(start: 0, length: doc.length, caption: "uncut, linear")]
+        }
+        var out = [OCFragmentInfo](repeating: OCFragmentInfo(), count: 400)
+        let n = withCStrings(lane.enzymes) {
+            oc_digest(doc.handle, $0, Int32(lane.enzymes.count), &out, Int32(out.count))
+        }
+        let frags = out.prefix(Int(min(n, Int32(out.count)))).map { f -> Fragment in
+            let left = tupleString(f.left_enzyme), right = tupleString(f.right_enzyme)
+            let ends = left.isEmpty && right.isEmpty ? "uncut"
+                : "\(left.isEmpty ? "end" : left) – \(right.isEmpty ? "end" : right)"
+            return Fragment(start: Int(f.start), length: Int(f.length), caption: ends)
+        }
+        // Nothing cut a circle: it runs supercoiled, as the gel draws it.
+        if frags.count == 1 && doc.isCircular && frags[0].caption == "uncut" {
+            return uncutCircle.map { Fragment(start: $0.start, length: $0.length,
+                                              caption: $0.caption.replacingOccurrences(of: "uncut", with: "not cut")) }
+        }
+        return frags.sorted { $0.length > $1.length }
+    }
+
+    private func fillSidebar() {
+        // Lanes, named as on the gel.
+        laneList.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let names = laneNames
+        for (i, lane) in lanes.enumerated() {
+            let name = NSTextField(labelWithString: lane.isLadder ? Self.ladderName(lane.ladder ?? 0)
+                                   : lane.doc.name.isEmpty ? "Untitled" : lane.doc.name)
+            name.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .medium)
+            name.lineBreakMode = .byTruncatingMiddle
+            let what = NSTextField(labelWithString: lane.isLadder ? "Ladder" : lane.enzymes.isEmpty ? "Uncut"
+                                   : lane.enzymes.joined(separator: " + "))
+            what.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            what.textColor = .secondaryLabelColor
+            what.lineBreakMode = .byTruncatingTail
+            let text = NSStackView(views: [name, what])
+            text.orientation = .vertical
+            text.alignment = .leading
+            text.spacing = 1
+            let row = ClickRow(content: text, badge: names[i])
+            row.isSelected = i == selected
+            row.onClick = { [weak self] in self?.selectLane(i) }
+            row.setAccessibilityLabel("Lane \(i + 1), \(name.stringValue), \(what.stringValue)")
+            laneList.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: laneList.widthAnchor).isActive = true
+        }
+        addLaneButton.isEnabled = lanes.count < comb.teeth
+        removeLaneButton.isEnabled = lanes.count > 1
+        moveLeftButton.isEnabled = selected > 0
+        moveRightButton.isEnabled = selected < lanes.count - 1
+
+        // The selected lane: what's loaded, and a sample's enzymes.
+        let lane = lanes[selected]
+        laneHeading.stringValue = lane.isLadder ? "LADDER" : "LANE \(names[selected])"
+        fillSequencePopup()
+        enzymeField.objectValue = lane.enzymes
+        fillEnzymeMenu(for: lane.doc)
+        for v in [enzymeField.superview, enzymeHint, fragmentHeading] as [NSView?] { v?.isHidden = lane.isLadder }
+        if lane.isLadder { enzymeNote.isHidden = true }
+
+        // Its fragments; clicking one selects it in its sequence.
+        fragmentList.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let frags = selected < fragments.count ? fragments[selected] : []
+        fragmentHeading.stringValue = frags.count == 1 ? "1 FRAGMENT" : "\(frags.count) FRAGMENTS"
+        for (j, f) in frags.enumerated() {
+            let size = NSTextField(labelWithString: "\(f.length.formatted()) bp")
+            size.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+            size.alignment = .right
+            size.widthAnchor.constraint(equalToConstant: 64).isActive = true
+            let ends = NSTextField(labelWithString: f.caption)
+            ends.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            ends.textColor = .secondaryLabelColor
+            ends.lineBreakMode = .byTruncatingTail
+            let content = NSStackView(views: [size, ends])
+            content.spacing = 10
+            let row = ClickRow(content: content)
+            let laneIndex = selected
+            row.onClick = { [weak self] in self?.pickFragment(lane: laneIndex, index: j) }
+            row.toolTip = "Select in \(lanes[selected].doc.name)"
+            row.setAccessibilityLabel("\(f.length) bp, \(f.caption)")
+            fragmentList.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: fragmentList.widthAnchor).isActive = true
+        }
+    }
+
+    private static func ladderName(_ ladder: Int) -> String { String(cString: oc_ladder_name(Int32(ladder))) }
+
+    /// Every open sequence, whether in a window or a tab, with the lane's own
+    /// first if it has since been closed, then the ladders. Refilled each time
+    /// the popup opens, so a sequence opened after the wizard is there too.
+    private func fillSequencePopup() {
+        let lane = lanes[selected]
+        let laneDoc = lane.doc
+        var docs: [CoreDocument] = []
+        func add(_ d: CoreDocument?) {
+            guard let d = d, !d.isEmpty, !docs.contains(where: { $0 === d }) else { return }
+            docs.append(d)
+        }
+        NSDocumentController.shared.documents.forEach { add(($0 as? SequenceDocument)?.core) }
+        for window in NSApp.windows {
+            for tab in window.tabbedWindows ?? [window] {
+                add((tab.windowController?.document as? SequenceDocument)?.core)
+            }
+        }
+        if !docs.contains(where: { $0 === laneDoc }) { docs.insert(laneDoc, at: 0) }
+        openDocs = docs
+        sequencePopup.removeAllItems()
+        for d in docs {
+            // A menu item per sequence, even when two share a name.
+            let item = NSMenuItem(title: "\(d.name.isEmpty ? "Untitled" : d.name)  ·  \(d.length.formatted()) bp",
+                                  action: nil, keyEquivalent: "")
+            sequencePopup.menu?.addItem(item)
+        }
+        sequencePopup.menu?.addItem(.separator())
+        sequencePopup.menu?.addItem(NSMenuItem.sectionHeader(title: "Ladders"))
+        for i in 0..<Int(oc_ladder_count()) {
+            sequencePopup.menu?.addItem(NSMenuItem(title: Self.ladderName(i), action: nil, keyEquivalent: ""))
+        }
+        if let ladder = lane.ladder {
+            sequencePopup.selectItem(at: docs.count + 2 + ladder)
+        } else if let i = docs.firstIndex(where: { $0 === laneDoc }) {
+            sequencePopup.selectItem(at: i)
+        }
+    }
+
+    /// Enzymes that cut `doc`, the fewest cuts first, for the Add menu.
+    private func fillEnzymeMenu(for doc: CoreDocument) {
+        enzymeMenu.removeAllItems()
+        enzymeMenu.addItem(withTitle: "")
+        enzymeMenu.lastItem?.image = NSImage(systemSymbolName: "plus.circle", accessibilityDescription: "Add Enzyme")
+        let cutting = doc.enzymes.filter { $0.cuts > 0 }
+        let groups: [(String, (Int) -> Bool)] = [("Cut once", { $0 == 1 }), ("Cut twice", { $0 == 2 }),
+                                                 ("Cut 3 to 6 times", { $0 >= 3 && $0 <= 6 })]
+        let menu = enzymeMenu.menu
+        for (title, test) in groups {
+            let names = Set(cutting.filter { test($0.cuts) }.map { $0.name }).sorted()
+            guard !names.isEmpty else { continue }
+            if (menu?.items.count ?? 0) > 1 { menu?.addItem(.separator()) }
+            menu?.addItem(NSMenuItem.sectionHeader(title: title))
+            for name in names {
+                let item = NSMenuItem(title: name, action: #selector(addEnzyme(_:)), keyEquivalent: "")
+                item.target = self
+                menu?.addItem(item)
+            }
+        }
+    }
+
+    private func selectLane(_ lane: Int) {
+        guard lane >= 0 && lane < lanes.count, lane != selected else { return }
+        selected = lane
+        gelView.selectedLane = lane
+        fillSidebar()
+    }
+
+    /// Selects fragment `index` of `lane` in its sequence's window.
+    private func pickFragment(lane: Int, index: Int) {
+        guard lane >= 0 && lane < lanes.count, lane < fragments.count, index < fragments[lane].count else { return }
+        let f = fragments[lane][index]
+        lanes[lane].doc.select(start: f.start, length: f.length)
+    }
+
+    @objc private func addLane(_ sender: Any?) {
+        guard lanes.count < comb.teeth else { return }
+        // After the lane being edited: the same sequence, uncut, ready for an
+        // enzyme (a ladder's neighbour takes the first sample's sequence).
+        let doc = lanes[selected].isLadder ? (lanes.first(where: { !$0.isLadder })?.doc ?? template) : lanes[selected].doc
+        lanes.insert(Lane(doc: doc, enzymes: []), at: selected + 1)
+        selected += 1
+        refresh()
+        window?.makeFirstResponder(enzymeField)
+    }
+
+    @objc private func removeLane(_ sender: Any?) {
+        guard lanes.count > 1 else { return }
+        lanes.remove(at: selected)
+        selected = min(selected, lanes.count - 1)
+        // Lanes after it moved over: they run again in their new places.
+        refresh()
+    }
+
+    /// Swaps the lane with its neighbour; both run again where they now are.
+    private func moveLane(by step: Int) {
+        let to = selected + step
+        guard to >= 0 && to < lanes.count else { return }
+        lanes.swapAt(selected, to)
+        selected = to
+        refresh()
+    }
+
+    @objc private func moveLaneLeft(_ sender: Any?) { moveLane(by: -1) }
+    @objc private func moveLaneRight(_ sender: Any?) { moveLane(by: 1) }
+
+    /// The popup picked a sequence, or a ladder, for the lane.
+    @objc private func sequenceChanged(_ sender: Any?) {
+        let i = sequencePopup.indexOfSelectedItem
+        let ladderAt = openDocs.count + 2
+        if i >= ladderAt {
+            let ladder = i - ladderAt
+            guard ladder < Int(oc_ladder_count()), lanes[selected].ladder != ladder else { return }
+            lanes[selected].ladder = ladder
+            UserDefaults.standard.set(ladder, forKey: "GelLadder")
+            refresh()
+            return
+        }
+        guard i >= 0 && i < openDocs.count, openDocs[i] !== lanes[selected].doc || lanes[selected].isLadder else { return }
+        // The enzymes stay: the same digest of another sequence (one that
+        // doesn't cut it leaves it uncut).
+        lanes[selected].doc = openDocs[i]
+        lanes[selected].ladder = nil
+        refresh()
+    }
+
+    @objc private func addEnzyme(_ sender: NSMenuItem) {
+        guard !lanes[selected].enzymes.contains(sender.title) else { return }
+        lanes[selected].enzymes.append(sender.title)
+        refresh()
+    }
+
+    /// The stain popup lists the Imager's stains on its tab, the 3D scenes on the other.
+    private func fillStainPopup() {
+        stainPopup.removeAllItems()
+        if lookTabs.selectedSegment == 1 {
+            for scene in Gel3DScene.allCases { stainPopup.addItem(withTitle: scene.title) }
+            stainPopup.selectItem(at: scene3D.rawValue)
+        } else {
+            for stain in Self.imagerStains { stainPopup.addItem(withTitle: stain.title) }
+            stainPopup.selectItem(at: Self.imagerStains.firstIndex(of: imagerStain) ?? 0)
+        }
+    }
+
+    @objc private func stainChanged(_ sender: Any?) {
+        let i = stainPopup.indexOfSelectedItem
+        if lookTabs.selectedSegment == 1 {
+            scene3D = Gel3DScene(rawValue: i) ?? .pinkOnBlue
+            UserDefaults.standard.set(scene3D.rawValue, forKey: "Gel3DScene")
+            gel3D?.scene = scene3D
+            return
+        }
+        imagerStain = i >= 0 && i < Self.imagerStains.count ? Self.imagerStains[i] : .ethidiumUV
+        UserDefaults.standard.set(imagerStain.rawValue, forKey: "GelStain")
+        gelView.stain = imagerStain
+    }
+
+    /// Imager: the flat imager print, in the chosen stain. 3D: the gel on the
+    /// light box, to turn around, in the chosen scene.
+    @objc private func lookChanged(_ sender: Any?) {
+        let look = lookTabs.selectedSegment
+        fillStainPopup()
+        // Copy Image takes the 2D gel; the 3D scene isn't copied yet.
+        copyButton.isEnabled = look != 1
+        tuneButton.isHidden = look != 1
+        if look != 1 { tunePopover?.close() }
+        if look == 1 && gel3D == nil {
+            let view = Gel3DView(frame: stage.bounds)
+            view.translatesAutoresizingMaskIntoConstraints = false
+            stage.addSubview(view, positioned: .above, relativeTo: gelView)
+            NSLayoutConstraint.activate([
+                view.topAnchor.constraint(equalTo: stage.topAnchor),
+                view.bottomAnchor.constraint(equalTo: stage.bottomAnchor),
+                view.leadingAnchor.constraint(equalTo: stage.leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: stage.trailingAnchor),
+            ])
+            view.ignoredViews = pills
+            view.scene = scene3D
+            view.comb = comb
+            view.look = Self.look3D
+            gel3D = view
+            view.show(models, runLevel: runSlider.doubleValue, dyeRuns: gelView.dyeRuns)
+        }
+        gel3D?.isHidden = look != 1
+        gelView.isHidden = look == 1
+    }
+
+    /// Sliders for the 3D picture's knobs, with their values, and a button
+    /// that copies them all as text (to settle on the shipped values).
+    @objc private func tuneClicked(_ sender: Any?) {
+        if let popover = tunePopover {
+            if popover.isShown { popover.close() } else { popover.show(relativeTo: tuneButton.bounds, of: tuneButton, preferredEdge: .maxY) }
+            return
+        }
+        let grid = NSGridView()
+        grid.rowSpacing = 4
+        grid.columnSpacing = 10
+        tuneValueLabels = []
+        tuneSliders = []
+        for (i, knob) in Self.knobs.enumerated() {
+            let name = NSTextField(labelWithString: knob.name)
+            let slider = NSSlider(value: Double(Self.look3D[keyPath: knob.value]), minValue: knob.lo, maxValue: knob.hi,
+                                  target: self, action: #selector(tuneChanged(_:)))
+            slider.isContinuous = true
+            slider.controlSize = .small
+            slider.tag = i
+            slider.widthAnchor.constraint(equalToConstant: 160).isActive = true
+            tuneSliders.append(slider)
+            let value = NSTextField(labelWithString: knob.text(Double(Self.look3D[keyPath: knob.value])))
+            value.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+            value.textColor = .secondaryLabelColor
+            value.alignment = .right
+            value.widthAnchor.constraint(equalToConstant: 48).isActive = true
+            tuneValueLabels.append(value)
+            grid.addRow(with: [name, slider, value])
+        }
+        let reset = NSButton(title: "Reset", target: self, action: #selector(resetLook(_:)))
+        reset.toolTip = "Back to the values that ship"
+        let copy = NSButton(title: "Copy Values", target: self, action: #selector(copyLook(_:)))
+        copy.toolTip = "Put every value on the clipboard, to send"
+        let buttons = NSStackView(views: [reset, copy])
+        buttons.orientation = .horizontal
+        buttons.spacing = 6
+        let box = NSStackView(views: [grid, buttons])
+        box.orientation = .vertical
+        box.alignment = .trailing
+        box.spacing = 8
+        box.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
+        let controller = NSViewController()
+        controller.view = box
+        let popover = NSPopover()
+        popover.contentViewController = controller
+        popover.behavior = .transient
+        tunePopover = popover
+        popover.show(relativeTo: tuneButton.bounds, of: tuneButton, preferredEdge: .maxY)
+    }
+
+    @objc private func tuneChanged(_ sender: NSSlider) {
+        let i = sender.tag
+        guard i >= 0 && i < Self.knobs.count else { return }
+        let knob = Self.knobs[i]
+        let v = knob.onStep(sender.doubleValue)
+        Self.look3D[keyPath: knob.value] = Float(v)
+        if i < tuneValueLabels.count { tuneValueLabels[i].stringValue = knob.text(v) }
+        gel3D?.look = Self.look3D
+    }
+
+    @objc private func resetLook(_ sender: Any?) {
+        let shipped = Gel3DLook()
+        for (i, knob) in Self.knobs.enumerated() where i < tuneSliders.count {
+            tuneSliders[i].doubleValue = Double(shipped[keyPath: knob.value])
+            tuneChanged(tuneSliders[i])
+        }
+    }
+
+    @objc private func copyLook(_ sender: Any?) {
+        var text = "3D gel look (\(scene3D.title))\n"
+        for knob in Self.knobs {
+            text += "\(knob.name): \(knob.text(Double(Self.look3D[keyPath: knob.value])))\n"
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    @objc private func combChanged(_ sender: Any?) {
+        let i = combPopup.indexOfSelectedItem
+        guard i >= 0 && i < GelComb.common.count else { return }
+        comb = GelComb.common[i]
+        UserDefaults.standard.set(i, forKey: "GelComb")
+        gelView.comb = comb
+        gel3D?.comb = comb
+        fillSidebar()
+    }
+
+    @objc private func agaroseChanged(_ sender: Any?) {
+        if let percent = (agarosePopup.selectedItem?.representedObject as? NSNumber)?.doubleValue {
+            UserDefaults.standard.set(percent, forKey: "GelPercent")
+        }
+        refresh()
+    }
+
+    @objc private func runChanged(_ sender: Any?) {
+        gelView.runLevel = runSlider.doubleValue
+        if gel3D?.isHidden == false { gel3D?.show(models, runLevel: runSlider.doubleValue, dyeRuns: gelView.dyeRuns) }
+        runLabel.stringValue = runSlider.doubleValue >= 0.995 ? "Full run"
+            : "\(Int((runSlider.doubleValue * 100).rounded()))% run"
+    }
+
+
+    @objc private func copyImage(_ sender: Any?) {
+        // What each lane holds, and how the gel was run, under the picture.
+        var legend: [(lane: String, what: String)] = []
+        let names = laneNames
+        for (i, lane) in lanes.enumerated() {
+            if let ladder = lane.ladder {
+                legend.append((lane: names[i], what: Self.ladderName(ladder)))
+                continue
+            }
+            let name = lane.doc.name.isEmpty ? "Untitled" : lane.doc.name
+            legend.append((lane: names[i], what: "\(name) · \(lane.enzymes.isEmpty ? "uncut" : lane.enzymes.joined(separator: " + "))"))
+        }
+        let caption = [agarosePopup.titleOfSelectedItem ?? "", "\(comb.name) comb", gelView.stain.title,
+                       runLabel.stringValue.lowercased()]
+            .filter { !$0.isEmpty }.joined(separator: " · ")
+        guard let image = gelView.snapshot(legend: legend, caption: caption) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects([image])
+        // A moment's tick on the button says it worked.
+        // Only the image changes: setting an image-only button's title draws
+        // the title too, and the pill grows.
+        copyButton.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Copied")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            self?.copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy Image")
+        }
+    }
+
+    @objc private func done(_ sender: Any?) { window?.close() }
+    /// Esc while typing an enzyme only leaves the box; otherwise it closes the gel.
+    override func cancelOperation(_ sender: Any?) {
+        if enzymeField.currentEditor() != nil {
+            window?.makeFirstResponder(nil)
+            return
+        }
+        window?.close()
+    }
+
+    // MARK: Enzymes typed as tokens
+
+    /// Known enzyme names, by lowercase name, for matching what's typed.
+    private lazy var enzymeNames: [String: String] = {
+        Dictionary(self.template.enzymes.map { ($0.name.lowercased(), $0.name) }, uniquingKeysWith: { a, _ in a })
+    }()
+
+    func tokenField(_ tokenField: NSTokenField, completionsForSubstring substring: String, indexOfToken tokenIndex: Int,
+                    indexOfSelectedItem selectedIndex: UnsafeMutablePointer<Int>?) -> [Any]? {
+        let s = substring.lowercased()
+        let doc = lanes[selected].doc
+        // Enzymes that cut this sequence first, then the rest.
+        let all = doc.enzymes
+        let cutting = all.filter { $0.cuts > 0 && $0.name.lowercased().hasPrefix(s) }.map { $0.name }
+        let others = all.filter { $0.cuts == 0 && $0.name.lowercased().hasPrefix(s) }.map { $0.name }
+        selectedIndex?.pointee = 0
+        return Array((Set(cutting).sorted() + Set(others).sorted()).prefix(30))
+    }
+
+    /// Only known enzymes become tokens; anything else is named in the orange note.
+    func tokenField(_ tokenField: NSTokenField, shouldAdd tokens: [Any], at index: Int) -> [Any] {
+        let typed = tokens.compactMap { $0 as? String }
+        let known = typed.compactMap { enzymeNames[$0.trimmingCharacters(in: .whitespaces).lowercased()] }
+        let unknown = typed.filter { enzymeNames[$0.trimmingCharacters(in: .whitespaces).lowercased()] == nil }
+        DispatchQueue.main.async { [weak self] in
+            self?.enzymesEdited(nil)
+            if !unknown.isEmpty {
+                self?.enzymeNote.stringValue = "Not a known enzyme: \(unknown.joined(separator: ", "))"
+                self?.enzymeNote.isHidden = false
+            }
+        }
+        return known
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) { enzymesEdited(nil) }
+
+    /// Takes the field's tokens as the lane's enzymes; names it doesn't know are left out.
+    @objc private func enzymesEdited(_ sender: Any?) {
+        let typed = (enzymeField.objectValue as? [Any] ?? []).compactMap { $0 as? String }
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        var known: [String] = []
+        var unknown: [String] = []
+        for t in typed {
+            if let name = enzymeNames[t.lowercased()] {
+                if !known.contains(name) { known.append(name) }
+            } else {
+                unknown.append(t)
+            }
+        }
+        enzymeNote.stringValue = unknown.isEmpty ? "" : "Not a known enzyme: \(unknown.joined(separator: ", "))"
+        enzymeNote.isHidden = unknown.isEmpty
+        guard known != lanes[selected].enzymes else { return }
+        lanes[selected].enzymes = known
+        let note = enzymeNote.stringValue
+        refresh()
+        // Keep the warning (refresh resets the field to the known names).
+        enzymeNote.stringValue = note
+        enzymeNote.isHidden = note.isEmpty
+    }
+
+    // MARK: Window
+
+    private static func withoutExtension(_ title: String) -> String {
+        let ext = (title as NSString).pathExtension.lowercased()
+        let known: Set<String> = ["dna", "gb", "gbk", "genbank", "embl", "emb", "fasta", "fa", "fna", "ape", "seq"]
+        return known.contains(ext) ? (title as NSString).deletingPathExtension : title
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) { chrome?.setDimmed(true) }
+    func windowDidResignKey(_ notification: Notification) { chrome?.setDimmed(false) }
+
+    func windowWillClose(_ notification: Notification) {
+        chrome?.detach()
+        Self.remembered.removeAll { $0.template === template }
+        Self.remembered.append((template: template, lanes: lanes, selected: selected))
+        // Let go after the close finishes.
+        DispatchQueue.main.async { Self.showing.removeAll { $0 === self } }
+    }
+
+    // MARK: Launch check
+
+    private static var visible: [GelWizard] { showing.filter { $0.window?.isVisible == true } }
+    static var isAnyOpen: Bool { !visible.isEmpty }
+    static var openWindows: [NSWindow] { visible.compactMap { $0.window } }
+    /// Each lane's band sizes in the first open gel, as laid out (the ladder first at the start).
+    static var bands: [[Int]] { visible.first?.gelView.lanes.map { $0.bands.map { $0.bp } } ?? [] }
+    /// As adding a lane and typing `enzymes` into it.
+    static func addLane(enzymes: [String]) {
+        guard let w = visible.first else { return }
+        w.addLane(nil)
+        w.enzymeField.objectValue = enzymes
+        w.enzymesEdited(nil)
+    }
+    /// Each lane's band runs in the first open gel.
+    static var runs: [[Double]] { visible.first?.gelView.lanes.map { $0.bands.map { $0.run } } ?? [] }
+    /// As picking `percent` in the GEL popup.
+    static func setAgarose(_ percent: Double) {
+        guard let w = visible.first,
+              let item = w.agarosePopup.itemArray.first(where: {
+                  abs(((($0.representedObject as? NSNumber)?.doubleValue) ?? 0) - percent) < 0.01 }) else { return }
+        w.agarosePopup.select(item)
+        w.agaroseChanged(nil)
+    }
+    /// As dragging the run slider to `level`, and choosing `stain`.
+    static func setRun(_ level: Double, stain: GelStain) {
+        guard let w = visible.first else { return }
+        w.runSlider.doubleValue = level
+        w.runChanged(nil)
+        w.imagerStain = stain
+        w.gelView.stain = stain
+        w.fillStainPopup()
+    }
+    /// As picking scene `index` in the popup on the 3D tab.
+    static func setScene3D(_ index: Int) {
+        guard let w = visible.first, w.lookTabs.selectedSegment == 1 else { return }
+        w.stainPopup.selectItem(at: index)
+        w.stainChanged(nil)
+    }
+    /// As clicking tab `look` (0 Imager, 1 3D) over the gel.
+    static func showLook(_ look: Int) {
+        guard let w = visible.first else { return }
+        w.lookTabs.selectedSegment = look
+        w.lookChanged(nil)
+    }
+    static var showing3D: Bool { visible.first?.gel3D?.isHidden == false }
+    /// Why the 3D gel shows a note instead of a picture, if it does.
+    static var problem3D: String? { visible.first?.gel3D?.problem }
+    static func closeAll() { visible.forEach { $0.window?.close() } }
+}

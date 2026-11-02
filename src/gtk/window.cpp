@@ -655,7 +655,8 @@ GtkWidget *Window::buildPanel()
     gtk_widget_set_hexpand(m_filter, TRUE);
     g_signal_connect(m_filter, "notify::selected", G_CALLBACK(&Window::onFilterChanged), this);
     m_onMapOnly = gtk_check_button_new_with_label("On map only");
-    gtk_widget_set_tooltip_text(m_onMapOnly, "List only the enzymes shown on the map");
+    gtk_widget_set_tooltip_text(m_onMapOnly, "List only the enzymes the cut filter lets onto the map "
+                                             "(unticked ones stay listed, to tick again)");
     gtk_check_button_set_active(GTK_CHECK_BUTTON(m_onMapOnly), settingBool("Layout", "enzymesOnMapOnly", false));
     g_signal_connect_swapped(m_onMapOnly, "toggled", G_CALLBACK(+[](gpointer p) {
                                  auto *self = static_cast<Window *>(p);
@@ -1091,8 +1092,8 @@ void Window::applyEnzymeSearch()
     const bool onMapOnly = gtk_check_button_get_active(GTK_CHECK_BUTTON(m_onMapOnly));
     for (const EnzymeRow &r : m_enzymeRows) {
         const bool matches = query.empty() || toLower(r.name).find(query) != std::string::npos;
-        const bool onMap = m_doc.enzymePassesFilter(r.name) && !m_doc.isEnzymeHidden(r.name);
-        gtk_widget_set_visible(r.row, matches && (!onMapOnly || onMap));
+        // Unticked enzymes stay listed, or there would be no way to tick them again.
+        gtk_widget_set_visible(r.row, matches && (!onMapOnly || m_doc.enzymePassesFilter(r.name)));
     }
 }
 

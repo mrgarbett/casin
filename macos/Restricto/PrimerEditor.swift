@@ -349,17 +349,18 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
         let checkWarnings = typed.isEmpty ? "" : takeString(oc_primer_check(typed, &check))
         if !typed.isEmpty {
             var line = "\(check.length) nt · GC \(String(format: "%.0f", check.gc * 100))%"
+            // Q5's Tm, as the PCR wizard and the status line give it.
             if let s = site {
                 // Tm of the part that anneals; a 5' tail doesn't count.
                 let annealing = String(typed.suffix(Int(s.length)))
-                var a = OCPrimerCheck()
-                oc_string_free(oc_primer_check(annealing, &a))
-                if !a.tm.isNaN {
-                    line += " · Tm \(String(format: "%.1f", a.tm)) °C"
+                let tm = oc_polymerase_tm(annealing, Int32(OC_POLYMERASE_Q5))
+                if tm > 0 {
+                    line += " · Q5 Tm \(tm) °C"
                     if typed.count > Int(s.length) { line += " annealing" }
                 }
-            } else if !check.tm.isNaN {
-                line += " · Tm \(String(format: "%.1f", check.tm)) °C"
+            } else {
+                let tm = oc_polymerase_tm(typed, Int32(OC_POLYMERASE_Q5))
+                if tm > 0 { line += " · Q5 Tm \(tm) °C" }
             }
             lines.append(line)
         }
@@ -663,10 +664,19 @@ final class PrimerEditor: NSViewController, NSTextViewDelegate, NSTextFieldDeleg
 
     @objc private func accept(_ sender: Any?) {
         guard var s = site else { NSSound.beep(); return }
+        let description = descriptionField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The site was found by the same core that adds the primer, so this
+        // only fails on a site it can't yet take (one crossing the origin);
+        // then the editor stays open with a word, rather than closing on a
+        // primer that was never added.
+        if oc_document_add_primer_at(document.handle, primerName, bases, hexColor, description, &s) < 0 {
+            warnings.stringValue = "This primer couldn't be added where it binds."
+            warnings.isHidden = false
+            NSSound.beep()
+            return
+        }
         finished = true
         oc_document_clear_pending_primer(document.handle)
-        let description = descriptionField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        oc_document_add_primer_at(document.handle, primerName, bases, hexColor, description, &s)
         document.select(start: Int(s.start), length: Int(s.length))
         close()
     }

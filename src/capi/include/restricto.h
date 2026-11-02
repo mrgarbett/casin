@@ -97,6 +97,8 @@ typedef struct {
     bool passes_filter;
     int methylation_blocked;   /* of its sites, how many Dam/Dcm methylation blocks */
     const char *methylation;   /* "Dam", "Dcm", "Dam and Dcm", or "" */
+    int cut_features;          /* drawn features (not "source") its cuts fall inside */
+    const char *cut_feature_names;   /* their names, one per line, or "" */
 } OCEnzymeInfo;
 
 int oc_document_enzyme_count(const OCDocument *doc);           /* every known enzyme */
@@ -106,23 +108,44 @@ int oc_document_max_cuts(const OCDocument *doc);
 void oc_document_set_max_cuts(OCDocument *doc, int max_cuts);  /* 1, 2, 3 or 0 = all */
 int oc_document_visible_site_count(const OCDocument *doc);
 const char *oc_document_visible_site_enzyme(const OCDocument *doc, int index);
+/* Where the site cuts the top strand (0..length), or -1 for a bad index. */
+int oc_document_visible_site_cut(const OCDocument *doc, int index);
 
 bool oc_document_has_selection(const OCDocument *doc);
 int oc_document_selection_start(const OCDocument *doc);
 int oc_document_selection_length(const OCDocument *doc);
 void oc_document_set_selection(OCDocument *doc, int start, int length);
 void oc_document_clear_selection(OCDocument *doc);
+/* Go to Position: "1234" (selects that base) or "100..500" / "100-500"
+ * (1-based, inclusive; across the origin of a circular sequence when the first
+ * is past the second). Returns false, changing nothing, when it isn't one. */
+bool oc_document_go_to_position(OCDocument *doc, const char *text);
 char *oc_document_selected_bases(const OCDocument *doc);
 char *oc_document_selected_reverse_complement(const OCDocument *doc);
 int oc_document_active_feature(const OCDocument *doc);
 int oc_document_active_site(const OCDocument *doc);
 void oc_document_activate_feature(OCDocument *doc, int index);
 void oc_document_activate_site(OCDocument *doc, int visible_index);
+/* Shift-click on a second site: selects from the active site's cut to this one's. */
+void oc_document_extend_to_site(OCDocument *doc, int visible_index);
+/* The site shift-clicked after the active one, while that selection stands; else -1. */
+int oc_document_second_site(const OCDocument *doc);
+/* Shift-click on a feature or primer: grows the selection to cover it too
+ * (the shorter way round on a circular sequence). */
+void oc_document_extend_to_feature(OCDocument *doc, int index);
+void oc_document_extend_to_primer(OCDocument *doc, int index);
 
 /* Searches both strands from just after the current selection start and
  * selects the next match. Returns the 1-based match number, 0 when there is
  * no match, or -1 when the query isn't DNA. *count gets the total. */
 int oc_document_find_next(OCDocument *doc, const char *query, int *count);
+/* Like oc_document_find_next, but features (not "source"), primers and enzyme
+ * sites named `query` (ignoring case) come first, in sequence order, then the
+ * base matches when the query is DNA. Repeating the query while its last
+ * match is still selected steps through them all. *kind gets OC_HIT_FEATURE,
+ * OC_HIT_PRIMER, OC_HIT_SITE or OC_HIT_SEQUENCE (bases). Returns -1 when
+ * nothing has the name and the query isn't DNA. */
+int oc_document_find_named(OCDocument *doc, const char *query, int *count, int *kind);
 
 /* ---- editing --------------------------------------------------------------
  * Each call is one undo step and reports OC_CHANGED_SEQUENCE, then
@@ -267,6 +290,8 @@ OCMapLayout *oc_map_layout_new_scaled(const OCDocument *doc, double width, doubl
 double oc_map_layout_radius(const OCMapLayout *layout);
 void oc_map_layout_free(OCMapLayout *layout);
 OCScene *oc_map_layout_render(const OCMapLayout *layout, const OCDocument *doc);
+/* As oc_seq_layout_set_hover: a feature and a site lightly highlighted, -1 for none. */
+void oc_map_layout_set_hover(OCMapLayout *layout, int feature, int site);
 /* kind = OC_HIT_*; index = feature, visible-site or primer index; position = base boundary. */
 void oc_map_layout_hit(const OCMapLayout *layout, double x, double y, int *kind, int *index, int *position);
 bool oc_map_layout_is_circular(const OCMapLayout *layout);
@@ -304,13 +329,23 @@ int oc_seq_layout_site_at(const OCSeqLayout *layout, double x, double y);
 int oc_seq_layout_primer_at(const OCSeqLayout *layout, double x, double y);
 /* First base of the codon whose amino acid is at (x, y) in a translation row, or -1. */
 int oc_seq_layout_codon_at(const OCSeqLayout *layout, double x, double y);
+/* The whole translation whose amino acid is at (x, y): the open reading frame
+   (start to stop) in a frame row, or the CDS feature's footprint in its
+   translation row. *start and *length get the span (it may wrap a circle);
+   false, with nothing stored, when (x, y) isn't on an amino acid. */
+bool oc_seq_layout_translation_at(const OCSeqLayout *layout, double x, double y, int *start, int *length);
 /* The base (0-based) at (x, y) on either strand, or -1. */
 int oc_seq_layout_base_at(const OCSeqLayout *layout, double x, double y);
 /* Outlines the codon starting at codon_start on the strands in later renders
    (the one whose amino acid is under the mouse); -1 for none. */
 void oc_seq_layout_set_hover_codon(OCSeqLayout *layout, int codon_start);
+/* Lightly highlights a feature and a site (indices as the hit tests give,
+   -1 for none) in later renders: the ones under the mouse here or on the map. */
+void oc_seq_layout_set_hover(OCSeqLayout *layout, int feature, int site);
 double oc_seq_layout_line_top(const OCSeqLayout *layout, int position);
 double oc_seq_layout_line_height(const OCSeqLayout *layout, int position);
+/* Bases on each full line (the arrow keys move the caret up and down by this). */
+int oc_seq_layout_bases_per_line(const OCSeqLayout *layout);
 char *oc_seq_layout_tooltip(const OCSeqLayout *layout, double x, double y);
 
 /* ---- digest and gel ------------------------------------------------------ */
@@ -329,6 +364,45 @@ typedef struct {
 int oc_digest(const OCDocument *doc, const char *const *enzymes, int enzyme_count, OCFragmentInfo *out, int max);
 int oc_ladder_count(void);
 const char *oc_ladder_name(int index);
+/* A gel built lane by lane: ladders and samples in any order, each sample a
+   sequence cut with some enzymes (none: the uncut molecule). Samples are
+   named by their number among the samples; a ladder lane is "L".
+   `oc_gel_new(ladder)` starts with that ladder in lane 0; a negative ladder
+   starts empty, for `oc_gel_add_ladder` to place ladders where wanted. */
+typedef struct OCGel OCGel;
+OCGel *oc_gel_new(int ladder);
+void oc_gel_free(OCGel *gel);
+void oc_gel_add_ladder(OCGel *gel, int ladder);
+void oc_gel_add_lane(OCGel *gel, const OCDocument *doc, const char *const *enzymes, int enzyme_count);
+/* The lane's band sizes, largest first; returns how many (up to `max`). */
+int oc_gel_lane_bands(const OCGel *gel, int lane, int *out, int max);
+/* The agarose percentage the gel is cast at (1% by default); it sets how far
+   each size runs. The percentages offered, lowest first: */
+void oc_gel_set_percent(OCGel *gel, double percent);
+int oc_gel_percent_count(void);
+double oc_gel_percent(int index);
+/* A band as a front end draws it: `run` is how far it ran, 0 at the wells to 1
+   at the bottom of a full run (more than 1: it ran off the gel); `intensity` is 0..1; `reference` marks a ladder's
+   brighter reference bands. */
+typedef struct {
+    int bp;
+    double run;
+    double intensity;
+    bool reference;
+    int form;               /* OC_GEL_LINEAR, OC_GEL_SUPERCOILED or OC_GEL_OPEN_CIRCULAR */
+} OCGelBand;
+/* An uncut plasmid runs as two bands: open circular (nicked, fainter) first,
+   then supercoiled. */
+enum { OC_GEL_LINEAR = 0, OC_GEL_SUPERCOILED = 1, OC_GEL_OPEN_CIRCULAR = 2 };
+int oc_gel_lane_count(const OCGel *gel);
+int oc_gel_lane_band_info(const OCGel *gel, int lane, OCGelBand *out, int max);
+/* True when the lane is an uncut circular molecule (it runs supercoiled). */
+bool oc_gel_lane_uncut_circular(const OCGel *gel, int lane);
+/* Where a linear band of `bp` runs on a `percent` gel, as OCGelBand.run. */
+double oc_gel_run_fraction(int bp, double percent);
+OCScene *oc_gel_scene(const OCGel *gel, double width, double height, bool dark, OCMeasureText measure,
+                      void *context);
+
 /* A virtual gel with three lanes: ladder, uncut, and the digest. */
 OCScene *oc_gel_render(const OCDocument *doc, const char *const *enzymes, int enzyme_count, int ladder, double width,
                        double height, bool dark, OCMeasureText measure, void *context);
@@ -367,6 +441,10 @@ typedef struct {
     int step_count;      /* 0 when a primer isn't plain DNA */
     OCPcrStep steps[8];
 } OCPcrProgram;
+/* A primer's Tm as NEB's calculator gives it in `polymerase`'s buffer, in
+   whole degrees (the Tm the PCR wizard, the primer editor and the status
+   line agree on); 0 when `bases` aren't plain DNA or are too short. */
+int oc_polymerase_tm(const char *bases, int polymerase);
 /* anneal1 and anneal2 are the primers' annealing parts (no tails). */
 void oc_pcr_program(const char *anneal1, const char *anneal2, int length, int polymerase, int cycles,
                     OCPcrProgram *out);
@@ -402,8 +480,16 @@ typedef struct {
     int extinction_reduced;  /* 280 nm, M^-1 cm^-1 */
     int extinction_cystines;
     int positive, negative;  /* K + R, D + E */
+    double instability;      /* instability index; > 40 predicts unstable */
+    double gravy;            /* mean Kyte-Doolittle hydropathy */
+    double aliphatic;        /* aliphatic index */
+    double charge_ph7;       /* net charge at pH 7 */
+    int strand;              /* OC_STRAND_FORWARD or OC_STRAND_REVERSE: the strand translated */
+    int codons;              /* whole codons in the selection, stop included */
+    int counts[26];          /* residues up to the first stop, by letter ('A' = 0) */
 } OCProteinInfo;
-/* Translates the selection (or the selected feature, on its own strand) and
+/* Translates the selection (or the selected feature, on its own strand; or the
+ * reverse strand when the selection sits in a reverse CDS or ORF's frame) and
  * returns the protein without its stop; NULL when fewer than 3 bases are selected. */
 char *oc_document_selection_protein(const OCDocument *doc, OCProteinInfo *out);
 

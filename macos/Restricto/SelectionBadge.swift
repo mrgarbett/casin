@@ -11,7 +11,7 @@ final class SelectionBadge {
     private let panel: NSPanel
     private let label = NSTextField(labelWithString: "")
     private var hideWork: DispatchWorkItem?
-    /// Longer selections get no Tm: nearest-neighbor Tm is for oligos.
+    /// Longer selections get no Tm: a primer's Tm is for oligos.
     private static let maxTmLength = 100
 
     private init() {
@@ -41,20 +41,27 @@ final class SelectionBadge {
         panel.contentView = box
     }
 
-    /// The text for the document's current selection, or nil when nothing is selected.
-    static func text(for document: CoreDocument) -> String? {
+    /// "start–end" (1-based) of the selection, or nil when nothing is selected.
+    static func positions(for document: CoreDocument) -> String? {
         guard document.hasSelection, document.selectionLength > 0 else { return nil }
         let n = document.length, length = document.selectionLength
         let start = document.selectionStart + 1
         var end = document.selectionStart + length
         if end > n { end -= n }
-        var parts = [length == 1 ? start.formatted() : "\(start.formatted())–\(end.formatted())",
-                     "\(length.formatted()) bp"]
-        // Below 8 bases the Tm formula means nothing (it goes negative).
+        return length == 1 ? start.formatted() : "\(start.formatted())–\(end.formatted())"
+    }
+
+    /// The text for the document's current selection, or nil when nothing is selected.
+    static func text(for document: CoreDocument) -> String? {
+        guard let positions = positions(for: document) else { return nil }
+        let length = document.selectionLength
+        // Between two enzyme sites: the fragment, named by its enzymes.
+        var parts = document.siteFragmentText.map { [$0, positions] } ?? [positions, "\(length.formatted()) bp"]
+        // Q5's Tm, as the primer editor, the Primers pane and the status
+        // line show it (the one the PCR wizard uses). Below 8 bases it means nothing.
         if length >= 8, length <= maxTmLength {
-            var check = OCPrimerCheck()
-            _ = takeString(oc_primer_check(document.selectedBases, &check))
-            if !check.tm.isNaN { parts.append(String(format: "Tm %.1f °C", check.tm)) }
+            let tm = oc_polymerase_tm(document.selectedBases, Int32(OC_POLYMERASE_Q5))
+            if tm > 0 { parts.append("Q5 Tm \(tm) °C") }
         }
         return parts.joined(separator: "  ·  ")
     }

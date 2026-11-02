@@ -19,7 +19,10 @@ final class PreviewProvider: QLPreviewProvider, QLPreviewingController {
             return
         }
         let size = CGSize(width: 820, height: 700)
-        let reply = QLPreviewReply(contextSize: size, isBitmap: true) { ctx, _ in
+        // A PDF context, not a bitmap: Quick Look scales the preview to its
+        // window and to Retina screens, and a bitmap drawn at 820x700 points
+        // came out blurry. Vector output stays crisp at any size.
+        let reply = QLPreviewReply(contextSize: size, isBitmap: false) { ctx, _ in
             defer { oc_document_free(document) }
             // The reply's context has y growing upward; scenes want it flipped.
             ctx.translateBy(x: 0, y: size.height)

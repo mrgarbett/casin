@@ -16,10 +16,15 @@ struct ProteinStats {
     int extinctionCystines = 0;  // at 280 nm, every cysteine pair forming a cystine
     int positive = 0;            // K + R
     int negative = 0;            // D + E
+    double instability = 0;      // instability index; above 40 predicts an unstable protein
+    double gravy = 0;            // mean Kyte-Doolittle hydropathy
+    double aliphatic = 0;        // aliphatic index (Ikai 1980)
 };
 
 // Stats of `protein` up to its first '*'. Average residue masses; pI from
-// the EMBOSS pKa set; extinction coefficients after Pace et al. (1995).
+// the EMBOSS pKa set; extinction coefficients after Pace et al. (1995);
+// instability index after Guruprasad, Reddy and Pandit (1990), over
+// neighbouring known residues; GRAVY from Kyte and Doolittle (1982).
 ProteinStats proteinStats(const std::string &protein);
 
 // Net charge at `pH` from the same pKa set.

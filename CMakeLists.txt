@@ -6,6 +6,29 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# The commit being built goes into the version (0.1.0-alpha+<short hash>), via
+# src/core/version_hash.h. CMake reruns when HEAD moves (commit, checkout,
+# merge); outside a git tree the hash is "unknown".
+set(RESTRICTO_GIT_HASH unknown)
+find_package(Git QUIET)
+if(GIT_FOUND)
+    execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+                    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+                    OUTPUT_VARIABLE _hash OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET RESULT_VARIABLE _rc)
+    if(_rc EQUAL 0 AND _hash)
+        set(RESTRICTO_GIT_HASH ${_hash})
+        execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --absolute-git-dir
+                        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+                        OUTPUT_VARIABLE _gitdir OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+        foreach(_f HEAD logs/HEAD)
+            if(EXISTS "${_gitdir}/${_f}")
+                set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_gitdir}/${_f}")
+            endif()
+        endforeach()
+    endif()
+endif()
+configure_file(cmake/version_hash.h.in ${PROJECT_SOURCE_DIR}/src/core/version_hash.h @ONLY)
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
