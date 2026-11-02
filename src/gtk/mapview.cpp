@@ -34,6 +34,19 @@ MapView::MapView(Document *doc) : m_doc(doc)
     GtkGesture *click = gtk_gesture_click_new();
     g_signal_connect(click, "pressed", G_CALLBACK(&MapView::pressed), this);
     gtk_widget_add_controller(m_area, GTK_EVENT_CONTROLLER(click));
+    // Right-click on an enzyme site: its menu.
+    GtkGesture *menu = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(menu), GDK_BUTTON_SECONDARY);
+    g_signal_connect(menu, "pressed", G_CALLBACK((+[](GtkGestureClick *, int, double x, double y, gpointer p) {
+                         auto *self = static_cast<MapView *>(p);
+                         if (!self->m_layout || !self->onSiteMenu || self->m_doc->isEmpty())
+                             return;
+                         const view::MapHit hit = self->m_layout->hitTest(view::Point{x, y});
+                         if (hit.kind == view::MapHit::Site)
+                             self->onSiteMenu(x, y, hit.index);
+                     })),
+                     this);
+    gtk_widget_add_controller(m_area, GTK_EVENT_CONTROLLER(menu));
 
     m_doc->onSequenceChanged([this] { invalidate(); });
     m_doc->onEnzymesChanged([this] { invalidate(); });

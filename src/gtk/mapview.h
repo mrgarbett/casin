@@ -40,6 +40,8 @@ public:
     // When set, clicking a primer picks it (index, shift held) instead of
     // starting a selection, as on the PCR wizard's vector map.
     std::function<void(int, bool)> onPickPrimer;
+    // Right-click on an enzyme site: where, and which visible site.
+    std::function<void(double, double, int)> onSiteMenu;
 
 private:
     static void draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer self);

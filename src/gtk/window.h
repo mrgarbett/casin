@@ -198,7 +198,9 @@ private:
     void endAddingPrimer();
     // Feature dialog: index < 0 adds a feature from the selection.
     void featureDialog(int index);
-    void openGelWizard();
+    void openGelWizard(const std::vector<std::string> &cutWith = {});
+    std::vector<std::string> fragmentEnzymes() const;
+    void siteMenu(GtkWidget *over, double x, double y, int site);
     void openPcrWizard();
     void openGatewayWizard();
     void cloningDialog();
@@ -275,6 +277,7 @@ private:
     std::unique_ptr<PrimerEditor> m_primerEditor;
     guint m_endPrimerIdle = 0;
     PcrWizard *m_pcr = nullptr;   // owns itself; closes with this tab
+    GtkWidget *m_digestFragment = nullptr;   // beside the status, between two cuts
     GelWizard *m_gel = nullptr;   // the same
     GatewayWizard *m_gateway = nullptr;   // the same
     std::vector<AdwDialog *> m_dialogs;   // the tab's open dialogs, closed with it

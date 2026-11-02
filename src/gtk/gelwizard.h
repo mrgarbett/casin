@@ -36,6 +36,9 @@ public:
     void close();
     // The template's sequence changed.
     void templateChanged();
+    // Selects a lane of the template cut with exactly `enzymes`, adding one
+    // after the last lane when there is none (nothing to do for an empty list).
+    void cutWith(const std::vector<std::string> &enzymes);
 
     std::function<void()> onClosed;
 

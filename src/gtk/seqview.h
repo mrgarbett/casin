@@ -55,6 +55,8 @@ public:
     // The feature or site under the mouse here (-1, -1 for none), so the map
     // can mark the same one.
     std::function<void(int, int)> onHoverTarget;
+    // Right-click on an enzyme site: where, and which visible site.
+    std::function<void(double, double, int)> onSiteMenu;
     // The feature and site hovered anywhere: their bases lightly tinted.
     void setHover(int feature, int site);
 

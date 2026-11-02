@@ -526,6 +526,19 @@ void Window::buildUi()
     m_info = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(m_info, "restricto-capsule");
     gtk_box_append(GTK_BOX(m_info), m_status);
+    // Beside the status while the selection runs between two enzyme sites.
+    m_digestFragment = gtk_button_new_with_label("Digest and Gel…");
+    gtk_widget_add_css_class(m_digestFragment, "flat");
+    gtk_widget_set_valign(m_digestFragment, GTK_ALIGN_CENTER);
+    gtk_widget_set_margin_end(m_digestFragment, 4);
+    gtk_widget_set_visible(m_digestFragment, FALSE);
+    gtk_widget_set_tooltip_text(m_digestFragment, "Digest and gel with the two enzymes at the ends of the selection");
+    g_signal_connect(m_digestFragment, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *self = static_cast<Window *>(p);
+                         self->openGelWizard(self->fragmentEnzymes());
+                     })),
+                     this);
+    gtk_box_append(GTK_BOX(m_info), m_digestFragment);
     gtk_widget_set_visible(m_info, FALSE);
     m_statusRow = toggles;
 
@@ -593,6 +606,8 @@ void Window::buildUi()
     };
     m_map->onHoverTarget = hoverTarget;
     m_seq->onHoverTarget = hoverTarget;
+    m_map->onSiteMenu = [this](double x, double y, int site) { siteMenu(m_map->widget(), x, y, site); };
+    m_seq->onSiteMenu = [this](double x, double y, int site) { siteMenu(m_seq->widget(), x, y, site); };
     m_map->onSelectDrag = [this](double x, double y) { showBadge(m_map->widget(), x, y); };
     m_seq->onSelectDrag = [this](double x, double y) { showBadge(m_seq->widget(), x, y); };
     auto edit = [this](int index) { featureDialog(index); };
@@ -1200,15 +1215,115 @@ void Window::updateTitle()
     }
 }
 
+// Right-click on an enzyme site: select from it to another cut, hide the
+// enzyme, or run it on a gel, as the Mac's site menu does. A popover with a
+// list, since the other cuts can be many.
+void Window::siteMenu(GtkWidget *over, double x, double y, int site)
+{
+    const std::vector<CutSite> &sites = m_doc.visibleSites();
+    if (site < 0 || size_t(site) >= sites.size())
+        return;
+    const std::string name = sites[size_t(site)].enzyme->name;
+    GtkWidget *pop = gtk_popover_new();
+    gtk_popover_set_has_arrow(GTK_POPOVER(pop), FALSE);
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    auto row = [&](const std::string &label, std::function<void()> run) {
+        GtkWidget *b = gtk_button_new_with_label(label.c_str());
+        gtk_widget_add_css_class(b, "flat");
+        gtk_button_set_can_shrink(GTK_BUTTON(b), TRUE);
+        if (GtkWidget *l = gtk_button_get_child(GTK_BUTTON(b)))
+            gtk_label_set_xalign(GTK_LABEL(l), 0);
+        auto *held = new std::function<void()>(std::move(run));
+        g_object_set_data_full(G_OBJECT(b), "run", held,
+                               [](gpointer p) { delete static_cast<std::function<void()> *>(p); });
+        g_object_set_data(G_OBJECT(b), "pop", pop);
+        g_signal_connect(b, "clicked", G_CALLBACK((+[](GtkButton *btn, gpointer) {
+                             auto *run = static_cast<std::function<void()> *>(g_object_get_data(G_OBJECT(btn), "run"));
+                             gtk_popover_popdown(GTK_POPOVER(g_object_get_data(G_OBJECT(btn), "pop")));
+                             (*run)();
+                         })),
+                         nullptr);
+        gtk_box_append(GTK_BOX(box), b);
+    };
+    // The other cuts, in map order, named with where they cut so repeats of
+    // one enzyme are told apart.
+    std::vector<int> others;
+    for (size_t i = 0; i < sites.size(); ++i)
+        if (int(i) != site)
+            others.push_back(int(i));
+    if (!others.empty()) {
+        GtkWidget *head = gtk_label_new("Select to");
+        gtk_label_set_xalign(GTK_LABEL(head), 0);
+        gtk_widget_add_css_class(head, "restricto-browser-header");
+        gtk_widget_set_margin_start(head, 10);
+        gtk_box_append(GTK_BOX(box), head);
+        GtkWidget *list = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+        GtkWidget *scroll = gtk_scrolled_window_new();
+        gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+        gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroll), TRUE);
+        gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 280);
+        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), list);
+        GtkWidget *outer = box;
+        box = list;
+        for (int i : others) {
+            const CutSite &c = sites[size_t(i)];
+            row(c.enzyme->name + " (" + view::withThousands(c.cutTop + 1) + ")", [this, site, i] {
+                m_doc.activateSite(site);
+                m_doc.extendToSite(i);
+            });
+        }
+        box = outer;
+        gtk_box_append(GTK_BOX(box), scroll);
+        gtk_box_append(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+    }
+    row("Hide " + name, [this, name] { m_doc.setEnzymeHidden(name, true); });
+    row("Digest with " + name + "…", [this, name] { openGelWizard({name}); });
+    gtk_popover_set_child(GTK_POPOVER(pop), box);
+    gtk_widget_set_parent(pop, over);
+    const GdkRectangle at = {int(x), int(y), 1, 1};
+    gtk_popover_set_pointing_to(GTK_POPOVER(pop), &at);
+    g_signal_connect(pop, "closed", G_CALLBACK(+[](GtkPopover *p) {
+                         g_idle_add_once([](gpointer w) { gtk_widget_unparent(GTK_WIDGET(w)); }, p);
+                     }),
+                     nullptr);
+    gtk_popover_popup(GTK_POPOVER(pop));
+}
+
+// The two enzymes whose cuts bound the selection, after a shift-click from
+// one site to another; empty when the selection is anything else.
+std::vector<std::string> Window::fragmentEnzymes() const
+{
+    const int a = m_doc.activeSite(), b = m_doc.secondSite();
+    const std::vector<CutSite> &sites = m_doc.visibleSites();
+    if (a < 0 || b < 0 || !m_doc.hasSelection() || size_t(a) >= sites.size() || size_t(b) >= sites.size())
+        return {};
+    const std::string first = sites[size_t(a)].enzyme->name, second = sites[size_t(b)].enzyme->name;
+    return first == second ? std::vector<std::string>{first} : std::vector<std::string>{first, second};
+}
+
 void Window::updateStatus()
 {
     std::string text = m_statusMessage;
+    const std::vector<std::string> fragment = fragmentEnzymes();
     if (text.empty()) {
-        text = m_doc.statusText(false);
-        if (m_hoverBase >= 0 && m_hoverBase < m_doc.sequence().length())
-            text += (text.empty() ? "" : "  ·  ") + std::string("pointer at ") + view::withThousands(m_hoverBase + 1);
+        if (!fragment.empty()) {
+            // Between two cuts: name the fragment, and keep it short so the
+            // Digest and Gel button has room.
+            const Span sel = m_doc.selection();
+            const int n = m_doc.sequence().length();
+            const int end = n > 0 ? (sel.start + sel.length - 1) % n + 1 : sel.start;
+            text = (fragment.size() == 1 ? fragment[0] + "–" + fragment[0] : fragment[0] + "–" + fragment[1]) + ": "
+                 + view::formatBp(sel.length) + "  ·  " + view::withThousands(sel.start + 1) + "–"
+                 + view::withThousands(end);
+        } else {
+            text = m_doc.statusText(false);
+            if (m_hoverBase >= 0 && m_hoverBase < m_doc.sequence().length())
+                text += (text.empty() ? "" : "  ·  ") + std::string("pointer at ")
+                      + view::withThousands(m_hoverBase + 1);
+        }
     }
     gtk_label_set_text(GTK_LABEL(m_status), text.c_str());
+    gtk_widget_set_visible(m_digestFragment, m_statusMessage.empty() && !fragment.empty());
     fade(m_info, !text.empty());
 }
 
@@ -1358,12 +1473,13 @@ void Window::openPcrWizard()
     m_pcr->present();
 }
 
-void Window::openGelWizard()
+void Window::openGelWizard(const std::vector<std::string> &cutWith)
 {
     if (m_doc.isEmpty())
         return;
     if (m_gel) {
         m_gel->present();
+        m_gel->cutWith(cutWith);
         return;
     }
     GtkApplication *app = gtk_window_get_application(gtkWindow());
@@ -1378,6 +1494,7 @@ void Window::openGelWizard()
     });
     m_gel->onClosed = [this] { m_gel = nullptr; };
     m_gel->present();
+    m_gel->cutWith(cutWith);
 }
 
 // This tab is the insert; the vector is picked from the tabs open now.
@@ -2376,7 +2493,9 @@ void Window::actAddPrimer(GSimpleAction *, GVariant *, gpointer p)
 
 void Window::actDigest(GSimpleAction *, GVariant *, gpointer p)
 {
-    static_cast<Window *>(p)->openGelWizard();
+    // With a selection between two cuts, the gel opens on that digest.
+    auto *self = static_cast<Window *>(p);
+    self->openGelWizard(self->fragmentEnzymes());
 }
 
 void Window::actPcr(GSimpleAction *, GVariant *, gpointer p)

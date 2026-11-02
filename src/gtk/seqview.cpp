@@ -50,7 +50,17 @@ SequenceView::SequenceView(Document *doc) : m_doc(doc)
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(menu), GDK_BUTTON_SECONDARY);
     g_signal_connect(menu, "pressed", G_CALLBACK((+[](GtkGestureClick *, int, double x, double y, gpointer p) {
                          auto *self = static_cast<SequenceView *>(p);
-                         if (self->m_doc->isEmpty() || !self->m_editable)
+                         if (self->m_doc->isEmpty())
+                             return;
+                         // On an enzyme site, its own menu comes first.
+                         if (self->m_layout && self->onSiteMenu) {
+                             const int site = self->m_layout->siteAt(self->content(x, y));
+                             if (site >= 0) {
+                                 self->onSiteMenu(x, y, site);
+                                 return;
+                             }
+                         }
+                         if (!self->m_editable)
                              return;
                          const bool sel = self->m_doc->hasSelection() && self->m_doc->selection().length > 0;
                          GMenu *model = g_menu_new();
