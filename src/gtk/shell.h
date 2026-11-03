@@ -84,6 +84,14 @@ private:
 };
 
 // Settings kept between launches (~/.config/restricto/settings.ini).
+// The files opened lately, newest first (at most ten), for File > Open Recent,
+// and the files open when the app last quit, reopened on a bare launch.
+std::vector<std::string> recentFiles();
+void addRecentFile(const std::string &path);
+void clearRecentFiles();
+std::vector<std::string> lastSessionFiles();
+void setLastSessionFiles(const std::vector<std::string> &paths);
+
 bool settingBool(const char *group, const char *key, bool fallback);
 void setSettingBool(const char *group, const char *key, bool value);
 std::string settingString(const char *group, const char *key);

@@ -211,6 +211,21 @@ void actExperimental(GSimpleAction *action, GVariant *value, gpointer app)
     gtk::Window::setExperimentalTools(GTK_APPLICATION(app), g_variant_get_boolean(value));
 }
 
+void actOpenRecent(GSimpleAction *, GVariant *value, gpointer app)
+{
+    gsize len = 0;
+    const char *path = value ? g_variant_get_string(value, &len) : nullptr;
+    if (path && *path)
+        gtk::openFiles(GTK_APPLICATION(app), {path});
+}
+
+void actClearRecent(GSimpleAction *, GVariant *, gpointer app)
+{
+    gtk::clearRecentFiles();
+    for (gtk::Shell *shell : gtk::Shell::all(GTK_APPLICATION(app)))
+        shell->rebuildMenu();
+}
+
 void onStartup(GApplication *app, gpointer)
 {
     static const GActionEntry entries[] = {
@@ -219,6 +234,8 @@ void onStartup(GApplication *app, gpointer)
         {"open", actOpen, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"quit", actQuit, nullptr, nullptr, nullptr, {0, 0, 0}},
         {"about", actAbout, nullptr, nullptr, nullptr, {0, 0, 0}},
+        {"open-recent", actOpenRecent, "s", nullptr, nullptr, {0, 0, 0}},
+        {"clear-recent", actClearRecent, nullptr, nullptr, nullptr, {0, 0, 0}},
     };
     g_action_map_add_action_entries(G_ACTION_MAP(app), entries, G_N_ELEMENTS(entries), app);
     g_simple_action_set_state(G_SIMPLE_ACTION(g_action_map_lookup_action(G_ACTION_MAP(app), "experimental")),
@@ -239,6 +256,7 @@ void onStartup(GApplication *app, gpointer)
         {"win.edit-feature", {"<Control><Shift>k", nullptr}},
         {"win.digest", {"<Control><Shift>g", "<Control>d", nullptr}},
         {"win.go-to", {"<Control>l", nullptr}},
+        {"win.protein", {"<Control><Alt>t", nullptr}},
         {"win.copy-map", {"<Control><Alt>c", nullptr}},
         {"win.export-map", {"<Control>e", nullptr}},
         {"win.print", {"<Control>p", nullptr}},
@@ -252,6 +270,16 @@ void onStartup(GApplication *app, gpointer)
         {"win.zoom-in", {"<Control>plus", "<Control>equal", "<Control>KP_Add", nullptr}},
         {"win.zoom-out", {"<Control>minus", "<Control>KP_Subtract", nullptr}},
         {"win.zoom-reset", {"<Control>0", "<Control>KP_0", nullptr}},
+        // Ctrl+1–8 pick a tab, Ctrl+9 the last one, as ⌘1–⌘9 do on the Mac.
+        {"win.show-tab(1)", {"<Control>1", nullptr}},
+        {"win.show-tab(2)", {"<Control>2", nullptr}},
+        {"win.show-tab(3)", {"<Control>3", nullptr}},
+        {"win.show-tab(4)", {"<Control>4", nullptr}},
+        {"win.show-tab(5)", {"<Control>5", nullptr}},
+        {"win.show-tab(6)", {"<Control>6", nullptr}},
+        {"win.show-tab(7)", {"<Control>7", nullptr}},
+        {"win.show-tab(8)", {"<Control>8", nullptr}},
+        {"win.show-tab(9)", {"<Control>9", nullptr}},
     };
     for (const Accel &a : accels)
         gtk_application_set_accels_for_action(GTK_APPLICATION(app), a.action, a.keys);
@@ -293,7 +321,13 @@ void onActivate(GApplication *app, gpointer)
         return;
     }
     w->present();
+    // A bare launch reopens the files that were open at the last quit, as
+    // tabs beside this empty one, which takes the first of them.
+    const std::vector<std::string> last = gtk::lastSessionFiles();
+    if (!last.empty())
+        gtk::openFiles(GTK_APPLICATION(app), last, w);
 }
+
 
 void onOpen(GApplication *app, GFile **files, int n, const char *, gpointer)
 {

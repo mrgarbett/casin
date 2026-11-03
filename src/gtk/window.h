@@ -118,6 +118,7 @@ private:
     static void onEnzymeRowActivated(GtkListBox *, GtkListBoxRow *row, gpointer self);
     static void onEnzymeToggled(GtkCheckButton *, gpointer self);
     static void onSearchActivate(GtkSearchEntry *, gpointer self);
+    static void actShowTab(GSimpleAction *, GVariant *value, gpointer shell);
     static void actToggleSidebar(GSimpleAction *, GVariant *, gpointer self);
     static void actShowFolder(GSimpleAction *, GVariant *, gpointer self);
     static void actShowPanel(GSimpleAction *, GVariant *, gpointer self);
@@ -198,7 +199,10 @@ private:
     void endAddingPrimer();
     // Feature dialog: index < 0 adds a feature from the selection.
     void featureDialog(int index);
-    void openGelWizard();
+    void openGelWizard(const std::vector<std::string> &cutWith = {});
+    std::vector<std::string> fragmentEnzymes() const;
+    void siteMenu(GtkWidget *over, double x, double y, int site);
+    void rememberFile(const std::string &path);
     void openPcrWizard();
     void openGatewayWizard();
     void cloningDialog();
@@ -216,7 +220,9 @@ private:
     void searchFolderDialog();
     void taCloningDialog();
     void overlapExtensionDialog();
-    void proteinDialog();
+    void proteinDialog();   // Analyze Translation: a popover beside the selection
+    void fillProteinPopover();
+    void placeProteinPopover();
     void insertionDialog();
     void renameDialog();
     void goToDialog();
@@ -275,6 +281,13 @@ private:
     std::unique_ptr<PrimerEditor> m_primerEditor;
     guint m_endPrimerIdle = 0;
     PcrWizard *m_pcr = nullptr;   // owns itself; closes with this tab
+    GtkWidget *m_digestFragment = nullptr;   // beside the status, between two cuts
+    GtkWidget *m_protein = nullptr;          // Analyze Translation, while it is up
+    GtkEventController *m_proteinKeys = nullptr;   // Escape closes the popover, once it has been opened
+    GdkRectangle m_proteinAt{};              // what it points at, so it only moves when it has to
+    bool m_proteinMoving = false;            // moving it closes it; this puts it straight back
+    std::string m_proteinText;               // what Copy Protein copies
+    bool m_proteinMore = false;              // the composition is showing
     GelWizard *m_gel = nullptr;   // the same
     GatewayWizard *m_gateway = nullptr;   // the same
     std::vector<AdwDialog *> m_dialogs;   // the tab's open dialogs, closed with it

@@ -342,10 +342,12 @@ int Document::findNext(const std::string &raw, int *count, Strand *strand)
     return int(hit) + 1;
 }
 
-int Document::findNamesOrBases(const std::string &raw, int *count, FindKind *kind)
+int Document::findNamesOrBases(const std::string &raw, int *count, FindKind *kind, int *nameCount)
 {
     if (count)
         *count = 0;
+    if (nameCount)
+        *nameCount = 0;
     if (kind)
         *kind = FindKind::None;
     auto lower = [](std::string t) {
@@ -397,6 +399,8 @@ int Document::findNamesOrBases(const std::string &raw, int *count, FindKind *kin
     }
     std::stable_sort(hits.begin(), hits.end(), [](const Hit &a, const Hit &b) { return a.span.start < b.span.start; });
     const size_t names = hits.size();
+    if (nameCount)
+        *nameCount = int(names);
     const bool dna = !bases.empty() && cleanBases(bases).size() == bases.size();
     if (dna)
         for (const PatternMatch &m : findPattern(m_seq, bases))

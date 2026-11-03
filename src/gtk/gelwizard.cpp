@@ -842,6 +842,27 @@ void GelWizard::addLane()
     refresh();
 }
 
+void GelWizard::cutWith(const std::vector<std::string> &enzymes)
+{
+    if (m_closing || enzymes.empty())
+        return;
+    for (size_t i = 0; i < m_lanes.size(); ++i)
+        if (m_lanes[i].isSample() && live(m_lanes[i]) == m_template && m_lanes[i].enzymes == enzymes) {
+            selectLane(int(i));
+            return;
+        }
+    const int teeth = gelCombs()[size_t(std::clamp(g_comb, 0, int(gelCombs().size()) - 1))].teeth;
+    Lane lane{m_template, m_template->sequence().name, m_template->sequence(), enzymes};
+    if (int(m_lanes.size()) < teeth) {
+        m_lanes.push_back(lane);
+        m_selected = int(m_lanes.size()) - 1;
+    } else {
+        // A full comb: the lane being edited takes the digest instead.
+        m_lanes[size_t(m_selected)] = lane;
+    }
+    refresh();
+}
+
 void GelWizard::removeLane()
 {
     if (m_closing)

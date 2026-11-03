@@ -44,18 +44,32 @@ SequenceView::SequenceView(Document *doc) : m_doc(doc)
     GtkGesture *click = gtk_gesture_click_new();
     g_signal_connect(click, "pressed", G_CALLBACK(&SequenceView::pressed), this);
     gtk_widget_add_controller(m_area, GTK_EVENT_CONTROLLER(click));
-    // Right-click: Add Primer (from the selection, if any), as on the Mac.
+    // Right-click: Add Primer (from the selection, if any) and, with bases
+    // selected, Copy and Analyze Translation, as on the Mac.
     GtkGesture *menu = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(menu), GDK_BUTTON_SECONDARY);
     g_signal_connect(menu, "pressed", G_CALLBACK((+[](GtkGestureClick *, int, double x, double y, gpointer p) {
                          auto *self = static_cast<SequenceView *>(p);
-                         if (self->m_doc->isEmpty() || !self->m_editable)
+                         if (self->m_doc->isEmpty())
+                             return;
+                         // On an enzyme site, its own menu comes first.
+                         if (self->m_layout && self->onSiteMenu) {
+                             const int site = self->m_layout->siteAt(self->content(x, y));
+                             if (site >= 0) {
+                                 self->onSiteMenu(x, y, site);
+                                 return;
+                             }
+                         }
+                         if (!self->m_editable)
                              return;
                          const bool sel = self->m_doc->hasSelection() && self->m_doc->selection().length > 0;
                          GMenu *model = g_menu_new();
                          g_menu_append(model, sel ? "Add Primer from Selection…" : "Add Primer…", "win.add-primer");
                          if (sel)
                              g_menu_append(model, "Copy", "win.copy");
+                         // A codon or more selected: translate it, as on the Mac.
+                         if (sel && self->m_doc->selection().length >= 3)
+                             g_menu_append(model, "Analyze Translation…", "win.protein");
                          GtkWidget *pop = gtk_popover_menu_new_from_model(G_MENU_MODEL(model));
                          g_object_unref(model);
                          gtk_widget_set_parent(pop, self->m_area);
@@ -114,6 +128,8 @@ SequenceView::~SequenceView()
 
 void SequenceView::invalidate()
 {
+    // The hovered feature and site are indices into lists this rebuilds.
+    m_hoverFeature = m_hoverSite = -1;
     m_layout.reset();
     ensureLayout();
     gtk_widget_queue_draw(m_area);
@@ -207,6 +223,20 @@ void SequenceView::scrollToPosition(int pos)
         scrollSmoothlyTo(top - 20);
 }
 
+bool SequenceView::rectForPosition(int pos, GdkRectangle *out)
+{
+    ensureLayout();
+    if (!m_layout || !out)
+        return false;
+    const double top = m_layout->lineTopFor(pos) * m_zoom - m_offset;
+    const double h = m_layout->lineHeightFor(pos) * m_zoom;
+    if (top + h < 0 || top > m_h)
+        return false;
+    const int width = gtk_widget_get_width(m_area);
+    *out = {0, int(std::max(0.0, top)), std::max(1, width - m_trailing), int(std::max(1.0, h))};
+    return true;
+}
+
 // ---- scrolling ---------------------------------------------------------------------
 
 namespace {
@@ -245,6 +275,8 @@ void SequenceView::syncOffset()
     gtk_adjustment_set_value(m_adj, std::clamp(m_offset, 0.0, maxOffset()));
     m_syncing = false;
     gtk_widget_queue_draw(m_area);
+    if (onScrolled)
+        onScrolled();
 }
 
 void SequenceView::setOffset(double y)
@@ -453,6 +485,8 @@ void SequenceView::draw(GtkDrawingArea *, cairo_t *cr, int, int h, gpointer p)
     st.activeFeature = self->m_doc->activeFeature();
     st.activeSite = self->m_doc->activeSite();
     st.hoverCodon = self->m_hoverCodon;
+    st.hoverFeature = self->m_hoverFeature;
+    st.hoverSite = self->m_hoverSite;
     const double z = self->m_zoom;
     const view::Scene scene = self->m_layout->render(self->m_offset / z, h / z, st);
     if (!scene.background.isNone()) {
@@ -474,6 +508,15 @@ void SequenceView::valueChanged(GtkAdjustment *adj, gpointer p)
         self->m_offset = gtk_adjustment_get_value(adj);
     }
     gtk_widget_queue_draw(self->m_area);
+}
+
+void SequenceView::setHover(int feature, int site)
+{
+    if (feature == m_hoverFeature && site == m_hoverSite)
+        return;
+    m_hoverFeature = feature;
+    m_hoverSite = site;
+    gtk_widget_queue_draw(m_area);
 }
 
 void SequenceView::setHoverCodon(int codon)
@@ -566,10 +609,21 @@ void SequenceView::dragBegin(GtkGestureDrag *g, double x, double y, gpointer p)
     const view::Point at = self->content(x, y);
     const GdkModifierType mods = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(g));
     if (mods & GDK_SHIFT_MASK) {
-        // On a second enzyme: the bases between the two cuts.
+        // On a second enzyme: the bases between the two cuts. On a primer or
+        // feature: the selection grown to cover it.
         const int site = self->m_layout->siteAt(at);
         if (site >= 0) {
             self->m_doc->extendToSite(site);
+            return;
+        }
+        const int primer = self->m_layout->primerAt(at);
+        if (primer >= 0 && primer < int(self->m_doc->displaySequence().primers.size())) {
+            self->m_doc->extendToPrimer(primer);
+            return;
+        }
+        const int feature = self->m_layout->featureAt(at);
+        if (feature >= 0) {
+            self->m_doc->extendToFeature(feature);
             return;
         }
         // Shift-click extends from the existing anchor.
@@ -663,6 +717,11 @@ void SequenceView::motion(GtkEventControllerMotion *, double x, double y, gpoint
     const view::Point at = self->content(x, y);
     // An amino acid under the mouse outlines its codon.
     self->setHoverCodon(self->m_layout->codonAt(at));
+    // A site or feature under the mouse is marked on the map too.
+    if (self->onHoverTarget) {
+        const int site = self->m_layout->siteAt(at);
+        self->onHoverTarget(site >= 0 ? -1 : self->m_layout->featureAt(at), site);
+    }
     if (self->onHoverBase)
         self->onHoverBase(self->m_layout->baseAt(at));
 }
@@ -671,6 +730,8 @@ void SequenceView::leave(GtkEventControllerMotion *, gpointer p)
 {
     auto *self = static_cast<SequenceView *>(p);
     self->setHoverCodon(-1);
+    if (self->onHoverTarget)
+        self->onHoverTarget(-1, -1);
     if (self->onHoverBase)
         self->onHoverBase(-1);
 }
@@ -678,9 +739,33 @@ void SequenceView::leave(GtkEventControllerMotion *, gpointer p)
 void SequenceView::pressed(GtkGestureClick *, int n, double x, double y, gpointer p)
 {
     auto *self = static_cast<SequenceView *>(p);
-    if (n != 2 || !self->m_layout || !self->onEditFeature)
+    if (n != 2 || !self->m_layout)
         return;
-    const int feature = self->m_layout->featureAt(self->content(x, y));
+    const view::Point at = self->content(x, y);
+    // On an amino acid: the whole translation, the open reading frame or the
+    // CDS, in place of the codon the first click selected. The drag gesture
+    // sees this press too and selects that codon, so the whole translation
+    // is selected once both gestures have had the press.
+    const Span translation = self->m_layout->translationAt(at);
+    if (!translation.empty()) {
+        self->m_pendingTranslation = translation;
+        g_idle_add_once(
+            [](gpointer p) {
+                auto *view = static_cast<SequenceView *>(p);
+                if (view->m_pendingTranslation.empty())
+                    return;
+                view->m_dragging = false;
+                view->m_codonAnchor = -1;
+                view->m_anchor = view->m_pendingTranslation.start;
+                view->m_doc->setSelection(view->m_pendingTranslation);
+                view->m_pendingTranslation = Span{};
+            },
+            self);
+        return;
+    }
+    if (!self->onEditFeature)
+        return;
+    const int feature = self->m_layout->featureAt(at);
     if (feature >= 0)
         self->onEditFeature(feature);
 }

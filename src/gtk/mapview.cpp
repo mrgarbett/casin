@@ -34,6 +34,19 @@ MapView::MapView(Document *doc) : m_doc(doc)
     GtkGesture *click = gtk_gesture_click_new();
     g_signal_connect(click, "pressed", G_CALLBACK(&MapView::pressed), this);
     gtk_widget_add_controller(m_area, GTK_EVENT_CONTROLLER(click));
+    // Right-click on an enzyme site: its menu.
+    GtkGesture *menu = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(menu), GDK_BUTTON_SECONDARY);
+    g_signal_connect(menu, "pressed", G_CALLBACK((+[](GtkGestureClick *, int, double x, double y, gpointer p) {
+                         auto *self = static_cast<MapView *>(p);
+                         if (!self->m_layout || !self->onSiteMenu || self->m_doc->isEmpty())
+                             return;
+                         const view::MapHit hit = self->m_layout->hitTest(view::Point{x, y});
+                         if (hit.kind == view::MapHit::Site)
+                             self->onSiteMenu(x, y, hit.index);
+                     })),
+                     this);
+    gtk_widget_add_controller(m_area, GTK_EVENT_CONTROLLER(menu));
 
     m_doc->onSequenceChanged([this] { invalidate(); });
     m_doc->onEnzymesChanged([this] { invalidate(); });
@@ -46,6 +59,8 @@ MapView::~MapView() = default;
 
 void MapView::invalidate()
 {
+    // The hovered feature and site are indices into lists this rebuilds.
+    m_hoverFeature = m_hoverSite = -1;
     m_layout.reset();
     gtk_widget_queue_draw(m_area);
 }
@@ -111,6 +126,15 @@ void MapView::ensureLayout(int w, int h)
     }
 }
 
+void MapView::setHover(int feature, int site)
+{
+    if (feature == m_hoverFeature && site == m_hoverSite)
+        return;
+    m_hoverFeature = feature;
+    m_hoverSite = site;
+    gtk_widget_queue_draw(m_area);
+}
+
 void MapView::draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer p)
 {
     auto *self = static_cast<MapView *>(p);
@@ -120,6 +144,8 @@ void MapView::draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer p)
     st.selection = self->m_doc->selection();
     st.activeFeature = self->m_doc->activeFeature();
     st.activeSite = self->m_doc->activeSite();
+    st.hoverFeature = self->m_hoverFeature;
+    st.hoverSite = self->m_hoverSite;
     const view::Scene scene = self->m_layout->render(st);
     if (!scene.background.isNone()) {
         // Under the floating capsules too, so they float over the map.
@@ -141,7 +167,11 @@ void MapView::dragBegin(GtkGestureDrag *drag, double x, double y, gpointer p)
     const view::MapHit hit = self->m_layout->hitTest(view::Point{x, y});
     switch (hit.kind) {
     case view::MapHit::Feature:
-        self->m_doc->activateFeature(hit.index);
+        // Shift-click grows the selection to cover the feature too.
+        if (gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(drag)) & GDK_SHIFT_MASK)
+            self->m_doc->extendToFeature(hit.index);
+        else
+            self->m_doc->activateFeature(hit.index);
         break;
     case view::MapHit::Site:
         // Shift-click on a second enzyme selects the bases between the two cuts.
@@ -154,6 +184,10 @@ void MapView::dragBegin(GtkGestureDrag *drag, double x, double y, gpointer p)
         if (self->onPickPrimer) {
             const GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(drag));
             self->onPickPrimer(hit.index, state & GDK_SHIFT_MASK);
+            break;
+        }
+        if (gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(drag)) & GDK_SHIFT_MASK) {
+            self->m_doc->extendToPrimer(hit.index);
             break;
         }
         [[fallthrough]];   // elsewhere a primer starts a selection, as other bases do
@@ -215,6 +249,10 @@ void MapView::motion(GtkEventControllerMotion *, double x, double y, gpointer p)
     const view::MapHit hit = self->m_layout->hitTest(view::Point{x, y});
     if (self->onPickPrimer)   // primers can be clicked here
         gtk_widget_set_cursor_from_name(self->m_area, hit.kind == view::MapHit::Primer ? "pointer" : nullptr);
+    // A feature or site under the mouse is marked in the sequence too.
+    if (self->onHoverTarget)
+        self->onHoverTarget(hit.kind == view::MapHit::Feature ? hit.index : -1,
+                            hit.kind == view::MapHit::Site ? hit.index : -1);
     if (!self->onHoverBase)
         return;
     const int n = self->m_doc->sequence().length();
@@ -224,6 +262,8 @@ void MapView::motion(GtkEventControllerMotion *, double x, double y, gpointer p)
 void MapView::leave(GtkEventControllerMotion *, gpointer p)
 {
     auto *self = static_cast<MapView *>(p);
+    if (self->onHoverTarget)
+        self->onHoverTarget(-1, -1);
     if (self->onHoverBase)
         self->onHoverBase(-1);
 }

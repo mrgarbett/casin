@@ -34,6 +34,10 @@ public:
     void setShowEnzymes(bool show);
     void setHiddenTypes(std::set<std::string> types);
     void scrollToPosition(int pos);
+    // Where the line holding `pos` sits in the view now, in widget
+    // coordinates, for something floating beside it. False when the view has
+    // no layout yet or that line is out of sight.
+    bool rectForPosition(int pos, GdkRectangle *out);
     // Typing bases, Backspace, Delete and the arrow keys edit the document.
     void setEditable(bool editable) { m_editable = editable; }
     // Text and drawing scaled together, like a zoomed web page (1 = 100 %).
@@ -52,6 +56,15 @@ public:
     std::function<void(int)> onHoverBase;
     std::function<void(double, double)> onSelectDrag;
     std::function<void(int)> onEditFeature;
+    // The feature or site under the mouse here (-1, -1 for none), so the map
+    // can mark the same one.
+    std::function<void(int, int)> onHoverTarget;
+    // Right-click on an enzyme site: where, and which visible site.
+    std::function<void(double, double, int)> onSiteMenu;
+    // The view scrolled: anything floating beside a base moves with it.
+    std::function<void()> onScrolled;
+    // The feature and site hovered anywhere: their bases lightly tinted.
+    void setHover(int feature, int site);
 
 private:
     static void draw(GtkDrawingArea *, cairo_t *cr, int w, int h, gpointer self);
@@ -114,8 +127,12 @@ private:
     // A drag that started on an amino acid: its codon, so the selection grows
     // codon by codon while it stays on amino acids (-1 otherwise).
     int m_codonAnchor = -1;
+    // A double-clicked translation, applied once the drag gesture has had
+    // the same press (it would otherwise leave just the codon selected).
+    Span m_pendingTranslation;
     // The codon whose amino acid is under the mouse, outlined on the strands.
     int m_hoverCodon = -1;
+    int m_hoverFeature = -1, m_hoverSite = -1;
     double m_x0 = 0, m_y0 = 0, m_lastX = 0, m_lastY = 0;
     guint m_timer = 0;
     // scroll state

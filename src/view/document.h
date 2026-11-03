@@ -117,8 +117,11 @@ public:
     // steps on through the whole list, wrapping around. Selects the match
     // (activating a feature or a site on the map) and returns its 1-based
     // number, 0 if nothing matched, -1 if nothing is named so and the query
-    // isn't DNA.
-    int findNamesOrBases(const std::string &query, int *count = nullptr, FindKind *kind = nullptr);
+    // isn't DNA. `count` is every match; `nameCount` is how many of those are
+    // name matches, which come first, so a caller can number the two groups
+    // apart (a query such as "MCS" is both a name and DNA).
+    int findNamesOrBases(const std::string &query, int *count = nullptr, FindKind *kind = nullptr,
+                         int *nameCount = nullptr);
 
     // ---- editing ----
     // Every change to the sequence goes through these. Each one is a step on

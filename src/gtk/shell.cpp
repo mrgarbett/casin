@@ -170,6 +170,55 @@ void setSettingString(const char *group, const char *key, const std::string &val
     g_key_file_free(kf);
 }
 
+namespace {
+const size_t kMaxRecent = 10;
+
+std::vector<std::string> fileList(const char *key)
+{
+    std::vector<std::string> out;
+    std::string joined = settingString("files", key);
+    size_t at = 0;
+    while (at < joined.size()) {
+        const size_t nl = joined.find('\n', at);
+        const std::string one = joined.substr(at, nl == std::string::npos ? std::string::npos : nl - at);
+        if (!one.empty() && g_file_test(one.c_str(), G_FILE_TEST_EXISTS))
+            out.push_back(one);
+        if (nl == std::string::npos)
+            break;
+        at = nl + 1;
+    }
+    return out;
+}
+
+void setFileList(const char *key, const std::vector<std::string> &paths)
+{
+    std::string joined;
+    for (const std::string &p : paths)
+        joined += (joined.empty() ? "" : "\n") + p;
+    setSettingString("files", key, joined);
+}
+} // namespace
+
+std::vector<std::string> recentFiles() { return fileList("recent"); }
+
+void addRecentFile(const std::string &path)
+{
+    if (path.empty())
+        return;
+    std::vector<std::string> files = recentFiles();
+    files.erase(std::remove(files.begin(), files.end(), path), files.end());
+    files.insert(files.begin(), path);
+    if (files.size() > kMaxRecent)
+        files.resize(kMaxRecent);
+    setFileList("recent", files);
+}
+
+void clearRecentFiles() { setFileList("recent", {}); }
+
+std::vector<std::string> lastSessionFiles() { return fileList("session"); }
+
+void setLastSessionFiles(const std::vector<std::string> &paths) { setFileList("session", paths); }
+
 // ---- styles ------------------------------------------------------------------------
 
 void Shell::loadStyles()
@@ -211,6 +260,10 @@ void Shell::loadStyles()
 }
 .restricto-cue.ready { background-color: alpha(@success_color, 0.16); color: @success_color; font-weight: 600; }
 .restricto-cue.problem { background-color: alpha(@warning_color, 0.16); color: @warning_color; }
+/* Enzymes list tags: a feature a cut falls inside, and Dam/Dcm blocking. */
+.restricto-tag { font-size: 9pt; font-weight: 600; }
+.restricto-tag.feature { color: #9141ac; }
+.restricto-tag.methyl { color: #e66100; }
 .restricto-program { padding: 10px 14px; font-feature-settings: "tnum"; }
 .restricto-program .head { font-size: smaller; font-weight: bold; opacity: 0.5; }
 .restricto-program .once { opacity: 0.6; }
@@ -554,6 +607,14 @@ gboolean Shell::onCloseRequest(GtkWindow *, gpointer p)
             return TRUE;   // asking; the answer closes the window again
     for (Window *w : self->pages())
         w->closeTools();
+    // The last window going: its tabs are the files to reopen next time.
+    if (Shell::all(self->app()).size() == 1) {
+        std::vector<std::string> paths;
+        for (Window *w : self->pages())
+            if (!w->path().empty())
+                paths.push_back(w->path());
+        setLastSessionFiles(paths);
+    }
     self->m_closing = true;
     return FALSE;
 }
@@ -879,6 +940,23 @@ void Shell::rebuildMenu()
     GMenu *fileSection = g_menu_new();
     g_menu_append(fileSection, "New Sequence…", "app.new");
     g_menu_append(fileSection, "Open…", "app.open");
+    // Open Recent, rebuilt with the menu so it lists what is there now.
+    const std::vector<std::string> recent = recentFiles();
+    if (!recent.empty()) {
+        GMenu *recentMenu = g_menu_new();
+        for (const std::string &path : recent) {
+            GMenuItem *item = g_menu_item_new(baseNameOf(path).c_str(), nullptr);
+            g_menu_item_set_action_and_target_value(item, "app.open-recent", g_variant_new_string(path.c_str()));
+            g_menu_append_item(recentMenu, item);
+            g_object_unref(item);
+        }
+        GMenu *clear = g_menu_new();
+        g_menu_append(clear, "Clear Menu", "app.clear-recent");
+        g_menu_append_section(recentMenu, nullptr, G_MENU_MODEL(clear));
+        g_menu_append_submenu(fileSection, "Open Recent", G_MENU_MODEL(recentMenu));
+        g_object_unref(recentMenu);
+        g_object_unref(clear);
+    }
     g_menu_append(fileSection, "Show Folder in Sidebar…", "win.show-folder");
     addExp(fileSection, "Search a Folder…", "win.search-folder");
     g_menu_append(fileSection, "Save", "win.save");
@@ -905,6 +983,7 @@ void Shell::rebuildMenu()
     g_menu_append(seqMenu, "Set Origin at Selection", "win.set-origin");
     g_menu_append(seqMenu, "Circular", "win.circular");
     g_menu_append(seqMenu, "Rename…", "win.rename");
+    g_menu_append(seqMenu, "Analyze Translation…", "win.protein");
     GMenu *featureMenu = g_menu_new();
     GMenu *featureEdit = g_menu_new();
     g_menu_append(featureEdit, "Add Feature…", "win.add-feature");
@@ -914,7 +993,6 @@ void Shell::rebuildMenu()
     GMenu *featureFind = g_menu_new();
     g_menu_append(featureFind, "Annotate Common Features", "win.annotate");
     addExp(featureFind, "Find ORFs…", "win.orfs");
-    addExp(featureFind, "Protein Properties…", "win.protein");
     g_menu_append_section(featureMenu, nullptr, G_MENU_MODEL(featureFind));
     GMenu *primerMenu = g_menu_new();
     GMenu *primerEdit = g_menu_new();
