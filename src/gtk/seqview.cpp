@@ -223,6 +223,20 @@ void SequenceView::scrollToPosition(int pos)
         scrollSmoothlyTo(top - 20);
 }
 
+bool SequenceView::rectForPosition(int pos, GdkRectangle *out)
+{
+    ensureLayout();
+    if (!m_layout || !out)
+        return false;
+    const double top = m_layout->lineTopFor(pos) * m_zoom - m_offset;
+    const double h = m_layout->lineHeightFor(pos) * m_zoom;
+    if (top + h < 0 || top > m_h)
+        return false;
+    const int width = gtk_widget_get_width(m_area);
+    *out = {0, int(std::max(0.0, top)), std::max(1, width - m_trailing), int(std::max(1.0, h))};
+    return true;
+}
+
 // ---- scrolling ---------------------------------------------------------------------
 
 namespace {
@@ -261,6 +275,8 @@ void SequenceView::syncOffset()
     gtk_adjustment_set_value(m_adj, std::clamp(m_offset, 0.0, maxOffset()));
     m_syncing = false;
     gtk_widget_queue_draw(m_area);
+    if (onScrolled)
+        onScrolled();
 }
 
 void SequenceView::setOffset(double y)

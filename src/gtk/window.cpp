@@ -273,6 +273,11 @@ Window::Window(Shell *shell) : m_shell(shell), m_window(shell->widget())
         updateStatus();
         updateActions();
         scrollTraceToSelection();
+        // Analyze Translation, while it is up, follows the selection.
+        if (m_protein) {
+            fillProteinPopover();
+            placeProteinPopover();
+        }
     });
     m_doc.onHistoryChanged([this] {
         updateTitle();
@@ -609,6 +614,8 @@ void Window::buildUi()
     m_seq->onHoverTarget = hoverTarget;
     m_map->onSiteMenu = [this](double x, double y, int site) { siteMenu(m_map->widget(), x, y, site); };
     m_seq->onSiteMenu = [this](double x, double y, int site) { siteMenu(m_seq->widget(), x, y, site); };
+    // Analyze Translation follows the selection and the scrolling while it is up.
+    m_seq->onScrolled = [this] { placeProteinPopover(); };
     m_map->onSelectDrag = [this](double x, double y) { showBadge(m_map->widget(), x, y); };
     m_seq->onSelectDrag = [this](double x, double y) { showBadge(m_seq->widget(), x, y); };
     auto edit = [this](int index) { featureDialog(index); };
@@ -2265,7 +2272,7 @@ namespace {
 // built and reachable with Experimental Tools on; off, their menu items and
 // shortcuts are gone.
 const char *const kExperimentalActions[] = {
-    "search-folder", "print", "choose-enzymes", "orfs", "protein", "clone", "golden-gate", "ta-cloning",
+    "search-folder", "print", "choose-enzymes", "orfs", "clone", "golden-gate", "ta-cloning",
     "overlap-extension", "mutagenesis", "history", "align", "compare", "clear-reads", "map-options", "frames",
 };
 

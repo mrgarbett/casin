@@ -1347,17 +1347,6 @@ void Window::overlapExtensionDialog()
 }
 
 namespace {
-GtkWidget *valueRow(GtkWidget *group, const char *title, const std::string &value)
-{
-    GtkWidget *row = adw_action_row_new();
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), title);
-    GtkWidget *v = gtk_label_new(value.c_str());
-    gtk_label_set_selectable(GTK_LABEL(v), TRUE);
-    gtk_widget_add_css_class(v, "dim-label");
-    adw_action_row_add_suffix(ADW_ACTION_ROW(row), v);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group), row);
-    return row;
-}
 
 // "39,990": formatBp without its unit.
 std::string grouped(int n)
@@ -1379,9 +1368,8 @@ std::string fixed(double v, int decimals)
 
 // The amino acid composition: one line per residue with its count, its share
 // and a bar (a quarter of the protein fills it), then the usual groupings.
-void addComposition(const Form &f, const std::string &protein)
+GtkWidget *compositionGrid(const std::string &protein)
 {
-    GtkWidget *group = addGroup(f, "Composition");
     GtkWidget *grid = gtk_grid_new();
     gtk_grid_set_column_spacing(GTK_GRID(grid), 12);
     gtk_grid_set_row_spacing(GTK_GRID(grid), 2);
@@ -1445,22 +1433,71 @@ void addComposition(const Form &f, const std::string &protein)
         cell(share(k), 2, row, false, true);
         ++row;
     }
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group), grid);
+    return grid;
 }
 } // namespace
 
-void Window::proteinDialog()
+// Analyze Translation: a popover beside the selected bases with the protein
+// and its properties, as on the Mac. It follows the selection while it is up,
+// and Show More adds the amino acid composition.
+void Window::fillProteinPopover()
 {
+    if (!m_protein)
+        return;
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_start(box, 12);
+    gtk_widget_set_margin_end(box, 12);
+    gtk_widget_set_margin_top(box, 10);
+    gtk_widget_set_margin_bottom(box, 10);
+    gtk_widget_set_size_request(box, 340, -1);
+    auto heading = [&](const std::string &text, const char *css) {
+        GtkWidget *l = gtk_label_new(text.c_str());
+        gtk_label_set_xalign(GTK_LABEL(l), 0);
+        gtk_label_set_wrap(GTK_LABEL(l), TRUE);
+        gtk_widget_add_css_class(l, css);
+        gtk_box_append(GTK_BOX(box), l);
+        return l;
+    };
+    // The title, with the close button beside it: the popover is not modal, so
+    // that it can follow the selection, which leaves nothing else to dismiss it.
+    auto titleRow = [&](const std::string &text) {
+        GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+        GtkWidget *l = gtk_label_new(text.c_str());
+        gtk_label_set_xalign(GTK_LABEL(l), 0);
+        gtk_label_set_wrap(GTK_LABEL(l), TRUE);
+        gtk_widget_set_hexpand(l, TRUE);
+        gtk_widget_add_css_class(l, "restricto-title");
+        gtk_box_append(GTK_BOX(row), l);
+        GtkWidget *shut = gtk_button_new_from_icon_name("window-close-symbolic");
+        gtk_widget_add_css_class(shut, "flat");
+        gtk_widget_add_css_class(shut, "circular");
+        gtk_widget_set_valign(shut, GTK_ALIGN_START);
+        gtk_widget_set_tooltip_text(shut, "Close");
+        g_signal_connect(shut, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                             auto *self = static_cast<Window *>(p);
+                             if (self->m_protein)
+                                 gtk_popover_popdown(GTK_POPOVER(self->m_protein));
+                         })),
+                         this);
+        gtk_box_append(GTK_BOX(row), shut);
+        gtk_box_append(GTK_BOX(box), row);
+    };
+
     const Span sel = m_doc.selection();
     if (sel.length < 3) {
-        toast("Select the coding bases, or a CDS feature, first");
+        m_proteinText.clear();
+        titleRow("Translation");
+        heading("Select three or more bases, or a CDS feature, to translate.", "dim-label");
+        gtk_popover_set_child(GTK_POPOVER(m_protein), box);
         return;
     }
+
     // A selected feature is read on its own strand, with its exons joined;
     // bases inside a reverse CDS or ORF's frame are read backwards too.
     const Sequence &seq = m_doc.sequence();
     const Strand strand = m_doc.selectionReadingStrand();
     std::string bases = m_doc.selectedBases();
+    std::string title = "Translation";
     std::string from = std::string("Selection, ") + (strand == Strand::Reverse ? "reverse" : "forward") + " strand";
     const int fi = m_doc.activeFeature();
     bool named = false;
@@ -1468,7 +1505,8 @@ void Window::proteinDialog()
         const Feature &f = seq.features[size_t(fi)];
         if (f.span(seq.length(), seq.circular) == sel) {
             bases = seq.featureBases(f);
-            from = f.name + (f.strand == Strand::Reverse ? ", reverse strand" : "");
+            title = f.name.empty() ? f.type : f.name;
+            from = std::string(f.strand == Strand::Reverse ? "Reverse" : "Forward") + " strand";
             named = true;
         }
     }
@@ -1480,14 +1518,14 @@ void Window::proteinDialog()
     std::string shown = protein;
     if (!shown.empty() && shown.back() == '*')
         shown.pop_back();
+    m_proteinText = shown;
     // The residues up to the first stop, which is what the stats count.
     const std::string counted = shown.substr(0, shown.find('*'));
 
-    Form f = makeForm("Translation", "Copy Protein");
-    adw_dialog_set_content_height(f.dialog, 600);
-    GtkWidget *gp = addGroup(f, "Protein");
-    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(gp),
-                                          (from + " · " + view::formatBp(int(bases.size()))).c_str());
+    titleRow(title);
+    heading(from + " · " + view::formatBp(int(bases.size())), "dim-label");
+
+    // The protein itself, scrolling once it is long.
     GtkWidget *text = gtk_label_new(shown.c_str());
     gtk_label_set_wrap(GTK_LABEL(text), TRUE);
     gtk_label_set_wrap_mode(GTK_LABEL(text), PANGO_WRAP_CHAR);
@@ -1499,62 +1537,190 @@ void Window::proteinDialog()
     gtk_label_set_xalign(GTK_LABEL(text), 0);
     gtk_widget_add_css_class(text, "monospace");
     gtk_widget_add_css_class(text, "card");
-    gtk_widget_set_margin_bottom(text, 4);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(gp), text);
-    // Leave room around the text inside the card.
-    GtkCssProvider *css = gtk_css_provider_new();
-    gtk_css_provider_load_from_string(css, "label.card, grid.card { padding: 10px 12px; }");
-    gtk_style_context_add_provider_for_display(gtk_widget_get_display(text), GTK_STYLE_PROVIDER(css),
-                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-    g_object_unref(css);
+    GtkWidget *textScroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(textScroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(textScroll), TRUE);
+    gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(textScroll), 110);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(textScroll), text);
+    gtk_box_append(GTK_BOX(box), textScroll);
 
-    GtkWidget *gs = addGroup(f, "Properties");
-    if (ps.truncated)
-        adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(gs),
-                                              "A stop codon ends the protein early; figures are up to it");
-    const int end = sel.length > 0 ? (sel.start + sel.length - 1) % std::max(1, seq.length()) + 1 : sel.start;
-    valueRow(gs, "Position", view::withThousands(sel.start + 1) + "–" + view::withThousands(end) + " ("
-                                 + (strand == Strand::Reverse ? "reverse" : "forward") + ")");
-    valueRow(gs, "Length", std::to_string(ps.length) + " aa");
-    valueRow(gs, "Molecular weight", fixed(ps.mass / 1000, 2) + " kDa");
-    valueRow(gs, "Isoelectric point", fixed(ps.pI, 2));
-    valueRow(gs, "Charge at pH 7", (charge > 0 ? "+" : "") + fixed(charge, 1));
-    valueRow(gs, "Charged residues", std::to_string(ps.positive) + " + (K, R), " + std::to_string(ps.negative) + " − (D, E)");
-    // Absorbance of a 1 g/l solution, as the extinction over the mass.
+    // The figures, two columns.
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 12);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 2);
+    int row = 0;
+    auto line = [&](const std::string &label, const std::string &value, bool indent = false) {
+        GtkWidget *l = gtk_label_new(((indent ? "    " : "") + label).c_str());
+        gtk_label_set_xalign(GTK_LABEL(l), 0);
+        gtk_widget_add_css_class(l, "dim-label");
+        gtk_widget_set_hexpand(l, TRUE);
+        GtkWidget *v = gtk_label_new(value.c_str());
+        gtk_label_set_xalign(GTK_LABEL(v), 1);
+        gtk_label_set_selectable(GTK_LABEL(v), TRUE);
+        gtk_widget_add_css_class(v, "numeric");
+        gtk_grid_attach(GTK_GRID(grid), l, 0, row, 1, 1);
+        gtk_grid_attach(GTK_GRID(grid), v, 1, row, 1, 1);
+        ++row;
+    };
+    const int n = std::max(1, seq.length());
+    const int end = (sel.start + sel.length - 1) % n + 1;
     auto absorbance = [&](int ext) { return ps.mass > 0 ? fixed(ext / ps.mass, 3) : std::string("–"); };
-    valueRow(gs, "Extinction at 280 nm", grouped(ps.extinctionReduced) + " M⁻¹cm⁻¹ (Cys reduced)");
-    valueRow(gs, "Abs 0.1 % (1 g/l)", absorbance(ps.extinctionReduced));
+    line("Position", view::withThousands(sel.start + 1) + "–" + view::withThousands(end) + " ("
+                         + (strand == Strand::Reverse ? "reverse" : "forward") + ")");
+    line("Length", std::to_string(ps.length) + " aa");
+    line("Molecular weight", fixed(ps.mass / 1000, 2) + " kDa");
+    line("Isoelectric point (pI)", fixed(ps.pI, 2));
+    line("Charge at pH 7", (charge > 0 ? "+" : "") + fixed(charge, 1));
+    line("Charged residues", std::to_string(ps.positive) + " + (K, R), " + std::to_string(ps.negative) + " − (D, E)");
+    line("Extinction at 280 nm", "");
+    line("Cys reduced", grouped(ps.extinctionReduced) + " M⁻¹cm⁻¹", true);
+    line("Abs 0.1 % (1 g/l)", absorbance(ps.extinctionReduced), true);
     if (ps.extinctionCystines != ps.extinctionReduced) {
-        valueRow(gs, "With cystines", grouped(ps.extinctionCystines) + " M⁻¹cm⁻¹");
-        valueRow(gs, "Abs 0.1 % with cystines", absorbance(ps.extinctionCystines));
+        line("Cys as cystines", grouped(ps.extinctionCystines) + " M⁻¹cm⁻¹", true);
+        line("Abs 0.1 % (1 g/l)", absorbance(ps.extinctionCystines), true);
     }
-    valueRow(gs, "Instability index",
-             fixed(ps.instability, 2) + (ps.instability > 40 ? " (unstable)" : " (stable)"));
-    valueRow(gs, "Aliphatic index", fixed(ps.aliphatic, 2));
-    valueRow(gs, "GRAVY", fixed(ps.gravy, 3));
-    if (ps.unknown > 0)
-        valueRow(gs, "Unknown residues", std::to_string(ps.unknown) + " (left out of the weight)");
+    line("Instability index", fixed(ps.instability, 2) + (ps.instability > 40 ? " (unstable)" : " (stable)"));
+    line("Aliphatic index", fixed(ps.aliphatic, 2));
+    line("GRAVY", fixed(ps.gravy, 3));
+    gtk_box_append(GTK_BOX(box), grid);
+
+    std::vector<std::string> notes;
+    if (ps.truncated)
+        notes.push_back("A stop codon ends the protein early; the figures are up to it.");
     if (sel.length % 3 != 0)
-        valueRow(gs, "Part codon", "the last " + std::to_string(sel.length % 3) + " base"
-                                       + (sel.length % 3 == 1 ? "" : "s") + " are left out");
+        notes.push_back("The selection isn't whole codons; the last " + std::to_string(sel.length % 3) + " base"
+                        + (sel.length % 3 == 1 ? " is" : "s are") + " left out.");
+    if (ps.unknown > 0)
+        notes.push_back(std::to_string(ps.unknown) + " unknown residue"
+                        + (ps.unknown == 1 ? " is" : "s are") + " left out of the weight.");
+    if (!notes.empty()) {
+        std::string all;
+        for (const std::string &one : notes)
+            all += (all.empty() ? "" : "\n") + one;
+        heading(all, "dim-label");
+    }
 
-    addComposition(f, counted);
+    if (m_proteinMore) {
+        GtkWidget *rule = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+        gtk_box_append(GTK_BOX(box), rule);
+        GtkWidget *comp = compositionGrid(counted);
+        GtkWidget *scroll = gtk_scrolled_window_new();
+        gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+        gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroll), TRUE);
+        gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 300);
+        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), comp);
+        gtk_box_append(GTK_BOX(box), scroll);
+    }
 
-    GtkWidget *note = addGroup(f);
-    adw_preferences_group_set_description(ADW_PREFERENCES_GROUP(note),
-                                          "Average masses; pI from EMBOSS pKa values; extinction after Pace et al. "
-                                          "(1995); instability after Guruprasad et al. (1990); GRAVY after Kyte and "
-                                          "Doolittle (1982)");
-    g_object_set_data_full(G_OBJECT(f.dialog), "protein", g_strdup(shown.c_str()), g_free);
-    g_signal_connect(f.ok, "clicked", G_CALLBACK((+[](GtkButton *b, gpointer d) {
-                         AdwDialog *dialog = ADW_DIALOG(d);
-                         const char *p = static_cast<const char *>(g_object_get_data(G_OBJECT(dialog), "protein"));
-                         gdk_clipboard_set_text(gtk_widget_get_clipboard(GTK_WIDGET(b)), p);
-                         adw_dialog_close(dialog);
+    GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_set_margin_top(buttons, 2);
+    GtkWidget *more = gtk_button_new_with_label(m_proteinMore ? "Show Less" : "Show More…");
+    gtk_widget_add_css_class(more, "flat");
+    g_signal_connect(more, "clicked", G_CALLBACK((+[](GtkButton *, gpointer p) {
+                         auto *self = static_cast<Window *>(p);
+                         self->m_proteinMore = !self->m_proteinMore;
+                         self->fillProteinPopover();
                      })),
-                     f.dialog);
-    gtk_widget_set_sensitive(f.ok, !shown.empty());
-    presentDialog(f.dialog);
+                     this);
+    gtk_box_append(GTK_BOX(buttons), more);
+    GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_hexpand(spacer, TRUE);
+    gtk_box_append(GTK_BOX(buttons), spacer);
+    GtkWidget *copy = gtk_button_new_with_label("Copy Protein");
+    gtk_widget_add_css_class(copy, "suggested-action");
+    gtk_widget_set_sensitive(copy, !shown.empty());
+    g_signal_connect(copy, "clicked", G_CALLBACK((+[](GtkButton *b, gpointer p) {
+                         auto *self = static_cast<Window *>(p);
+                         gdk_clipboard_set_text(gtk_widget_get_clipboard(GTK_WIDGET(b)), self->m_proteinText.c_str());
+                         self->toast("Protein copied");
+                     })),
+                     this);
+    gtk_box_append(GTK_BOX(buttons), copy);
+    gtk_box_append(GTK_BOX(box), buttons);
+
+    gtk_popover_set_child(GTK_POPOVER(m_protein), box);
+}
+
+void Window::proteinDialog()
+{
+    if (m_protein) {   // a second Analyze Translation puts it away
+        gtk_popover_popdown(GTK_POPOVER(m_protein));
+        return;
+    }
+    if (m_doc.isEmpty())
+        return;
+    if (!m_doc.hasSelection() || m_doc.selection().length < 3) {
+        toast("Select the coding bases, or a CDS feature, first");
+        return;
+    }
+    // Over the sequence, beside the bases themselves: with the map beside it
+    // the sequence lives in the panel, so open that on the sequence first.
+    if (!m_mapStacked && !m_mapHidden) {
+        if (!m_panelShown)
+            setPanelShown(true);
+        showPane("sequence");
+    }
+    m_seq->scrollToPosition(m_doc.selection().start);
+    if (!m_protein) {
+        m_protein = gtk_popover_new();
+        gtk_popover_set_has_arrow(GTK_POPOVER(m_protein), TRUE);
+        gtk_popover_set_autohide(GTK_POPOVER(m_protein), FALSE);
+        gtk_widget_set_parent(m_protein, m_seq->widget());
+        g_signal_connect(m_protein, "closed", G_CALLBACK((+[](GtkPopover *, gpointer p) {
+                             auto *self = static_cast<Window *>(p);
+                             if (std::exchange(self->m_proteinMoving, false)) {
+                                 g_idle_add_once(
+                                     [](gpointer w) {
+                                         auto *again = static_cast<Window *>(w);
+                                         if (again->m_protein)
+                                             gtk_popover_popup(GTK_POPOVER(again->m_protein));
+                                     },
+                                     self);
+                                 return;
+                             }
+                             GtkWidget *pop = std::exchange(self->m_protein, nullptr);
+                             // Unparent once it has finished closing.
+                             g_idle_add_once([](gpointer w) { gtk_widget_unparent(GTK_WIDGET(w)); }, pop);
+                         })),
+                         this);
+    }
+    if (!m_proteinKeys) {
+        // It isn't modal, so Escape reaches the window rather than the popover.
+        m_proteinKeys = gtk_event_controller_key_new();
+        gtk_event_controller_set_propagation_phase(m_proteinKeys, GTK_PHASE_CAPTURE);
+        g_signal_connect(m_proteinKeys, "key-pressed",
+                         G_CALLBACK((+[](GtkEventControllerKey *, guint key, guint, GdkModifierType,
+                                         gpointer p) -> gboolean {
+                             auto *self = static_cast<Window *>(p);
+                             if (key != GDK_KEY_Escape || !self->m_protein)
+                                 return FALSE;
+                             gtk_popover_popdown(GTK_POPOVER(self->m_protein));
+                             return TRUE;
+                         })),
+                         this);
+        gtk_widget_add_controller(GTK_WIDGET(m_window), m_proteinKeys);
+    }
+    fillProteinPopover();
+    placeProteinPopover();
+    gtk_popover_popup(GTK_POPOVER(m_protein));
+}
+
+// Keeps the popover beside the selection, hiding it when that scrolls away.
+void Window::placeProteinPopover()
+{
+    if (!m_protein)
+        return;
+    GdkRectangle at{};
+    if (!m_seq->rectForPosition(m_doc.selection().start, &at)) {
+        at = {0, 0, std::max(1, gtk_widget_get_width(m_seq->widget())), 1};
+    }
+    if (at.x == m_proteinAt.x && at.y == m_proteinAt.y && at.width == m_proteinAt.width
+        && at.height == m_proteinAt.height)
+        return;
+    m_proteinAt = at;
+    // GTK closes a popover that is moved while it is up, so put it straight back.
+    m_proteinMoving = gtk_widget_get_mapped(m_protein);
+    gtk_popover_set_pointing_to(GTK_POPOVER(m_protein), &at);
 }
 
 namespace {

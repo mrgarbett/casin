@@ -34,6 +34,10 @@ public:
     void setShowEnzymes(bool show);
     void setHiddenTypes(std::set<std::string> types);
     void scrollToPosition(int pos);
+    // Where the line holding `pos` sits in the view now, in widget
+    // coordinates, for something floating beside it. False when the view has
+    // no layout yet or that line is out of sight.
+    bool rectForPosition(int pos, GdkRectangle *out);
     // Typing bases, Backspace, Delete and the arrow keys edit the document.
     void setEditable(bool editable) { m_editable = editable; }
     // Text and drawing scaled together, like a zoomed web page (1 = 100 %).
@@ -57,6 +61,8 @@ public:
     std::function<void(int, int)> onHoverTarget;
     // Right-click on an enzyme site: where, and which visible site.
     std::function<void(double, double, int)> onSiteMenu;
+    // The view scrolled: anything floating beside a base moves with it.
+    std::function<void()> onScrolled;
     // The feature and site hovered anywhere: their bases lightly tinted.
     void setHover(int feature, int site);
 
